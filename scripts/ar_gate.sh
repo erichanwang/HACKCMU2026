@@ -40,7 +40,10 @@ for run in tests/swift/*/run.sh; do
 done
 for sim in scripts/ar_sim*.py; do
   [ -e "$sim" ] || continue
-  run_check "$sim" "PYTHONPATH=. python3 '$sim'"
+  # --adversarial: the clutter-merge and drift sweeps never fail the gate, but without the
+  # flag they never RUN either, so those two characterised limitations had no automated
+  # coverage at all and their WARN emitters could rot unnoticed. Costs a few seconds.
+  run_check "$sim" "PYTHONPATH=. python3 '$sim' --adversarial"
 done
 
 echo ""

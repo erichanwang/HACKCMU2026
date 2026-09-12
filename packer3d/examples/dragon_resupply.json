@@ -1,0 +1,25 @@
+{
+  "container": {
+    "id": "dragon", "shape": "cylinder", "dims": [3.2, 3.2, 1.15],
+    "gravity": false, "max_mass": 3307,
+    "obstacles": [{"id": "hatch", "position": [1.35, 1.35, 0.95], "dims": [0.5, 0.5, 0.2]}]
+  },
+  "items": [
+    {"id": "CTB1", "shape": "box", "dims": [0.50, 0.42, 0.25], "mass": 27},
+    {"id": "CTB2", "shape": "box", "dims": [0.50, 0.42, 0.25], "mass": 22},
+    {"id": "CTB3", "shape": "box", "dims": [0.50, 0.42, 0.25], "mass": 31},
+    {"id": "CTB4", "shape": "box", "dims": [0.50, 0.42, 0.25], "mass": 18},
+    {"id": "CTB5", "shape": "box", "dims": [0.50, 0.42, 0.25], "mass": 25},
+    {"id": "CTB6", "shape": "box", "dims": [0.50, 0.42, 0.25], "mass": 29},
+    {"id": "CTB_double", "shape": "box", "dims": [0.50, 0.42, 0.50], "mass": 48, "count": 3},
+    {"id": "freezer", "shape": "box", "dims": [0.9, 0.6, 0.7], "mass": 210, "fragile": true, "keep_upright": true, "priority": 4},
+    {"id": "tank", "shape": "cylinder", "radius": 0.2, "height": 0.75, "mass": 95, "keep_upright": true, "count": 2},
+    {"id": "gas_bottle", "shape": "cylinder", "radius": 0.11, "height": 0.6, "mass": 30, "count": 2},
+    {"id": "crate", "shape": "box", "dims": [0.6, 0.4, 0.4], "mass": 60, "count": 3},
+    {"id": "rack", "shape": "box", "dims": [0.8, 0.5, 0.6], "mass": 120, "keep_upright": true, "count": 2},
+    {"id": "spare_pump", "shape": "box", "dims": [0.35, 0.35, 0.3], "mass": 40, "fragile": true},
+    {"id": "science_locker", "shape": "box", "dims": [0.45, 0.45, 0.5], "mass": 55, "fragile": true, "keep_upright": true, "priority": 3},
+    {"id": "water_bag", "shape": "cylinder", "radius": 0.25, "height": 0.5, "mass": 90}
+  ],
+  "optimizer": {"time_budget_s": 5, "seed": 0}
+}

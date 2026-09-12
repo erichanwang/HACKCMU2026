@@ -106,6 +106,29 @@ def _dump(result: dict) -> str:
     return json.dumps(result, sort_keys=True, default=float)
 
 
+# Snapshots are compared to ~1 nanometre, not to the last bit. numpy dispatches different SIMD
+# kernels by CPU capability, so the same scene reduces to a different final ulp on a different
+# machine -- CI proved it by passing and failing the identical commit on two runners. Every
+# regression this test exists to catch moves millimetres; none moves 1e-18. Both sides are
+# normalised so the stored snapshot stays exactly as generated.
+_PLACES = 9
+
+
+def _round(value):
+    if isinstance(value, float):
+        return round(value, _PLACES)
+    if isinstance(value, dict):
+        return {k: _round(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_round(v) for v in value]
+    return value
+
+
+def _norm(dumped: str) -> str:
+    """`dumped` (a `_dump` string, ours or the stored snapshot) with every float rounded."""
+    return json.dumps(_round(json.loads(dumped)), sort_keys=True)
+
+
 class SnapshotRegressionTest(unittest.TestCase):
     def test_validate_layout_output_unchanged(self):
         expected = json.loads(SNAPSHOT_PATH.read_text())
@@ -113,7 +136,7 @@ class SnapshotRegressionTest(unittest.TestCase):
         self.assertEqual(sorted(expected), sorted(scenes), "scene corpus changed")
         for name, scene in scenes.items():
             with self.subTest(scene=name):
-                self.assertEqual(expected[name], _dump(validate_layout(scene)))
+                self.assertEqual(_norm(expected[name]), _norm(_dump(validate_layout(scene))))
 
 
 class FaceCycleTest(unittest.TestCase):

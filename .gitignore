@@ -28,3 +28,4 @@ graphify-out/cache/
 .pytest_cache/
 packer3d/uv.lock
 packer3d/.venv/
+tests/swift/typecheck/.modcache/

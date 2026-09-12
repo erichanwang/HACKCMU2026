@@ -75,6 +75,11 @@ def _violation_types(result: dict) -> set:
 @unittest.skipUnless(CLI_BIN.exists(), f"packphysics CLI not built at {CLI_BIN}; see module docstring")
 class TestValidatorDifferential(unittest.TestCase):
     def test_python_and_swift_agree_on_random_scenes(self):
+        # NOTE: `_random_scene` only ever builds plain box `Object`s (no
+        # `footprint`), so every scene here is box-only by construction. Do
+        # NOT add footprint/hull objects to this generator -- the Swift CLI
+        # has no hull support (see `test_swift_ignores_hull_and_uses_bbox`
+        # below) and would silently disagree, defeating this test's purpose.
         import tempfile
 
         rng = random.Random(SEED)
@@ -94,6 +99,48 @@ class TestValidatorDifferential(unittest.TestCase):
                     f"scene {i}: violation types mismatch -- python={_violation_types(py_result)} "
                     f"swift={_violation_types(sw_result)}\nscene={json.dumps(scene_to_dict(scene))}",
                 )
+
+    def test_swift_ignores_hull_and_uses_bbox(self):
+        """Documents the EXPECTED divergence on hull/footprint objects.
+
+        `physics.schema.Object.footprint` (added on top of `loop`) lets an
+        object be a convex prism instead of a box; `physics.validator` is
+        hull-aware. The Swift `SceneObject` decoder
+        (`swift/PackPhysics/Sources/PackPhysics/Schema.swift`) has no
+        `footprint` case in its `CodingKeys`/`init(from:)`, so it silently
+        ignores that JSON field and treats the object as a plain box using
+        `dimensions` (the footprint's bounding box, per `schema.py`'s
+        docstring). This scene is built so a second object sits inside
+        `hull_obj`'s bounding box but outside its actual (chamfered) hull:
+        Python sees no collision, Swift -- having silently boxed the hull
+        object -- does. If Swift ever gains real hull support, or Python's
+        hull handling changes, this assertion should break loudly rather
+        than have someone mistake it for the box-only test above.
+        """
+        import tempfile
+
+        container = Container(id="box", dimensions=(1.2, 1.2, 1.2), position=(0.0, 0.6, 0.0))
+        # Convex pentagon: the square footprint with one corner chamfered off.
+        hull = [(-0.3, -0.3), (0.3, -0.3), (0.3, 0.1), (0.1, 0.3), (-0.3, 0.3)]
+        hull_obj = Object(
+            id="hull_obj", dimensions=(0.6, 0.4, 0.6), position=(0.0, 0.2, 0.0),
+            rotation=(0.0, 0.0, 0.0, 1.0), footprint=hull,
+        )
+        # Sits in the chamfered-off corner: inside hull_obj's bbox, outside its hull.
+        box_obj = Object(
+            id="box_obj", dimensions=(0.08, 0.4, 0.08), position=(0.27, 0.2, 0.27),
+            rotation=(0.0, 0.0, 0.0, 1.0),
+        )
+        scene = Scene(container=container, objects=[hull_obj, box_obj])
+
+        py_result = validate_layout(scene)
+        self.assertTrue(py_result["valid"], "python (hull-aware) should see no collision")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sw_result = _run_swift_validate(scene, Path(tmp))
+        self.assertFalse(sw_result["valid"], "swift (box-only) should see hull_obj's bbox collide")
+        self.assertEqual(_violation_types(sw_result), {"OBJECT_COLLISION"})
+
 
 if __name__ == "__main__":
     unittest.main()

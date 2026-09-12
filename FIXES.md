@@ -6,9 +6,10 @@ against the code on `loop` today (grep or read), not carried over from the morni
 
 ## 1. Blockers: the demo cannot run until this is done
 
-- **The iOS app has never been built in Xcode.** `docs/AR_BUILD.md` is an honest checklist
-  ("nobody on this team has compiled the iOS app... read it as 'should work from the code as it
-  reads today,' not 'we've done this'"). On a Mac: `xcodegen generate`, pick a LiDAR device
+- **Today's Swift changes have not been built in Xcode yet.** Teammates build and run the app on
+  their Macs; what is unverified is everything authored on Linux today (PlanAnchor, the async
+  ScanView tap, the live-plane anchor and `ARSessionDelegate` on a `@MainActor` class, the items
+  and settings sheets), which only passed `swiftc -parse` and the shim typecheck. On a Mac: `xcodegen generate`, pick a LiDAR device
   (Simulator can't run ARKit at all), expect real type errors the Linux `swiftc -parse` gate
   never caught. `tests/swift/typecheck/run.sh`'s own header says what it does and doesn't prove:
   internal consistency against hand-written shims, not that the shims match Apple's SDK, and
@@ -28,12 +29,11 @@ against the code on `loop` today (grep or read), not carried over from the morni
 
 ## 3. Risks that will bite in a real demo
 
-- **`docs/DEMO_SCRIPT.md:15` claims `make server` matches the documented manual launch, but it
-  doesn't.** The manual command in that same doc adds `--workers 2` (measured: one worker made a
-  `GET /items` fired during `POST /plan` take 7.5x its solo latency; two workers brought it to
-  0.6x — see `55c295c`'s commit message). `Makefile:26-31`'s `server:` target has no `--workers`
-  flag. A teammate running `make server` today gets the stall the doc says is fixed. Add
-  `--workers 2` to the Makefile, or stop claiming parity in the doc.
+- **One uvicorn worker, by decision.** A `POST /plan` (about 3 s of solver) stalls other requests on
+  the same worker by roughly 0.5 s; `--workers 2` would remove that but runs the background
+  labeller in both processes (double attempts, double Grok billing) unless items are claimed
+  atomically. `make server` and `docs/DEMO_SCRIPT.md` agree on one worker with `--host 0.0.0.0`.
+  Add the atomic claim in `server/main.py::relabel_pending` before ever adding `--workers`.
 - **Demo plans are not reproducible run-to-run.** `server/planner.py:74` calls `pack_optimized`
   with `time_budget_s=per_run` only (never `max_iterations`), and `packer3d/packer3d/search.py`'s
   annealing loop exits on `time.perf_counter() - t0 >= budget_t` — so the same seed does a

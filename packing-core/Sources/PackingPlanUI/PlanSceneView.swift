@@ -14,7 +14,8 @@ import SwiftUI
 /// The packing *sequence* is the product, so stepping is the primary control:
 /// step 0 is the empty bag, the item at the current step is drawn bright with
 /// its label, earlier items are dimmed, and nothing past the current step is
-/// drawn at all.
+/// drawn at all. Tapping an item selects it out of that sequence, and focusing
+/// a selection puts the stepper on it so the two controls never disagree.
 public struct PlanSceneView: View {
     /// Radians of orbit per point of drag. 100 points ≈ one radian: far enough
     /// round the bag in one comfortable swipe, short of feeling twitchy.
@@ -29,6 +30,15 @@ public struct PlanSceneView: View {
 
     @State private var camera: PlanCamera = .default
     @State private var step: Int
+
+    /// `Placement.itemID` of the tapped item, or `nil` for nothing selected.
+    /// The container is never selectable — tapping it is how you deselect.
+    @State private var selectedID: String?
+
+    /// "Show me just this": everything but the selection drops to a whisper.
+    /// Only ever true with a selection, and only while the stepper agrees with
+    /// it — stepping away turns it off rather than leaving a dark canvas.
+    @State private var focused = false
 
     /// Gesture-local, so an interrupted drag or pinch snaps back on its own and
     /// only a completed one is committed to `camera`.
@@ -49,6 +59,10 @@ public struct PlanSceneView: View {
         placements.first { $0.step == step }
     }
 
+    private var selected: Placement? {
+        selectedID.flatMap { id in placements.first { $0.itemID == id } }
+    }
+
     /// The camera as it stands right now: the committed one plus whatever the
     /// in-flight gesture is adding.
     private var liveCamera: PlanCamera {
@@ -59,7 +73,10 @@ public struct PlanSceneView: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             scene
-            zoomSlider
+            HStack(spacing: 12) {
+                zoomSlider
+                resetButton
+            }
             stepControl
             caption
             Spacer(minLength: 0)
@@ -87,24 +104,32 @@ public struct PlanSceneView: View {
     // MARK: - Scene
 
     private var scene: some View {
-        Canvas { context, size in
-            // Projected once per draw — never per box, never per face.
-            let boxes = plan.projected(
-                camera: liveCamera,
-                size: SIMD2(Float(size.width), Float(size.height)),
-                upTo: step
-            )
-            for box in boxes {
-                draw(box, in: &context)
-            }
-            // After every fill, so a nearer already-packed item cannot paint
-            // over the one label the view is meant to be about.
-            if let current = boxes.first(where: { $0.step != 0 && $0.step == step }) {
-                context.opacity = 1
-                context.draw(
-                    Text("\(current.step). \(current.label)").font(.caption2.weight(.semibold)),
-                    at: CGPoint(x: CGFloat(current.center.x), y: CGFloat(current.center.y))
+        // The reader exists for the tap: hit-testing has to re-project into the
+        // same rect the canvas drew into, and only layout knows how big that is.
+        GeometryReader { proxy in
+            Canvas { context, size in
+                // Projected once per draw — never per box, never per face.
+                let boxes = plan.projected(
+                    camera: liveCamera,
+                    size: SIMD2(Float(size.width), Float(size.height)),
+                    upTo: step
                 )
+                for box in boxes {
+                    draw(box, in: &context)
+                }
+                // After every fill, so a nearer already-packed item cannot paint
+                // over the labels the view is meant to be about.
+                context.opacity = 1
+                for box in boxes where box.step != 0 && (box.step == step || box.id == selectedID) {
+                    context.draw(
+                        Text("\(box.step). \(box.label)").font(.caption2.weight(.semibold)),
+                        at: CGPoint(x: CGFloat(box.center.x), y: CGFloat(box.center.y))
+                    )
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(count: 1, coordinateSpace: .local) { location in
+                select(at: location, in: proxy.size)
             }
         }
         .aspectRatio(1, contentMode: .fit)
@@ -121,14 +146,20 @@ public struct PlanSceneView: View {
 
     private func draw(_ box: ProjectedBox, in context: inout GraphicsContext) {
         let isContainer = box.step == 0
+        let isSelected = box.id == selectedID
         let isCurrent = !isContainer && box.step == step
         let tint = isContainer
             ? Color.secondary
             : (placements.first { $0.step == box.step }?.diagramColor ?? .accentColor)
 
         // The container reads as glass; already-packed items sit back so the
-        // current one is unmistakable.
-        context.opacity = isContainer ? 0.3 : (isCurrent ? 1 : 0.45)
+        // current one is unmistakable. Focus is the same idea turned up: the
+        // rest of the bag stays as context and nothing else competes.
+        if focused && !isSelected {
+            context.opacity = isContainer ? 0.15 : 0.07
+        } else {
+            context.opacity = isContainer ? 0.3 : (isSelected || isCurrent ? 1 : 0.45)
+        }
 
         for face in box.faces {
             guard let path = polygon(face.corners) else { continue }
@@ -142,7 +173,7 @@ public struct PlanSceneView: View {
             context.stroke(
                 outline,
                 with: .color(isContainer ? .secondary : tint),
-                lineWidth: isCurrent ? 2 : 1
+                lineWidth: isSelected ? 3 : (isCurrent ? 2 : 1)
             )
         }
     }
@@ -155,6 +186,61 @@ public struct PlanSceneView: View {
         path.addLines(points.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) })
         path.closeSubpath()
         return path
+    }
+
+    // MARK: - Selection
+
+    /// Select the front-most item under `point`, or deselect if that is the bag
+    /// or empty space.
+    ///
+    /// The test is point-in-polygon over the visible faces, not the silhouette's
+    /// bounding rect: boxes in a packed bag overlap heavily, and a rect test
+    /// picks whichever one happens to be *near* the tap rather than under it.
+    private func select(at point: CGPoint, in size: CGSize) {
+        let boxes = plan.projected(
+            camera: liveCamera,
+            size: SIMD2(Float(size.width), Float(size.height)),
+            upTo: step
+        )
+        let target = SIMD2(Float(point.x), Float(point.y))
+        // Back to front is the draw order, so the front-most hit is the last one
+        // — walk it in reverse and stop at the first.
+        selectedID = boxes.reversed().first { box in
+            box.step != 0 && box.faces.contains { contains($0.corners, target) }
+        }?.id
+        // A new selection is not a focused one: the button says what it does.
+        focused = false
+    }
+
+    /// Ray-crossing test in screen space, y down. The parity of the crossings to
+    /// one side of the point decides it, so it is right for any simple polygon
+    /// and does not care which way the ring winds.
+    private func contains(_ corners: [SIMD2<Float>], _ point: SIMD2<Float>) -> Bool {
+        guard corners.count >= 3 else { return false }
+        var inside = false
+        var j = corners.count - 1
+        for i in corners.indices {
+            let a = corners[i]
+            let b = corners[j]
+            // The straddle test guarantees `b.y != a.y`, so the divide is safe.
+            if (a.y > point.y) != (b.y > point.y),
+               point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x {
+                inside.toggle()
+            }
+            j = i
+        }
+        return inside
+    }
+
+    /// Focus, or drop focus. Focusing moves the stepper onto the item: the two
+    /// controls describe one thing, so they had better not disagree about it.
+    private func focus(on placement: Placement) {
+        guard !focused else {
+            focused = false
+            return
+        }
+        step = placement.step
+        focused = true
     }
 
     // MARK: - Camera
@@ -203,10 +289,35 @@ public struct PlanSceneView: View {
         .foregroundStyle(.secondary)
     }
 
+    /// Free orbit means getting lost, and there is no gesture for "back to where
+    /// I started".
+    private var resetButton: some View {
+        Button {
+            camera = .default
+        } label: {
+            Label("Reset view", systemImage: "arrow.counterclockwise")
+                .labelStyle(.iconOnly)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .accessibilityLabel("Reset view")
+    }
+
     // MARK: - Stepping
 
     private var stepControl: some View {
-        Stepper(value: $step, in: 0...placements.count) {
+        // Stepping is a disagreement with focus, so it ends it. The selection
+        // survives — it is still what the caption is talking about — unless the
+        // step it belongs to has been stepped back past, in which case the
+        // canvas is no longer drawing it and the caption must not either.
+        let binding = Binding(get: { step }) { newStep in
+            step = newStep
+            focused = false
+            if let placement = selected, placement.step > newStep {
+                selectedID = nil
+            }
+        }
+        return Stepper(value: binding, in: 0...placements.count) {
             Text(step == 0 ? "Empty bag" : "Step \(step) of \(placements.count)")
                 .font(.subheadline.weight(.medium))
                 .monospacedDigit()
@@ -215,13 +326,11 @@ public struct PlanSceneView: View {
 
     private var caption: some View {
         Group {
-            if let placement = current {
+            if let placement = selected {
+                selectionCard(placement)
+            } else if let placement = current {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(placement.step)")
-                        .font(.caption2.monospacedDigit().weight(.bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 18, height: 18)
-                        .background(placement.diagramColor, in: Circle())
+                    stepBadge(placement)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(placement.label).font(.caption.weight(.medium))
                         Text(placement.note)
@@ -235,7 +344,7 @@ public struct PlanSceneView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Drag to orbit · pinch or the slider to zoom")
+            Text("Tap an item to select · drag to orbit · pinch or the slider to zoom")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -246,8 +355,55 @@ public struct PlanSceneView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: step)
     }
 
+    /// The tapped item, with the two things the stepper never showed: how big it
+    /// is, and a way to see it on its own.
+    private func selectionCard(_ placement: Placement) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            stepBadge(placement)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(placement.label).font(.caption.weight(.medium))
+                Text(
+                    "\(centimetres(placement.size.x, decimals: 0)) × "
+                        + "\(centimetres(placement.size.y, decimals: 0)) × "
+                        + "\(centimetres(placement.size.z, decimals: 0))"
+                )
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                Text(placement.note)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 4) {
+                Button(focused ? "Show all" : "Show only this") { focus(on: placement) }
+                Button("Deselect") {
+                    selectedID = nil
+                    focused = false
+                }
+            }
+            .font(.caption2)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
+    private func stepBadge(_ placement: Placement) -> some View {
+        Text("\(placement.step)")
+            .font(.caption2.monospacedDigit().weight(.bold))
+            .foregroundStyle(.white)
+            .frame(width: 18, height: 18)
+            .background(placement.diagramColor, in: Circle())
+    }
+
     /// The canvas is opaque to VoiceOver, so it carries the step in words.
     private var sceneDescription: String {
+        if let placement = selected {
+            return "Selected: \(placement.label), step \(placement.step) of \(placements.count), "
+                + "\(centimetres(placement.size.x, decimals: 0)) by "
+                + "\(centimetres(placement.size.y, decimals: 0)) by "
+                + "\(centimetres(placement.size.z, decimals: 0)). \(placement.note)"
+                + (focused ? " Shown on its own." : "")
+        }
         guard let placement = current else {
             return "Empty \(plan.container.label), seen in 3D."
         }
@@ -268,7 +424,8 @@ public struct PlanSceneView: View {
     }
 }
 
-/// The end of the sequence: every item in, the last one still highlighted.
+/// The end of the sequence: every item in, the last one still highlighted — and
+/// the one preview where there is something to tap.
 #Preview("Demo carry-on — fully packed") {
     if let plan = try? PlanLoader.mockPlan() {
         PlanSceneView(plan: plan, initialStep: plan.placements.count)

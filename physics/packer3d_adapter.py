@@ -211,7 +211,8 @@ def item_metadata(items) -> dict[str, dict]:
         for iid in ids:
             entry = {
                 "source_id": d["id"],
-                "keep_upright": bool(d.get("keep_upright", False)),
+                # the loader (`packer3d.scenario`) accepts both spellings; grade the same constraint it packed
+                "keep_upright": bool(d["keep_upright"]) if "keep_upright" in d else bool(d.get("keepUpright", False)),
                 "priority": float(d.get("priority", 1.0)),
             }
             if "heights" in d:
@@ -220,9 +221,15 @@ def item_metadata(items) -> dict[str, dict]:
                     width, height, depth = d["dimensions"]  # server document form, metres
                     units = "m"
                 if width is not None and depth is not None and height is not None:
+                    # a soft item is packed at height / k with its grid squashed the same way
+                    # (`Item.compressed`, same rigidity gate as `packer3d.scenario`); the cavity
+                    # solids must describe that squashed item, not the loose scan
+                    k = float(d.get("compressibility", 1.0)) if d.get("rigidity", "soft") == "soft" else 1.0
+                    k = k if k > 1.0 else 1.0
+                    heights = d["heights"] if k == 1.0 else [[float(v) / k for v in row] for row in d["heights"]]
                     entry.update(
-                        heights=d["heights"], cellSize=d.get("cellSize", 0.0),
-                        width=width, depth=depth, height=height, units=units,
+                        heights=heights, cellSize=d.get("cellSize", 0.0),
+                        width=width, depth=depth, height=float(height) / k, units=units,
                     )
             meta[iid] = entry
     return meta

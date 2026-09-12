@@ -19,6 +19,8 @@ from physics.incremental import PlacementValidator
 from physics.io import apply_placements
 from physics.metrics import scene_metrics
 from physics.packer3d_adapter import (
+    _cavity_local_boxes,
+    item_metadata,
     IDENTITY_ROTATION,
     TABLE_GAP_M,
     packer3d_placement_from_object,
@@ -261,6 +263,34 @@ class NestingAgreementTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         types = {v["type"] for v in result["violations"]}
         self.assertIn("OBJECT_COLLISION", types)
+
+
+class MetadataGradingTests(unittest.TestCase):
+    """`item_metadata` must describe the item the solver actually packed (grading bugs
+    found 2026-09-12: a soft hoodie's cavity solids stood at twice the packed height,
+    and a server document's `keepUpright` was never checked)."""
+
+    SCAN = {"id": "hoodie", "dimensions": [0.2, 0.1, 0.2], "cellSize": 0.05,
+            "heights": [[0.1, 0.1], [0.1, 0.02]]}
+
+    def test_soft_item_cavity_is_graded_at_the_compressed_height(self):
+        meta = item_metadata({"items": [self.SCAN | {"rigidity": "soft", "compressibility": 2.0}]})["hoodie"]
+        self.assertAlmostEqual(meta["height"], 0.05)
+        self.assertAlmostEqual(max(max(r) for r in meta["heights"]), 0.05)
+        top = max(hi[2] for _lo, hi in _cavity_local_boxes(meta))
+        self.assertAlmostEqual(top, 0.05, msg="cavity solids must stop at the packed (squashed) height")
+
+    def test_rigid_and_fragile_items_ignore_a_stray_compressibility(self):
+        for rigidity in ("rigid", "fragile"):
+            meta = item_metadata({"items": [self.SCAN | {"rigidity": rigidity, "compressibility": 2.0}]})["hoodie"]
+            self.assertAlmostEqual(meta["height"], 0.1, msg=rigidity)
+
+    def test_keep_upright_accepts_the_server_documents_spelling(self):
+        meta = item_metadata({"items": [{"id": "a", "keepUpright": True}, {"id": "b", "keep_upright": True},
+                                        {"id": "c", "keepUpright": False, "keep_upright": True}]})
+        self.assertTrue(meta["a"]["keep_upright"])
+        self.assertTrue(meta["b"]["keep_upright"])
+        self.assertTrue(meta["c"]["keep_upright"], "explicit snake_case wins, as in the loader")
 
 
 class ObstacleTests(unittest.TestCase):

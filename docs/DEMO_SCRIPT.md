@@ -35,8 +35,8 @@ ipconfig getifaddr en0
 curl http://<that-ip>:8000/suitcases   # should return [] or existing suitcases, not a connection error
 ```
 
-On the phone: open the app, tap the URL button at the bottom of the screen (shows the current
-`serverURL`), type `http://<that-ip>:8000` into the Settings sheet. No rebuild needed.
+On the phone: open the app, tap the gear at the top right, type `http://<that-ip>:8000` into
+the Settings sheet. No rebuild needed.
 
 Checklist:
 - Phone and Mac on the **same Wi-Fi**, not phone hotspot / Mac Ethernet.
@@ -73,9 +73,9 @@ guessed wrong.
 that means, don't hide it). This is the solver running four candidate packings plus a physics
 validation pass, picking the best.
 
-**Beat 5 — 2D/3D plan (15s).** The plan diagram sheet opens automatically. Walk through it
-layer by layer: "each item's position and rotation, checked for collisions, containment, and
-support before you ever see it."
+**Beat 5 — 2D/3D plan (15s).** The plan sheet opens automatically with a **Layers | 3D**
+picker at the top. Walk the layers first: "each item's position and rotation, checked for
+collisions, containment, and support before you ever see it." Then flip to 3D and turn it once.
 
 **Beat 6 — AR overlay (20s).** Close the sheet, back to the AR view. Coloured boxes should
 appear inside the scanned bag showing where each item goes. Say what you're pointing at: "this

@@ -14,12 +14,20 @@ Schema (all keys except ``container.dims`` and ``items`` optional):
              "rigidity": "soft", "compressibility": 2.0},   <- soft items pack at height / k (Item.compressed);
                                                               "rigidity": "fragile" / "keepUpright" (server docs) also work
             {"id", "shape": "box|cylinder", "length", "depth", "height", ...}   <- lidar payload form
-            {"id", "shape": "cylinder", "radius", "height", "mass", "keep_upright", "allow_lay_down", ...}],
+            {"id", "shape": "cylinder", "radius", "height", "mass", "keep_upright", "allow_lay_down", ...},
+            {"id", "width", "depth", "height", "cellSize", "heights": [[...]]}      <- heightmap, CENTIMETRES
+            {"id", "dimensions": [w, h, d], "cellSize", "heights": [[...]]}],      <- heightmap, METRES
   "optimizer": {"time_budget_s": 5, "max_iterations": null, "seed": 0},
   "weights": {"unpacked": 10, "compact": 1, "com": 6, "height": 0.5}
 }
 ``count`` > 1 expands an item into ``id_1 .. id_n`` copies (handy for lidar-scanned batches).
 Every key added here is optional: a scenario written before them loads exactly as it did.
+
+WATCH THE UNITS.  Every length here is metres -- except a ``heights`` payload spelled with
+``width``/``depth``/``height``, which ``Item.from_scanned_heightmap`` reads as CENTIMETRES
+(its own default; ``tools/packbench/fixtures`` relies on it).  The server document form,
+``dimensions: [width, height, depth]``, is metres.  The phone only ever sends the latter, so
+a hand-written scenario is the only way to mix the two -- and mixing them is a silent 100x.
 """
 from __future__ import annotations
 
@@ -142,7 +150,11 @@ def _item_from_dict(d: dict) -> list:
     out = []
     for iid in ids:
         if "heights" in d:  # lidar spike heightmap payload (SCAN_OUTPUT.md)
-            out.append(Item.from_scanned_heightmap(d, mass=mass, fragile=fragile, keep_upright=keep_upright,
+            # from_scanned_heightmap takes the id off the payload, so `count` > 1 has to hand it
+            # the generated `iid` -- passing `d` untouched gave every copy the same id and
+            # validate_items rejected the lot, the way the "length" branch below never did.
+            out.append(Item.from_scanned_heightmap({**d, "id": iid}, mass=mass, fragile=fragile,
+                                                    keep_upright=keep_upright,
                                                     allow_lay_down=bool(d.get("allow_lay_down", True)),
                                                     priority=priority))
             continue
@@ -158,6 +170,8 @@ def _item_from_dict(d: dict) -> list:
             if "dims" not in d:
                 raise ValueError(f"item {iid!r}: shape 'box' needs a 'dims' key")
             dims = d["dims"]
+            if len(dims) != 3:  # a 4th entry was silently dropped; 2 entries raised IndexError
+                raise ValueError(f"item {iid!r}: 'dims' must have exactly 3 entries, got {dims!r}")
             out.append(Item.box(iid, dims[0], dims[1], dims[2], **common))
         elif shape == "cylinder":
             if "radius" not in d or "height" not in d:
@@ -248,6 +262,11 @@ def _zone_container(base: Container, zone: Zone, spec: dict) -> Container:
         gravity=bool(spec.get("gravity", base.gravity)),
         max_mass=math.inf if max_mass is None else float(max_mass),
         obstacles=obstacles, min_support=float(spec.get("min_support", base.min_support)),
+        # dimensionless axis priorities, so they carry into a zone unchanged -- dropping them
+        # silently reverted a scenario's declared weights to the (1, 1, 0.5) default per zone.
+        com_axis_weights=base.com_axis_weights,
+        # com_target deliberately does NOT carry: it is an absolute point in the parent's frame,
+        # so each zone balances about its own centre (Container.effective_com_target) instead.
     )
 
 

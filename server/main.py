@@ -52,7 +52,10 @@ def compressibility(value, rigidity: str) -> float:
         return 1.0
 
 
-db = MongoClient(os.environ.get("SUITCASE_MONGODB_URI", "mongodb://localhost:27017"), serverSelectionTimeoutMS=8000)[os.environ.get("MONGO_DB", "suitcase")]
+# socketTimeoutMS: a Mongo that accepts the socket and then stops answering (paused container,
+# laptop sleep) must fail the request, not hang every handler; serverSelection only covers discovery.
+db = MongoClient(os.environ.get("SUITCASE_MONGODB_URI", "mongodb://localhost:27017"), serverSelectionTimeoutMS=8000,
+                 connectTimeoutMS=8000, socketTimeoutMS=15000)[os.environ.get("MONGO_DB", "suitcase")]
 try:
     db.client.admin.command("ping")  # fail at startup, not on the first request
 except Exception as exc:  # pymongo's ServerSelectionTimeoutError, or a bad URI
@@ -272,16 +275,16 @@ def create_suitcase(s: NewSuitcase, user: str = Depends(current_user)):
     return public(doc)
 
 
+# Reads are owner-scoped like the writes. In open mode every caller is the one "local" user, so
+# the scoping is vacuous there by design; with Auth0 configured nobody reads another user's rows.
 @app.get("/suitcases")
-def list_suitcases():
-    return [public(d) for d in db.suitcases.find().sort("createdAt", -1)]
+def list_suitcases(user: str = Depends(current_user)):
+    return [public(d) for d in db.suitcases.find({"owner_id": user}).sort("createdAt", -1)]
 
 
 @app.get("/suitcases/{suitcase_id}")
-def get_suitcase(suitcase_id: str):
-    doc = db.suitcases.find_one({"_id": suitcase_id})
-    if doc is None:
-        raise HTTPException(404, "no such suitcase")
+def get_suitcase(suitcase_id: str, user: str = Depends(current_user)):
+    doc = owned(db.suitcases.find_one({"_id": suitcase_id}), user)
     return public(doc) | {"items": [public(d) for d in db.items.find({"suitcaseId": suitcase_id})]}
 
 
@@ -303,13 +306,22 @@ def create_plan(suitcase_id: str, user: str = Depends(current_user)):
         raise HTTPException(409, "suitcase has no scanned items to pack")
     # labelling is not worth blocking a plan for; the app shows how many labels are still coming
     pending = sum(i.get("labelStatus") == "pending" for i in items)
-    doc = {"_id": suitcase_id, "suitcaseId": suitcase_id, "createdAt": now()} | solve(suitcase, items) | {"pendingLabels": pending}
+    try:
+        result = solve(suitcase, items)
+    except (ValueError, TypeError) as exc:
+        # A stored scan the solver cannot read (Scan validates uploads, but not documents that
+        # predate a check). Refuse this plan, never 500 it; str(exc)[:200] because packer3d's
+        # message can quote the whole document, photo bytes included.
+        logger.warning("plan for %s refused: %s", suitcase_id, str(exc)[:200])
+        raise HTTPException(422, f"a scanned item is unusable, delete it and rescan: {str(exc)[:200]}")
+    doc = {"_id": suitcase_id, "suitcaseId": suitcase_id, "createdAt": now()} | result | {"pendingLabels": pending}
     db.plans.replace_one({"_id": suitcase_id}, doc, upsert=True)
     return public(doc)
 
 
 @app.get("/suitcases/{suitcase_id}/plan")
-def get_plan(suitcase_id: str):
+def get_plan(suitcase_id: str, user: str = Depends(current_user)):
+    owned(db.suitcases.find_one({"_id": suitcase_id}), user)
     doc = db.plans.find_one({"_id": suitcase_id})
     if doc is None:
         raise HTTPException(404, "no plan for this suitcase yet; POST this URL to make one")
@@ -317,15 +329,23 @@ def get_plan(suitcase_id: str):
 
 
 Positive = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+Finite = Annotated[float, Field(allow_inf_nan=False)]
 
 
-class Scan(BaseModel, extra="allow"):
-    """The phone's ScannedItem (SCAN_OUTPUT.md); anything malformed is refused at upload, not inside the solver."""
+class Scan(BaseModel, extra="ignore"):
+    """The phone's ScannedItem (SCAN_OUTPUT.md); anything malformed is refused at upload, not inside the solver.
+
+    extra="ignore", not "allow": every field below is what the solver reads, and an undeclared one
+    (`count`, `priority`, `width`, a malformed `footprint`) used to land in packer3d unchecked, where
+    it either 500s every plan for this suitcase or multiplies the item without a cap.
+    """
     id: str = Field(min_length=1, max_length=100)
     suitcaseId: str = Field(min_length=1, max_length=100)
     dimensions: tuple[Positive, Positive, Positive]
     cellSize: Positive
     heights: list[list[Annotated[float, Field(ge=0, allow_inf_nan=False)]]]
+    # The LiDAR hull, local (x, z) in metres, 3+ vertices; convexity is checked where the geometry is built.
+    footprint: Annotated[list[tuple[Finite, Finite]], Field(min_length=3, max_length=256)] | None = None
 
     @model_validator(mode="after")
     def rectangular(self):
@@ -339,7 +359,7 @@ class Scan(BaseModel, extra="allow"):
 def create_item(background: BackgroundTasks, item: str = Form(...), image: UploadFile = File(...),
                 later: bool = Query(False, alias="async"), user: str = Depends(current_user)):
     try:
-        doc = Scan.model_validate_json(item).model_dump(mode="json")
+        doc = Scan.model_validate_json(item).model_dump(mode="json", exclude_none=True)  # no footprint: no key, not null
     except ValidationError as exc:
         raise HTTPException(422, str(exc))
     item_id, suitcase_id = doc["id"], doc["suitcaseId"]
@@ -413,8 +433,8 @@ def update_item(item_id: str, patch: Patch, user: str = Depends(current_user)):
 
 
 @app.get("/items")
-def list_items(suitcaseId: str | None = None):
-    return [public(d) for d in db.items.find({"suitcaseId": suitcaseId} if suitcaseId else {})]
+def list_items(suitcaseId: str | None = None, user: str = Depends(current_user)):
+    return [public(d) for d in db.items.find({"owner_id": user} | ({"suitcaseId": suitcaseId} if suitcaseId else {}))]
 
 
 @app.get("/inventory")
@@ -424,12 +444,9 @@ def list_inventory(user: str = Depends(current_user)):
 
 
 @app.get("/items/{item_id}")
-def get_item(item_id: str):
+def get_item(item_id: str, user: str = Depends(current_user)):
     """One item; the app polls this while `labelStatus` is "pending"."""
-    doc = db.items.find_one({"_id": item_id})
-    if doc is None:
-        raise HTTPException(404, "no such item")
-    return public(doc)
+    return public(owned(db.items.find_one({"_id": item_id}), user))
 
 
 @app.delete("/items/{item_id}")

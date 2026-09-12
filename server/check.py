@@ -180,6 +180,18 @@ assert c.delete("/items/t1c").json() == {"deleted": "t1c"}
 assert c.delete("/items/t1d").json() == {"deleted": "t1d"}
 assert c.delete("/items/t1e").json() == {"deleted": "t1e"}
 
+# the phone's footprint is validated like everything else; a bad one used to 500 every later plan
+hull = {"id": "fp", "suitcaseId": sc["id"], "dimensions": [0.2, 0.1, 0.1], "cellSize": 0.01, "heights": [[0.1]]}
+for bad in ([[0, 0, 0], [1, 0, 0], [0, 1, 0]], "abc", [[0.0, None], [1, 0], [0, 1]], [[0, 0], [1, 0]], [[0, 0], [1, float("nan")], [0, 1]]):
+    assert c.post("/items", data={"item": json.dumps(hull | {"footprint": bad})}, files=img).status_code == 422, bad
+r = c.post("/items", data={"item": json.dumps(hull | {"footprint": [[-0.1, -0.05], [0.1, -0.05], [0.1, 0.05], [-0.1, 0.05]], "count": 100000, "priority": 0, "width": 50.0})}, files=img)
+assert r.status_code == 200 and r.json()["footprint"] == [[-0.1, -0.05], [0.1, -0.05], [0.1, 0.05], [-0.1, 0.05]], r.text
+assert not {"count", "priority", "width"} & r.json().keys(), "undeclared fields must not reach the solver"
+assert c.post(f"/suitcases/{sc['id']}/plan").status_code == 200, "a scan with a good hull plans"
+main.db.items.update_one({"_id": "fp"}, {"$set": {"footprint": [[0, 0, 0]]}})  # a document that predates the check
+assert c.post(f"/suitcases/{sc['id']}/plan").status_code == 422, "an unreadable stored scan is refused, not a 500"
+assert c.delete("/items/fp").json() == {"deleted": "fp"}
+
 items = c.get("/items").json()
 assert len(items) == 1 and items[0]["heights"] == [[0.1]] and "_id" not in items[0], items
 assert all("photo" not in i for i in items), "GET /items must never return the stored photo"
@@ -266,12 +278,17 @@ with patch.dict(os.environ, {"AUTH0_DOMAIN": "test-tenant.example.auth0.com", "A
     assert c.post("/suitcases", json={"name": "x", "dimensions": [1, 1, 1]}).status_code == 401
     assert c.delete(f"/suitcases/{empty['id']}").status_code == 401
     assert c.get("/inventory").status_code == 401, "the inventory is per-user, so it needs a token"
+    for path in ("/suitcases", f"/suitcases/{empty['id']}", f"/suitcases/{empty['id']}/plan", "/items", "/items/t1"):
+        assert c.get(path).status_code == 401, f"reads need a token too: {path}"
 main.app.dependency_overrides[auth.require_auth] = lambda: {"sub": "u1", "email": "u1@example.com"}
 
 main.app.dependency_overrides[auth.require_auth] = lambda: {"sub": "u2"}  # a different, authenticated user
 assert c.delete(f"/suitcases/{empty['id']}").status_code == 403, "u2 must not delete u1's suitcase"
 assert c.post(f"/suitcases/{empty['id']}/plan").status_code == 403
 assert c.get("/inventory").json() == [], "u2 has scanned nothing, and must not see u1's items"
+assert c.get("/suitcases").json() == [] and c.get("/items").json() == [], "u2 sees none of u1's rows"
+assert c.get(f"/suitcases/{empty['id']}").status_code == 403 and c.get(f"/suitcases/{empty['id']}/plan").status_code == 403
+assert c.get("/items/t1").status_code == 403, "u2 must not read u1's item"
 main.app.dependency_overrides[auth.require_auth] = lambda: {"sub": "u1", "email": "u1@example.com"}
 assert c.delete(f"/suitcases/{empty['id']}").json() == {"deleted": empty["id"]}, "u1 (the owner) may delete it"
 

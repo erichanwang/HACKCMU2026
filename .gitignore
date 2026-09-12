@@ -13,3 +13,14 @@ __pycache__/
 out/
 .playwright-mcp/
 graphify-out/cache/
+# personal / local
+.claude/settings.local.json
+# Xcode (project is regenerated from project.yml with `xcodegen`)
+*.xcworkspace
+*.xcarchive
+*.ipa
+*.dSYM*
+# Swift build output
+.swiftpm/
+# Python
+.venv/

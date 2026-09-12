@@ -1,0 +1,186 @@
+"""Contract tests for the FastAPI server (server/main.py) against an in-memory Mongo
+(mongomock), exercising the app the way the iOS app does: the exact multipart shape from
+`Spike/API.swift` and the JSON keys the `ScannedItem` Codable struct in `Spike/Geometry.swift`
+sends/decodes, and the plan document against `packing-core/CLAUDE.md`'s contract.
+
+`server/check.py` already covers upload/label/patch/plan/auth happy- and sad-paths end to
+end; this file only adds what it does not: the Swift-shaped multipart fields, the exact
+response key set a `ScannedItem` decode needs, replace-not-duplicate on re-upload, the
+10MB+1 image 413, `GET /items?suitcaseId=` isolation, delete-invalidates-plan, an unknown
+PATCH field being ignored rather than 500, and a unicode label round-trip.
+
+Run (pytest is not in the server uv env, so plain unittest):
+    cd server && uv run python -c "import sys; sys.path.insert(0, '../tests'); \
+import unittest, test_server_contract; unittest.main(module=test_server_contract)"
+"""
+import json
+import math
+import os
+import unittest
+from unittest.mock import patch
+
+import mongomock
+import pymongo
+
+os.environ.setdefault("MONGO_DB", "suitcase_contract_test")
+from fastapi.testclient import TestClient
+with patch.object(pymongo, "MongoClient", mongomock.MongoClient):
+    import main
+
+import auth
+
+# The six permutation strings AxisRotation.swift decodes (packing-core CLAUDE.md).
+ROTATIONS = {"XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"}
+
+# Every key `ScannedItem` (Spike/Geometry.swift) can decode from a response. All but the
+# first four are optional on the Swift side, but the server always fills them in.
+SCANNED_ITEM_KEYS = {
+    "id", "suitcaseId", "dimensions", "cellSize", "heights", "label", "labelSource",
+    "labelStatus", "description", "mass", "keepUpright", "rigidity", "rigiditySource",
+    "compressibility", "compressibilitySource", "createdAt",
+}
+
+IMG = {"image": ("o.jpg", b"\xff\xd8fake", "image/jpeg")}
+
+
+def scanned_item_json(item_id: str, suitcase_id: str) -> str:
+    """The multipart "item" field body exactly as Swift's `JSONEncoder().encode(item)` would
+    produce it: only the non-optional `ScannedItem` fields are present, since `JSONEncoder`
+    omits `nil` optionals (label, mass, etc. are unset until the server fills them in)."""
+    return json.dumps({
+        "id": item_id, "suitcaseId": suitcase_id,
+        "dimensions": [0.2, 0.1, 0.1], "cellSize": 0.01, "heights": [[0.1]],
+    })
+
+
+class ServerContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app)
+        main.app.dependency_overrides[auth.require_auth] = lambda: {"sub": "u1", "email": "u1@example.com"}
+
+    @classmethod
+    def tearDownClass(cls):
+        del main.app.dependency_overrides[auth.require_auth]
+
+    def setUp(self):
+        main.db.items.drop()
+        main.db.suitcases.drop()
+        main.db.plans.drop()
+
+    def make_suitcase(self, name="carry-on"):
+        return self.client.post("/suitcases", json={"name": name, "dimensions": [0.55, 0.22, 0.35]}).json()
+
+    def upload(self, item_id, suitcase_id):
+        return self.client.post("/items", data={"item": scanned_item_json(item_id, suitcase_id)}, files=IMG)
+
+    # --- (1) Swift multipart shape / ScannedItem key contract -----------------------------
+
+    def test_upload_multipart_fields_and_response_keys(self):
+        """Field names "item"/"image" (API.swift's `upload`) must be what the server accepts,
+        and the response must carry every key `ScannedItem` (Geometry.swift) decodes."""
+        sc = self.make_suitcase()
+        r = self.upload("i1", sc["id"])
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(SCANNED_ITEM_KEYS.issubset(body.keys()), body.keys() - SCANNED_ITEM_KEYS)
+        self.assertEqual(body["id"], "i1")
+        self.assertEqual(body["suitcaseId"], sc["id"])
+
+    # --- (2) plan response vs packing-core/CLAUDE.md's PackingPlan contract ---------------
+
+    def test_plan_matches_packing_plan_contract(self):
+        sc = self.make_suitcase()
+        self.upload("i1", sc["id"])
+        plan_doc = self.client.post(f"/suitcases/{sc['id']}/plan").json()
+        p = plan_doc["plan"]
+
+        self.assertEqual(p["units"], "meters")
+        self.assertIn("version", p)
+        container = p["container"]
+        for key in ("id", "label", "dimensions", "zones"):
+            self.assertIn(key, container)
+        self.assertEqual(set(container["dimensions"]), {"x", "y", "z"})
+        zone_ids = {z["id"] for z in container["zones"]}
+        for zone in container["zones"]:
+            for key in ("id", "label", "origin", "size"):
+                self.assertIn(key, zone)
+            self.assertEqual(set(zone["origin"]), {"x", "y", "z"})
+            self.assertEqual(set(zone["size"]), {"x", "y", "z"})
+
+        steps = sorted(pl["step"] for pl in p["placements"])
+        self.assertEqual(steps, list(range(1, len(p["placements"]) + 1)))
+        for pl in p["placements"]:
+            for key in ("step", "itemId", "label", "zone", "position", "size", "rotation", "note"):
+                self.assertIn(key, pl)
+            self.assertIn(pl["rotation"], ROTATIONS)
+            self.assertIn(pl["zone"], zone_ids)
+            self.assertEqual(set(pl["position"]), {"x", "y", "z"})
+            self.assertEqual(set(pl["size"]), {"x", "y", "z"})
+
+    # --- (3) re-uploading the same item id replaces, not duplicates -----------------------
+
+    def test_reupload_same_item_id_replaces(self):
+        sc = self.make_suitcase()
+        self.upload("dup", sc["id"])
+        r = self.client.patch("/items/dup", json={"label": "first label"})
+        self.assertEqual(r.json()["label"], "first label")
+        r = self.upload("dup", sc["id"])  # re-scan the same item
+        self.assertEqual(r.status_code, 200, r.text)
+        items = self.client.get("/items", params={"suitcaseId": sc["id"]}).json()
+        self.assertEqual([i["id"] for i in items], ["dup"], "must not duplicate")
+        # a fresh scan resets a user's earlier PATCH, since it's a brand new upload
+        self.assertEqual(self.client.get("/items/dup").json()["labelSource"], "auto")
+
+    # --- (4) an image over MAX_IMAGE_BYTES is rejected -------------------------------------
+
+    def test_oversized_image_rejected_with_413(self):
+        sc = self.make_suitcase()
+        big = {"image": ("o.jpg", b"\x00" * (main.MAX_IMAGE_BYTES + 1), "image/jpeg")}
+        r = self.client.post("/items", data={"item": scanned_item_json("big", sc["id"])}, files=big)
+        self.assertEqual(r.status_code, 413, r.text)
+        self.assertEqual(self.client.get("/items/big").status_code, 404, "an oversized upload must not be stored")
+
+    # --- (5) GET /items?suitcaseId= isolates suitcases --------------------------------------
+
+    def test_items_isolated_by_suitcase_id(self):
+        a, b = self.make_suitcase("a"), self.make_suitcase("b")
+        self.upload("a1", a["id"])
+        self.upload("b1", b["id"])
+        self.assertEqual([i["id"] for i in self.client.get("/items", params={"suitcaseId": a["id"]}).json()], ["a1"])
+        self.assertEqual([i["id"] for i in self.client.get("/items", params={"suitcaseId": b["id"]}).json()], ["b1"])
+
+    # --- (6) DELETE /items/{id} invalidates the stored plan ---------------------------------
+
+    def test_delete_item_invalidates_plan(self):
+        sc = self.make_suitcase()
+        self.upload("i1", sc["id"])
+        self.assertEqual(self.client.post(f"/suitcases/{sc['id']}/plan").status_code, 200)
+        self.assertEqual(self.client.get(f"/suitcases/{sc['id']}/plan").status_code, 200)
+        self.assertEqual(self.client.delete("/items/i1").json(), {"deleted": "i1"})
+        self.assertEqual(self.client.get(f"/suitcases/{sc['id']}/plan").status_code, 404)
+
+    # --- (7) an unknown PATCH field is ignored, not a 500 ------------------------------------
+
+    def test_patch_unknown_field_ignored(self):
+        sc = self.make_suitcase()
+        self.upload("i1", sc["id"])
+        r = self.client.patch("/items/i1", json={"label": "known", "notAField": "surprise"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["label"], "known")
+        self.assertNotIn("notAField", r.json())
+
+    # --- (8) a unicode label survives a round trip -------------------------------------------
+
+    def test_unicode_label_round_trip(self):
+        sc = self.make_suitcase()
+        self.upload("i1", sc["id"])
+        label = "スーツケース 🧳 café"
+        r = self.client.patch("/items/i1", json={"label": label})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["label"], label)
+        self.assertEqual(self.client.get("/items/i1").json()["label"], label)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -135,6 +135,10 @@ struct ScanScreen: View {
         .sheet(isPresented: $showSettings) { SettingsSheet(serverURL: $serverURL, authToken: $authToken) }
         .sheet(isPresented: $showingPlanSheet) {
             if let plan {
+                // `inventory` rather than `items`: it is the superset and is kept current
+                // from launch, where `items` is only re-read when the Items sheet opens.
+                // `uniquingKeysWith` rather than `uniqueKeysWithValues`: the latter traps on
+                // a duplicate id instead of picking one.
                 PlanSheet(plan: plan, notice: planNotice,
                           scans: Dictionary(inventory.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
                           arActive: $planARActive)
@@ -468,8 +472,11 @@ struct ScanScreen: View {
         Task {
             defer { packing = false }
             do {
-                let (fetchedPlan, unpacked, pendingLabels) = try await API.plan(suitcaseId: suitcaseId)
+                async let planTask = API.plan(suitcaseId: suitcaseId)
+                async let itemsTask = API.items(suitcaseId: suitcaseId)
+                let ((fetchedPlan, unpacked, pendingLabels), fetchedItems) = try await (planTask, itemsTask)
                 plan = fetchedPlan
+                items = fetchedItems
                 planNotice = nil
                 showingPlanSheet = true
                 status = unpacked.isEmpty

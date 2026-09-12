@@ -288,6 +288,12 @@ struct ScannedItem: Codable, Identifiable, Equatable {
     // centre (width +x, depth +z) -- same frame/sign convention as physics/io.py's
     // `object_from_box_fit` local frame. nil for a plain box (degenerate or unavailable hull).
     var footprint: [[Float]]?
+    /// Base64 PNG, `heights.count` wide by `heights[0].count` tall, one pixel per cell — the
+    /// real colour seen at that cell's captured top surface, baked at scan time by projecting
+    /// each cell back through the camera that took the label photo (see
+    /// `ScanView.Coordinator.bakeColorMap`). nil for a plain box, an item scanned before this
+    /// existed, or a cell that projected off-screen.
+    var colorMap: String?
     var label: String?
     var labelSource: String?
     /// "pending" (server retrying in the background), "done", "unidentified" (every configured

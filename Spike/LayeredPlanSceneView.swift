@@ -50,7 +50,7 @@ final class LayeredPlanSceneController: ObservableObject {
     private var pitch: Float = .pi / 7
     private var distance: Float
 
-    init(plan: PackingPlan, scans: [String: ScannedItem]) {
+    init(plan: PackingPlan, scans: [String: ScannedItem], useRealScans: Bool = true) {
         let dimensions = plan.container.dimensions
         target = (dimensions / 2).simd
         distance = simd_length(dimensions.simd) * startDistanceFactor
@@ -64,7 +64,7 @@ final class LayeredPlanSceneController: ObservableObject {
         root.addChild(PlanEntityBuilder.wireframeBox(size: dimensions))
 
         // Same boxes the AR overlay draws — one builder, two hosts.
-        let built = PlanEntityBuilder(plan: plan, scans: scans).build(includeLabels: true)
+        let built = PlanEntityBuilder(plan: plan, scans: scans).build(includeLabels: true, useRealScans: useRealScans)
         root.addChild(built.root)
         content = built
         labels = built.labels
@@ -73,6 +73,18 @@ final class LayeredPlanSceneController: ObservableObject {
         cameraAnchor.addChild(camera)
         arView.scene.addAnchor(cameraAnchor)
         arView.scene.addAnchor(root)
+
+        // `.nonAR` gets none of AR mode's live camera-based light estimate, so without an
+        // explicit light every material — however carefully shaded — renders flat and dim.
+        // Fixed in world space, not on the camera, so orbiting actually reveals shading
+        // rather than the light rotating along with the view.
+        let sun = DirectionalLight()
+        sun.light.intensity = 5000
+        sun.light.isRealWorldProxy = false
+        sun.orientation = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: simd_normalize(SIMD3<Float>(-0.5, -1, -0.3)))
+        let lightAnchor = AnchorEntity(world: .zero)
+        lightAnchor.addChild(sun)
+        arView.scene.addAnchor(lightAnchor)
 
         updateCamera()
     }
@@ -173,11 +185,11 @@ struct LayeredPlanSceneView: View {
     ///     the other views of the same plan. When omitted the view keeps its own
     ///     and starts with every layer visible.
     ///   - showsTitle: false when embedded in someone else's screen.
-    init(plan: PackingPlan, scans: [String: ScannedItem] = [:], topLayer: Binding<Int>? = nil,
-         showsTitle: Bool = true) {
+    init(plan: PackingPlan, scans: [String: ScannedItem] = [:], useRealScans: Bool = true,
+         topLayer: Binding<Int>? = nil, showsTitle: Bool = true) {
         self.plan = plan
         self.showsTitle = showsTitle
-        let controller = LayeredPlanSceneController(plan: plan, scans: scans)
+        let controller = LayeredPlanSceneController(plan: plan, scans: scans, useRealScans: useRealScans)
         _controller = StateObject(wrappedValue: controller)
         externalTopLayer = topLayer
         _ownTopLayer = State(initialValue: controller.layerCount - 1)
@@ -284,6 +296,10 @@ struct PlanSheet: View {
 
     @State private var diagram: DiagramMode = .flat
     @State private var showingAR = false
+    /// Forces every item to a plain box, even ones with a scanned heightmap — a clean
+    /// read of the layering itself. Applies to the 3D scene and the AR overlay; the
+    /// 2D diagram never drew scans in the first place, so it ignores this.
+    @State private var useRealScans = true
     /// Shared by all three views: the 2D picker shows layer `n`, the 3D slider
     /// and the AR overlay peel down to layer `n`, so switching lands you where
     /// you were rather than resetting.
@@ -317,11 +333,12 @@ struct PlanSheet: View {
             case .flat:
                 PlanDiagramView(plan: plan, selectedLayer: $selectedLayer)
             case .scene:
-                LayeredPlanSceneView(plan: plan, scans: scans, topLayer: $selectedLayer)
+                LayeredPlanSceneView(plan: plan, scans: scans, useRealScans: useRealScans, topLayer: $selectedLayer)
+                    .id(useRealScans)
             }
         }
         .fullScreenCover(isPresented: $showingAR) {
-            PlanARPlanView(plan: plan, scans: scans, topLayer: $selectedLayer)
+            PlanARPlanView(plan: plan, scans: scans, useRealScans: useRealScans, topLayer: $selectedLayer)
         }
         .onChange(of: showingAR) { _, active in arActive?.wrappedValue = active }
         .onDisappear { arActive?.wrappedValue = false }
@@ -338,6 +355,13 @@ struct PlanSheet: View {
             }
             .buttonStyle(.bordered)
             .accessibilityHint("Switches to \(diagram.other.title)")
+
+            if diagram == .scene {
+                Toggle(isOn: $useRealScans) { Label("Real", systemImage: "camera.viewfinder") }
+                    .toggleStyle(.button)
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel(useRealScans ? "Showing real scans" : "Showing demo shapes")
+            }
 
             Spacer()
 

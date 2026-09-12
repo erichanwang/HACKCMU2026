@@ -118,6 +118,7 @@ func heightMap(points: [SIMD3<Float>], box: BoxFit, planeY: Float, cell: Float) 
 /// depth) — the object's real shape as seen from above. Label/rigidity are filled in by the server.
 struct ScannedItem: Codable, Identifiable {
     var id = UUID().uuidString
+    var suitcaseId: String?        // the suitcase this was scanned into; the server rejects items without one
     var dimensions: [Float]
     var cellSize: Float
     var heights: [[Float]]

@@ -105,6 +105,69 @@ for bag in bags {
     assert(halfD <= spineNearZ + eps, "\(bag.name): modeled back wall \(halfD) crosses into the spine (starts at \(spineNearZ))")
     assert(maxY <= bag.outerH + eps, "\(bag.name): modeled interior taller than the outer shell")
     assert(halfW <= bag.outerW / 2 - bag.shell + eps, "\(bag.name): modeled interior wider than the shell-only interior")
+    // Section 2's calibration is safe, but it must not become so conservative it demos as a bag
+    // that "holds nothing" — cap how much volume it's allowed to give up.
+    assert(margin < 45, "\(bag.name): symmetric calibration should give up well under half the bag, got \(margin)%")
 }
 
-print("\nbag model: flat 1 cm wall overestimates every simulated bag; the calibrated per-axis model stays inside the true interior for all of them — ok")
+// --- 3. The cheaper fix: pay the spine once, not twice (needs a PlanAnchor.swift change) --------
+// Section 2's wallDepth is subtracted from BOTH the front (opening, no intrusion) and back
+// (spine) faces, because interiorBox never shifts the box's center in z. The spine only exists
+// at the back, so half of that cut is pure waste. Height doesn't have this problem: interiorBox
+// already raises the floor by wallHeight AND shifts center.y up by wallHeight/2, so the modeled
+// top still touches the outer shell exactly (zero waste there). Depth needs the same treatment —
+// pay spineDepth once, shift center.z toward the opening by spineDepth/2 — which is a few lines
+// in PlanAnchor.swift (out of scope here), so it's modelled by hand to quantify what it buys.
+print("\n=== cheapest real fix: asymmetric depth (pay the spine once) vs true interior ===")
+for bag in bags {
+    let wallHeight = bag.shell + bag.wellHeight
+    let width = bag.outerW - 2 * bag.shell
+    let height = bag.outerH - wallHeight
+    let depth = bag.outerD - 2 * bag.shell - bag.spineDepth
+    let center = SIMD3<Float>(0, bag.outerH / 2 + wallHeight / 2, -bag.spineDepth / 2)
+    let modeled = BoxFit(width: width, depth: depth, height: height, center: center, axis: SIMD3(1, 0, 0))
+    let modeledVol = modeled.width * modeled.depth * modeled.height
+    let trueVol = bag.trueVolume
+    let margin = (trueVol - modeledVol) / trueVol * 100
+    print("\(pad(bag.name, 16)) modeled=\(r2(modeledVol * 1000))L true=\(r2(trueVol * 1000))L " +
+          "margin=-\(r1(margin))% (safe volume given up)")
+    assert(modeledVol < trueVol, "\(bag.name): asymmetric model must stay inside the true interior")
+    assert(margin < 30, "\(bag.name): asymmetric fix should give up well under a third of the bag, got \(margin)%")
+
+    // Same containment proof as section 2, plus: the back face should touch the spine boundary
+    // exactly (a tight fit, not just another conservative pad).
+    let minY = modeled.center.y - modeled.height / 2
+    let wellTopY = bag.shell + bag.wellHeight
+    let spineNearZ = bag.outerD / 2 - bag.shell - bag.spineDepth
+    let backZ = modeled.center.z + modeled.depth / 2
+    let eps: Float = 1e-4
+    assert(minY >= wellTopY - eps, "\(bag.name): asymmetric floor dips into the well")
+    assert(backZ <= spineNearZ + eps, "\(bag.name): asymmetric back wall crosses into the spine")
+    assert(abs(backZ - spineNearZ) < eps, "\(bag.name): asymmetric back wall should touch the spine boundary, not pad past it")
+
+    // It should also recover more usable volume than section 2's symmetric calibration.
+    let symModeled = interiorBox(bag.outerBox, wall: bag.shell, wallHeight: wallHeight, wallDepth: bag.shell + bag.spineDepth)
+    let symVol = symModeled.width * symModeled.depth * symModeled.height
+    assert(modeledVol > symVol, "\(bag.name): asymmetric fix should recover more volume than the symmetric one")
+}
+
+// --- 4. Sanity-check a single flat wall applied to every axis (today's ScanView.swift) -----------
+// Spike/ScanView.swift:123 calls interiorBox(box, wall: suitcaseWallMeters) with ONE constant;
+// wallHeight/wallDepth default to it. There is no value of that single constant that is both
+// safe and efficient: big enough to clear the tallest well and deepest spine, it also needlessly
+// shrinks the width, which has no well or spine at all.
+print("\n=== single flat knob (today's ScanView.swift call) can't be both safe and efficient ===")
+for bag in bags {
+    let neededForHeight = bag.shell + bag.wellHeight
+    let neededForDepth = bag.shell + bag.spineDepth
+    let safeFlat = max(neededForHeight, neededForDepth)   // one number safe on every axis
+    let modeled = interiorBox(bag.outerBox, wall: safeFlat)
+    let modeledVol = modeled.width * modeled.depth * modeled.height
+    let trueVol = bag.trueVolume
+    let margin = (trueVol - modeledVol) / trueVol * 100
+    print("\(pad(bag.name, 16)) safe single wall=\(r2(safeFlat * 100))cm margin=-\(r1(margin))% (vs -39..-41% with 3 separate constants)")
+    assert(modeledVol < trueVol, "\(bag.name): single safe wall should still stay inside the true interior")
+    assert(margin > 50, "\(bag.name): forcing one constant to be safe on every axis should cost more than half the bag, got \(margin)%")
+}
+
+print("\nbag model: flat 1 cm wall overestimates every simulated bag; the calibrated per-axis model stays inside the true interior, and the asymmetric fix halves the wasted volume — ok")

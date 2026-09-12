@@ -62,6 +62,8 @@ struct ItemEditor: View {
             ForEach(["rigid", "soft", "fragile"], id: \.self) { Text($0) }
         }
         .pickerStyle(.segmented)
+        if let d = item.description, !d.isEmpty { Text(d).font(.caption) }
+        Text("~\(String(format: "%.1f", item.mass ?? 0)) kg · squeezes \(String(format: "%.1f", item.compressibility ?? 1))×\(item.keepUpright == true ? " · keep upright" : "")").font(.caption2)
         Text("\(item.labelSource ?? "") label · \(item.rigiditySource ?? "") rigidity").font(.caption2)
     }
 }

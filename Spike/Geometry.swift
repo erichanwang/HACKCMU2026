@@ -123,8 +123,13 @@ struct ScannedItem: Codable, Identifiable {
     var heights: [[Float]]
     var label: String?
     var labelSource: String?
+    var description: String?       // one sentence from Grok
+    var mass: Double?              // estimated kg from Grok, 0 = unknown
+    var keepUpright: Bool?         // must stay this side up (liquids, open containers)
     var rigidity: String?
     var rigiditySource: String?
+    var compressibility: Double?   // loose volume / squeezed volume, >= 1; 1 unless soft
+    var compressibilitySource: String?
     var createdAt: String?
 
     init(_ box: BoxFit, heights: [[Float]], cell: Float) {

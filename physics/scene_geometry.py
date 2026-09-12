@@ -281,6 +281,12 @@ def xz_overlap_area(geom: SceneGeometry, i: int, j: int) -> float:
     return polygon_area_2d(convex_clip_2d(hull_i, hull_j))
 
 
+# Below this XZ overlap area a "contact" is a float artifact, not a contact: two boxes
+# packed flush edge to edge come out of the OBB vertex math overlapping by ~1e-17 m^2,
+# which `area > 0.0` admitted as one resting on the other.
+MIN_CONTACT_AREA_M2 = 1e-9
+
+
 def resting_pairs(geom: SceneGeometry, contact_eps: float) -> list[tuple[int, int, float]]:
     """Unified "what rests on what" graph: (top_idx, bottom_idx, xz_overlap_area)
     for every ordered pair where top's lowest Y is within `contact_eps` of
@@ -301,7 +307,7 @@ def resting_pairs(geom: SceneGeometry, contact_eps: float) -> list[tuple[int, in
     out: list[tuple[int, int, float]] = []
     for t, b in zip(*np.nonzero(close)):
         area = xz_overlap_area(geom, int(t), int(b))
-        if area > 0.0:
+        if area > MIN_CONTACT_AREA_M2:
             out.append((int(t), int(b), area))
     return out
 

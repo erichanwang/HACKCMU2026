@@ -1,0 +1,6 @@
+CLAUDE.local.md
+*.xcodeproj
+xcuserdata/
+DerivedData/
+.build/
+.DS_Store

@@ -1,0 +1,21 @@
+name: Spike
+options:
+  bundleIdPrefix: com.suitcase
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Spike:
+    type: application
+    platform: iOS
+    sources: [Spike]
+    info:
+      path: Spike/Info.plist
+      properties:
+        NSCameraUsageDescription: Measures objects with the LiDAR camera.
+        UIRequiredDeviceCapabilities: [arkit]
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic

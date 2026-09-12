@@ -208,8 +208,8 @@ public extension PackingPlan {
     /// solver emitted something impossible and a call site may refuse the plan
     /// outright; these are the client's own physics judgement, made because
     /// `PlanLoader` decodes only the `plan` key and never sees the server's
-    /// `validation.valid` verdict. A plan can be worth showing with a warning
-    /// and still trip several of these — the hand-authored mock plan does.
+    /// `validation.valid` verdict. A plan that trips one of these is still worth
+    /// opening and showing the user — it is a warning, not a refusal.
     ///
     /// **The plan carries no masses.** Every judgement here therefore assumes
     /// **uniform density**: an item's centre of mass is the centre of its box,
@@ -226,9 +226,10 @@ public extension PackingPlan {
     ///     density-free proxy for "crushed", and the one number here that wants
     ///     calibrating against real bags: at `1.0` every honest multi-layer plan
     ///     we have trips it (a three-layer solver plan puts 1.10× over the jacket
-    ///     at the bottom, the bundled mock 1.15× over the jeans), which is how a
-    ///     warning banner teaches people to ignore it. `2.0` still catches the
-    ///     case that matters — something small under a mountain.
+    ///     at the bottom, the bundled mock 1.15× over the jeans and 1.18× over the
+    ///     shirts), which is how a warning banner teaches people to ignore it.
+    ///     `2.0` still catches the case that matters — something small under a
+    ///     mountain.
     func stabilityIssues(tolerance: Float = 1e-6, maxLoadRatio: Float = 2.0) -> [GeometryIssue] {
         var issues: [GeometryIssue] = []
         let ordered = orderedPlacements

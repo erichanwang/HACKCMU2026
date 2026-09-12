@@ -221,4 +221,20 @@ final class PlanGeometryStabilityTests: XCTestCase {
         let stability = plan.stabilityIssues(tolerance: tolerance)
         XCTAssertTrue(stability.isEmpty, "\(stability)")
     }
+
+    /// Why `maxLoadRatio` defaults to 2.0 and not 1.0. The mock plan's heaviest
+    /// column is 1.18x the volume of the item under it and a real three-layer
+    /// solver plan runs 1.10x, so at 1.0 every honest multi-layer plan would show
+    /// a warning banner — which is how users learn to ignore banners.
+    func testLoadRatioOfOneWouldWarnOnTheMockPlan() throws {
+        let plan = try PlanLoader.mockPlan()
+        XCTAssertTrue(plan.stabilityIssues(tolerance: tolerance, maxLoadRatio: 2.0).isEmpty)
+
+        let overloaded = plan.stabilityIssues(tolerance: tolerance, maxLoadRatio: 1.0)
+            .compactMap { issue -> String? in
+                guard case let .overloadedStack(id, _) = issue else { return nil }
+                return id
+            }
+        XCTAssertEqual(Set(overloaded), ["jeans-folded", "shirt-stack"])
+    }
 }

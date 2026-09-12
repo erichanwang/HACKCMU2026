@@ -132,6 +132,10 @@ enum API {
         var body = Data()
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"item\"\r\n\r\n".data(using: .utf8)!)
         body.append(try JSONEncoder().encode(item))
+        // Which labelling model the server should ask; "both" is its own default.
+        let model = UserDefaults.standard.string(forKey: "labelModel") ?? "both"
+        body.append("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
+        body.append(model.data(using: .utf8)!)
         body.append("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"image\"; filename=\"o.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
         body.append(jpeg)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)

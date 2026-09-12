@@ -40,6 +40,7 @@ struct PackScreen: View {
             }
             .background(Sheet.paper)
             .navigationTitle(suitcases.count == 1 ? "1 suitcase" : "\(suitcases.count) suitcases")
+            .navigationBarTitleDisplayMode(.inline)
             .refreshable { await load() }
             .navigationDestination(isPresented: $showingPlan) {
                 if let plan {
@@ -73,35 +74,39 @@ struct PackScreen: View {
                 .foregroundStyle(Sheet.ink.opacity(0.5))
                 .padding(.top, 2)
 
-            LoadBar(value: value).padding(.top, 14)
-
-            HStack(spacing: 10) {
-                Button { editing = bag } label: {
-                    Label("Add items", systemImage: "plus")
-                        .font(.subheadline.weight(.medium))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Sheet.card, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Sheet.ink)
-
-                Button { pack(bag) } label: {
-                    Group {
-                        if packing == bag.id {
-                            ProgressView().tint(.white)
-                        } else {
-                            Image(systemName: "play.fill").font(.body)
-                        }
+            HStack(spacing: 14) {
+                // The zip only runs while this bag is actually being solved; the rest of
+                // the time the same line is the load against the limit.
+                Group {
+                    if packing == bag.id {
+                        ZipperBar()
+                    } else {
+                        LoadBar(value: value)
                     }
-                    .foregroundStyle(.white)
-                    .frame(width: 58, height: 44)
-                    .background(aboard.isEmpty ? Sheet.ink.opacity(0.18) : Sheet.accent, in: Capsule())
+                }
+                Button { pack(bag) } label: {
+                    Image(systemName: "play.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(aboard.isEmpty ? Sheet.ink.opacity(0.18) : Sheet.accent, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(aboard.isEmpty || packing != nil)
                 .accessibilityLabel("Pack \(bag.name)")
             }
-            .padding(.top, 16)
+            .padding(.top, 18)
+
+            Button { editing = bag } label: {
+                Label("Add items", systemImage: "plus")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Sheet.card, in: Capsule())
+                    .overlay(Capsule().stroke(Sheet.hairline, lineWidth: 0.5))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Sheet.ink)
+            .padding(.top, 14)
 
             if aboard.isEmpty {
                 Text("Put something in this bag before packing it.")
@@ -287,5 +292,51 @@ struct LoadBar: View {
         .frame(height: 14)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(Int((value * 100).rounded())) percent by volume\(over ? ", over what the bag holds" : "")")
+    }
+}
+
+
+/// The load bar while the solver is running: a zip closing along the bag.
+///
+/// Teeth ahead of the pull sit splayed and grey, teeth behind it mesh and take the
+/// accent, and the pull runs the length on a loop until the plan comes back. It is the
+/// same 14pt line the LoadBar occupies, so the card does not jump when it swaps in.
+/// Reduce Motion parks the pull halfway rather than running it.
+struct ZipperBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion)) { context in
+            let cycle = 1.7
+            let phase = reduceMotion
+                ? 0.55
+                : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycle) / cycle
+            Canvas { ctx, size in
+                let midY = size.height / 2
+                let pullX = size.width * phase
+                let pitch: CGFloat = 7
+
+                var x: CGFloat = 1
+                while x < size.width - 1 {
+                    let closed = x < pullX - 3
+                    let spread: CGFloat = closed ? 1.6 : 4.6
+                    let colour = closed ? Sheet.accent : Sheet.ink.opacity(0.2)
+                    for side in [CGFloat(-1), CGFloat(1)] {
+                        let rect = CGRect(x: x, y: midY + side * spread - 1.5, width: 4.2, height: 3)
+                        ctx.fill(Path(roundedRect: rect, cornerRadius: 1.2), with: .color(colour))
+                    }
+                    x += pitch
+                }
+
+                // The pull itself, with its tab hanging below the line.
+                let body = CGRect(x: pullX - 4.5, y: midY - 6.5, width: 9, height: 13)
+                ctx.fill(Path(roundedRect: body, cornerRadius: 3), with: .color(Sheet.accent))
+                let tab = CGRect(x: pullX - 1.8, y: midY + 5, width: 3.6, height: 7)
+                ctx.fill(Path(roundedRect: tab, cornerRadius: 1.8), with: .color(Sheet.accent.opacity(0.7)))
+            }
+        }
+        .frame(height: 14)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Packing this bag")
     }
 }

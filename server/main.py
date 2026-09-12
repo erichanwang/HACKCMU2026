@@ -145,15 +145,26 @@ def _is_unknown(guess: dict) -> bool:
     return guess["label"].strip().lower() == "unknown"
 
 
-def detect(jpeg: bytes) -> dict:
-    """Ask whichever of Grok/Claude is configured.
+LABEL_MODELS = ("both", "grok", "claude")
+
+
+def detect(jpeg: bytes, prefer: str = "both") -> dict:
+    """Ask whichever of Grok/Claude is configured, or just the one `prefer` names.
 
     If only one identifies the item, use it — the other declining is not a disagreement. If both
     identify it but name it differently, trust Claude. Only if every configured model declines (or
     none is configured) does the result come back "unknown"; the caller turns that into a distinct,
     terminal labelStatus, since a retry against the same stored photo cannot change a model's mind.
+
+    `prefer` is the caller's choice of "both" (ask each and arbitrate), "grok", or "claude". It
+    narrows which keys are consulted; it cannot conjure a key that is not configured, so asking for
+    a model with no key set reads the same as having no model configured at all.
     """
     grok_key, claude_key = os.environ.get("XAI_API_KEY"), os.environ.get("ANTHROPIC_API_KEY")
+    if prefer == "grok":
+        claude_key = None
+    elif prefer == "claude":
+        grok_key = None
     if not grok_key and not claude_key:
         return dict(UNKNOWN)
     grok_guess = grok_err = claude_guess = claude_err = None
@@ -213,7 +224,7 @@ def label_item(doc: dict) -> bool:
         db.items.update_one({"_id": item_id}, {"$set": {"labelStatus": "failed"}})
         return False
     try:
-        guess = detect(doc["photo"])
+        guess = detect(doc["photo"], doc.get("labelModel", "both"))
     except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
         attempts = doc.get("labelAttempts", 0) + 1
         logging.warning("labelling item %s failed (attempt %d): %s", item_id, attempts, exc)
@@ -357,11 +368,14 @@ class Scan(BaseModel, extra="ignore"):
 
 @app.post("/items")
 def create_item(background: BackgroundTasks, item: str = Form(...), image: UploadFile = File(...),
-                later: bool = Query(False, alias="async"), user: str = Depends(current_user)):
+                model: str = Form("both"), later: bool = Query(False, alias="async"),
+                user: str = Depends(current_user)):
     try:
         doc = Scan.model_validate_json(item).model_dump(mode="json", exclude_none=True)  # no footprint: no key, not null
     except ValidationError as exc:
         raise HTTPException(422, str(exc))
+    if model not in LABEL_MODELS:
+        raise HTTPException(422, f"model must be one of {', '.join(LABEL_MODELS)}")
     item_id, suitcase_id = doc["id"], doc["suitcaseId"]
     owned(db.suitcases.find_one({"_id": suitcase_id}), user)
     existing = db.items.find_one({"_id": item_id})
@@ -376,7 +390,7 @@ def create_item(background: BackgroundTasks, item: str = Form(...), image: Uploa
         guess, status = dict(UNKNOWN), "pending"
     else:
         try:
-            guess = detect(jpeg)
+            guess = detect(jpeg, model)
             status = resolve_label_status(doc, guess)
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
             # every configured model's call itself failed (down, rate-limited, garbage) — this is not
@@ -385,6 +399,7 @@ def create_item(background: BackgroundTasks, item: str = Form(...), image: Uploa
             guess, status = dict(UNKNOWN), "pending"
     doc |= guess | {
         "_id": item_id, "owner_id": user, "photo": jpeg, "labelStatus": status,
+        "labelModel": model,  # the background sweep re-asks the same model the scan chose
         "labelSource": "auto", "rigiditySource": "auto", "compressibilitySource": "auto",
         "massSource": "auto", "keepUprightSource": "auto",
         "createdAt": now(),

@@ -526,6 +526,9 @@ struct ItemEditor: View {
 struct SettingsSheet: View {
     @Binding var serverURL: String
     @Binding var authToken: String
+    /// Which model the server asks to identify a scan. Sent with every upload; the
+    /// server re-asks the same one on its background retries.
+    @AppStorage("labelModel") private var labelModel = "both"
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -537,6 +540,18 @@ struct SettingsSheet: View {
                     Text("Server address")
                 } footer: {
                     Text("The Mac running the packing server, on the same Wi-Fi as this phone. `ipconfig getifaddr en0` on the Mac prints its address.")
+                }
+                Section {
+                    Picker("Model", selection: $labelModel) {
+                        Text("MoE").tag("both")
+                        Text("Grok").tag("grok")
+                        Text("Claude").tag("claude")
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("Identification")
+                } footer: {
+                    Text(modelFooter)
                 }
                 Section("Bearer token") {
                     TextField("Optional", text: $authToken)
@@ -553,5 +568,15 @@ struct SettingsSheet: View {
             .toolbar { Button("Done") { dismiss() } }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// What each choice actually does on the server, in its own words.
+    private var modelFooter: String {
+        switch labelModel {
+        case "grok": return "Only Grok is asked. Faster, and one opinion."
+        case "claude": return "Only Claude is asked."
+        default:
+            return "Both are asked and the answers arbitrated: if one declines, the other's answer stands; if they name it differently, Claude's wins. A model with no API key set on the server is skipped."
+        }
     }
 }

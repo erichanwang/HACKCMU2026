@@ -224,6 +224,110 @@ class ServerContractTests(unittest.TestCase):
         self.assertEqual(r.json()["label"], label)
         self.assertEqual(self.client.get("/items/i1").json()["label"], label)
 
+    # --- (9) moving an item between bags ------------------------------------------------------
+
+    def stored_plan(self, bag_id):
+        """Stand in a plan document for `bag_id` so a move can be seen to invalidate it."""
+        main.db.plans.replace_one({"_id": bag_id}, {"_id": bag_id, "owner_id": "u1", "plan": {}}, upsert=True)
+
+    def test_move_between_bags_drops_both_plans(self):
+        a, b = self.make_suitcase("a"), self.make_suitcase("b")
+        self.upload("i1", a["id"])
+        self.stored_plan(a["id"])
+        self.stored_plan(b["id"])
+        r = self.client.patch("/items/i1", json={"suitcaseId": b["id"]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["suitcaseId"], b["id"])
+        # Neither bag's stored plan still matches its contents.
+        self.assertIsNone(main.db.plans.find_one({"_id": a["id"]}))
+        self.assertIsNone(main.db.plans.find_one({"_id": b["id"]}))
+        # And it moved for real: it is in b's items and gone from a's.
+        self.assertEqual([i["id"] for i in self.client.get(f"/items?suitcaseId={b['id']}").json()], ["i1"])
+        self.assertEqual(self.client.get(f"/items?suitcaseId={a['id']}").json(), [])
+
+    def test_move_out_of_every_bag_keeps_it_in_inventory(self):
+        a = self.make_suitcase("a")
+        self.upload("i1", a["id"])
+        self.stored_plan(a["id"])
+        r = self.client.patch("/items/i1", json={"suitcaseId": None})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIsNone(r.json()["suitcaseId"])
+        self.assertIsNone(main.db.plans.find_one({"_id": a["id"]}))
+        self.assertEqual([i["id"] for i in self.client.get("/inventory").json()], ["i1"])
+
+    def test_move_to_a_bag_that_does_not_exist_is_refused(self):
+        a = self.make_suitcase("a")
+        self.upload("i1", a["id"])
+        self.stored_plan(a["id"])
+        r = self.client.patch("/items/i1", json={"suitcaseId": "nope"})
+        self.assertEqual(r.status_code, 404, r.text)
+        # Refused means nothing moved and nothing was invalidated.
+        self.assertEqual(self.client.get("/items/i1").json()["suitcaseId"], a["id"])
+        self.assertIsNotNone(main.db.plans.find_one({"_id": a["id"]}))
+
+    def test_move_into_someone_elses_bag_is_refused(self):
+        a = self.make_suitcase("a")
+        self.upload("i1", a["id"])
+        main.db.suitcases.insert_one({"_id": "theirs", "owner_id": "u2", "name": "theirs",
+                                      "dimensions": [0.5, 0.2, 0.3]})
+        r = self.client.patch("/items/i1", json={"suitcaseId": "theirs"})
+        # 403, not 404: the bag exists, it just is not yours.
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertEqual(self.client.get("/items/i1").json()["suitcaseId"], a["id"])
+
+    def test_move_to_the_bag_it_is_already_in_changes_nothing(self):
+        a = self.make_suitcase("a")
+        self.upload("i1", a["id"])
+        self.stored_plan(a["id"])
+        r = self.client.patch("/items/i1", json={"suitcaseId": a["id"]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["suitcaseId"], a["id"])
+        # A move that moves nothing must not throw away a plan that still matches.
+        self.assertIsNotNone(main.db.plans.find_one({"_id": a["id"]}))
+
+    def test_patching_an_item_that_does_not_exist_is_404(self):
+        self.assertEqual(self.client.patch("/items/ghost", json={"suitcaseId": None}).status_code, 404)
+
+    def test_move_survives_a_round_trip_through_inventory(self):
+        a, b = self.make_suitcase("a"), self.make_suitcase("b")
+        self.upload("i1", a["id"])
+        self.client.patch("/items/i1", json={"suitcaseId": b["id"]})
+        self.client.patch("/items/i1", json={"suitcaseId": None})
+        self.client.patch("/items/i1", json={"suitcaseId": a["id"]})
+        self.assertEqual(self.client.get("/items/i1").json()["suitcaseId"], a["id"])
+        self.assertEqual(len(self.client.get("/inventory").json()), 1)
+
+    # --- (10) the labelling model the app asks for ---------------------------------------------
+
+    def test_upload_rejects_an_unknown_model(self):
+        sc = self.make_suitcase()
+        r = self.client.post("/items", data={"item": scanned_item_json("i1", sc["id"]), "model": "gpt"}, files=IMG)
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_upload_records_the_model_it_was_asked_for(self):
+        sc = self.make_suitcase()
+        r = self.client.post("/items", data={"item": scanned_item_json("i1", sc["id"]), "model": "claude"}, files=IMG)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(main.db.items.find_one({"_id": "i1"})["labelModel"], "claude")
+
+    def test_upload_defaults_to_both_models(self):
+        sc = self.make_suitcase()
+        self.upload("i1", sc["id"])
+        self.assertEqual(main.db.items.find_one({"_id": "i1"})["labelModel"], "both")
+
+    def test_detect_asks_only_the_model_it_was_told_to(self):
+        with patch.dict(os.environ, {"XAI_API_KEY": "x", "ANTHROPIC_API_KEY": "c"}, clear=False):
+            with patch.object(main, "_grok_detect", return_value={"label": "grok answer"}) as grok, \
+                 patch.object(main, "_claude_detect", return_value={"label": "claude answer"}) as claude:
+                self.assertEqual(main.detect(b"jpeg", "grok")["label"], "grok answer")
+                self.assertEqual(grok.call_count, 1)
+                self.assertEqual(claude.call_count, 0)
+                self.assertEqual(main.detect(b"jpeg", "claude")["label"], "claude answer")
+                self.assertEqual(claude.call_count, 1)
+                # "both" asks each and, on a disagreement, trusts Claude.
+                self.assertEqual(main.detect(b"jpeg", "both")["label"], "claude answer")
+                self.assertEqual(grok.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

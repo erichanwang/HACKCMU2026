@@ -71,6 +71,14 @@ _PACKER3D_ROOT = ROOT / "packer3d"
 if (_PACKER3D_ROOT / "packer3d" / "__init__.py").is_file() and str(_PACKER3D_ROOT) not in sys.path:
     sys.path.append(str(_PACKER3D_ROOT))  # sibling source dir, same trick as physics/packer3d_adapter.py
 from packer3d.models import Item, oriented_solid_boxes  # noqa: E402 -- needs the sys.path append above
+from physics.geometry import convex_hull_2d  # noqa: E402
+from physics.packer3d_adapter import (  # noqa: E402
+    _oriented_footprint,
+    packer3d_point,
+    physics_point,
+    swap_yz,
+    validate_packer3d,
+)
 
 RNG_SEED = 20260912
 TABLE_Y = 0.80          # world height of the table plane, metres
@@ -551,7 +559,7 @@ def item_doc(it: dict, fit: dict, *, with_footprint: bool, item_id: str | None =
     footprint the real Swift path now computes (`ScannedItem.footprint`, docs/LIDAR_HULLS.md).
     `item_id` defaults to a fresh uuid; pass a fixed one to compare two POSTs of "the same" item
     (the solver's own ordering can depend on item id, so two calls with different random ids are
-    not a controlled comparison -- see `footprint_wiring_check`)."""
+    not a controlled comparison -- see `post_suitcase_items_plan`'s `item_ids`)."""
     doc = {"id": item_id or f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": None,
            "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
            "heights": fit["heights"]}
@@ -575,49 +583,211 @@ def assert_footprint_in_box(name: str, fit: dict) -> None:
                  f"({hx:.4f}, {hz:.4f})")
 
 
-def footprint_wiring_check(base: str, dims, items: list[dict], item_fits: list[dict]) -> None:
-    """Does sending `footprint` change the solver's plan at all? POST the same items/suitcase
-    twice -- once with `footprint`, once without -- and compare. `prepack.py`'s `physics_object()`
-    and packer3d's own Item builder never read `doc["footprint"]`, so this is expected to show no
-    effect; that is the real finding item 4 of the task asks for, not a bug in this script.
+def footprint_orientation_derivation_check() -> None:
+    """From-first-principles proof of `_FOOTPRINT_XZ`'s "xyz"/"yxz" mappings, independent of
+    reading that table -- see the task's derivation requirement on commit 1aa1b24.
 
-    Pinning identical item ids across both POSTs (so id-driven noise doesn't confound the diff)
-    turned up a SEPARATE, real finding: the solver's own step/orientation assignment is not
-    reproducible run-to-run even with byte-identical requests -- verified by running the SAME
-    request (`with_footprint` held fixed) twice in a row and seeing the placements differ on
-    ~1/3 of trials. So exact placement equality is not a valid footprint test on its own; compare
-    the solver's own metrics (items_packed/unpacked -- order-invariant, and the one number that
-    would actually move if footprint let something pack that otherwise wouldn't) plus a
-    permutation-of-assignment-invariant summary (the multiset of packed box volumes)."""
-    ids = [f"{it['name']}-wiring-{uuid.uuid4().hex[:8]}" for it in items]
-    with_fp, with_metrics = post_suitcase_items_plan(base, "wiring check (with footprint)", dims, items,
-                                                       item_fits, with_footprint=True, item_ids=ids)
-    without_fp, without_metrics = post_suitcase_items_plan(base, "wiring check (without footprint)", dims,
-                                                             items, item_fits, with_footprint=False, item_ids=ids)
-    metrics_same = (with_metrics.get("items_packed") == without_metrics.get("items_packed")
-                     and with_metrics.get("items_unpacked") == without_metrics.get("items_unpacked"))
-    volumes = lambda ps: sorted(round(p["size"]["x"] * p["size"]["y"] * p["size"]["z"], 6) for p in ps)
-    volumes_same = volumes(with_fp) == volumes(without_fp)
-    exact_same = with_fp == without_fp
-    print(f"[wiring] with vs without `footprint`: items_packed/unpacked "
-          f"{'match' if metrics_same else 'DIFFER'} "
-          f"({with_metrics.get('items_packed')}/{with_metrics.get('items_unpacked')} vs "
-          f"{without_metrics.get('items_packed')}/{without_metrics.get('items_unpacked')}), "
-          f"packed volumes {'match' if volumes_same else 'DIFFER'}, "
-          f"exact placements {'match' if exact_same else 'differ (see note on solver order-noise above)'}")
-    if metrics_same and volumes_same:
-        print("[wiring] footprint is accepted by the server (Scan model has extra=\"allow\") but "
-              "never reaches a packing decision: physics/prepack.py's physics_object() and "
-              "packer3d's own Item builder both read only dimensions/heights/rigidity/etc., "
-              "never doc[\"footprint\"] -- the field is stored on the item doc and otherwise inert.")
-        warn("footprint inert", "the phone sends a hull but no packing decision reads it; "
-                                "an L-shaped item still packs as a rectangle")
+    Derivation: a scanned `footprint` point `(fx, fz)` is given in the item's OWN frame,
+    "width +x, depth +z" (docs/LIDAR_HULLS.md), i.e. it already equals the item's own
+    `(x, y)` in packer3d's `x=length(width), y=width(depth), z=up` convention (models.py's
+    module docstring). `BOX_ORIENTATIONS[name][k]` says which item axis lands on packer WORLD
+    axis k, so world `(X, Y) = (item[perm[0]], item[perm[1]])`:
+      "xyz" perm=(0,1,2): world (X, Y) = (fx, fz)
+      "yxz" perm=(1,0,2): world (X, Y) = (fz, fx)
+    `_object_from_placement` always builds the graded `Object` with `oriented=True` (identity
+    rotation, per `scene_from_packer3d`'s own docstring), so the Object's LOCAL axes equal
+    packer WORLD axes exactly, and `physics_point(x, y, z) = (x, z, -y)` (this module's own
+    top-of-file contract, unchanged for every other coordinate in the adapter) turns a
+    packer-world `(X, Y, 0)` offset into physics-local `(X, 0, -Y)`, i.e. local `(x, z) =
+    (X, -Y)`. Composing:
+      "xyz": (x, z) = (fx, -fz)
+      "yxz": (x, z) = (fz, -fx)
+    -- exactly `_FOOTPRINT_XZ` as committed. This derivation therefore AGREES with the
+    committed mapping; it is arrived at from `BOX_ORIENTATIONS` + `physics_point`, not by
+    reading `_FOOTPRINT_XZ` itself.
+
+    Proof fixture: a SCALENE triangle with no vertex on the fx=fz or fx=-fz diagonal, so no
+    mirror (dropping a negation) and no axis swap (using the other orientation's formula)
+    can map it to itself -- both wrong mappings below are checked to land on visibly
+    different points for every vertex, so this cannot pass by an accidental symmetry.
+    """
+    fp = [(0.10, 0.02), (-0.05, 0.09), (-0.08, -0.07)]
+    entry = {"footprint": fp}
+    derived = {"xyz": [(fx, -fz) for fx, fz in fp], "yxz": [(fz, -fx) for fx, fz in fp]}
+    for orientation, want in derived.items():
+        got = _oriented_footprint(entry, orientation)
+        for (gx, gz), (wx, wz) in zip(got, want):
+            if abs(gx - wx) > 1e-12 or abs(gz - wz) > 1e-12:
+                fail(f"footprint derivation ({orientation}): _FOOTPRINT_XZ gave ({gx}, {gz}), "
+                     f"first-principles derivation gives ({wx}, {wz})")
+        mirrored = [(fx, fz) for fx, fz in fp]  # the "forgot to negate" bug
+        other = derived["yxz" if orientation == "xyz" else "xyz"]  # the "used the wrong perm" bug
+        for wrong, bug in ((mirrored, "missing negation"), (other, "swapped with the other orientation")):
+            if all(abs(a[0] - b[0]) <= 1e-9 and abs(a[1] - b[1]) <= 1e-9 for a, b in zip(want, wrong)):
+                fail(f"footprint derivation fixture is degenerate: the {bug!r} bug for "
+                     f"{orientation!r} would pass unnoticed on this footprint -- pick a less "
+                     f"symmetric fixture")
+    for orientation in ("xzy", "yzx", "zxy", "zyx"):
+        if _oriented_footprint(entry, orientation) is not None:
+            fail(f"orientation {orientation!r} must fall back to the box (None), got a footprint")
+    print("[footprint-derivation] xyz/yxz re-derived from BOX_ORIENTATIONS + physics_point "
+          "independently, agree with _FOOTPRINT_XZ; 4 fallback orientations correctly return None")
+
+
+def notch_probe_local_point(hull_xz, hx: float, hz: float, margin: float = 0.02):
+    """A bounding-box corner (inset by `margin`), in the same LOCAL (x, z) frame as `hull_xz`
+    (a CCW convex polygon), that lies OUTSIDE it -- i.e. genuinely inside whatever corner the
+    hull cuts away -- or `None` if no corner clears the hull by more than `margin`.
+
+    Picks whichever of the 4 corners is outside by the LARGEST margin (most negative
+    cross-product against the nearest hull edge), not just the first one found: a real scan's
+    hull is only approximately axis-aligned near a corner it does NOT cut away, so more than
+    one corner can appear technically (sub-millimetre) outside from noise alone. The real,
+    intentionally-dropped quadrant is outside by centimetres, not noise -- taking the biggest
+    violation picks that one."""
+    def min_cross(pt) -> float:
+        n = len(hull_xz)
+        return min(
+            (hull_xz[(i + 1) % n][0] - hull_xz[i][0]) * (pt[1] - hull_xz[i][1])
+            - (hull_xz[(i + 1) % n][1] - hull_xz[i][1]) * (pt[0] - hull_xz[i][0])
+            for i in range(n)
+        )
+    corners = [(sx * (hx - margin), sz * (hz - margin)) for sx in (-1.0, 1.0) for sz in (-1.0, 1.0)]
+    worst = min(corners, key=min_cross)
+    return worst if min_cross(worst) < -margin / 2.0 else None
+
+
+def footprint_gate_flip_check(driver: Path, base: str) -> None:
+    """Independent end-to-end proof that the physics GATE (`validate_packer3d`, exactly what
+    `server/planner.py` calls) grades the real scanned footprint, for both z-up orientations
+    "xyz"/"yxz" -- driven through the real `POST /suitcases -> POST /items -> POST .../plan`
+    server path, so the hull graded here is the real Swift-computed one
+    (`ScannedItem.footprint`), and the orientation is whatever packer3d's own solver actually
+    chose (forced by the suitcase's own dimensions, not asserted from this side).
+
+    packer3d has no footprint awareness at all (the finding this commit's fix responds to), so
+    it never packs two items with overlapping bounding boxes -- no real solved plan ever puts a
+    second item in another item's notch "for free". This drives the real pipeline for
+    everything BUT that final placement: a real L-shaped scan, `keepUpright` forced True
+    (restricts packer3d to exactly the two z-up orientations, `packer3d.models.Item.
+    orientations`), and a suitcase sized so only one of "xyz"/"yxz" clears it -- run once per
+    orientation. From each real solved plan it takes the REAL placement packer3d chose for the
+    L item, and adds one synthetic placement for a small "pebble", positioned -- via
+    `_oriented_footprint`, the code under test -- at a bounding-box corner the REAL scanned hull
+    does not cover. `validate_packer3d` then runs on that combined result, with and without the
+    item's footprint metadata: OBJECT_COLLISION without it (full-bbox fallback), clean with it
+    (the pebble is outside the true hull). Replaces the old `footprint_wiring_check`, whose
+    AR-WARN "footprint inert" no longer applies now that the gate reads `footprint`.
+    """
+    w, d, h = 0.30, 0.50, 0.10  # asymmetric on purpose: a square item's two z-up orientations
+    # share one oriented bbox and `Item.orientations()` de-dupes them down to just one, so a
+    # square item could never exercise both "xyz" and "yxz"
+    exercised = []
+    for variant_idx, wanted in enumerate(("A", "B")):
+        pts = l_shape_points(np.random.default_rng(RNG_SEED + 200 + variant_idx), w, d, h, 0.0, 0.0, 0.0, TABLE_Y)
+        fit = run_driver(driver, {"cmd": "scan", "scan": [
+            {"points": pts.tolist(), "planeY": TABLE_Y, "cell": 0.02, "padding": 0.0}]})[0]
+        real_footprint = fit.get("footprint")
+        if not real_footprint:
+            fail("footprint gate check: the real scan produced no footprint for the L-shaped item")
+
+        # fitBox's own "width"/"depth" labelling doesn't necessarily match which axis this
+        # script called `w`/`d` when building the point cloud (see `dims_m`'s own note on
+        # labelling), so size the two forcing suitcases off the REAL reported width/depth, not
+        # the nominal ones. The item's two z-up orientations occupy (width, depth) and
+        # (depth, width) on the container's (x, y); with lo < hi those two pairs are (lo, hi)
+        # and (hi, lo) whichever real value the labels landed on. Variant "A" allows only the
+        # (hi, lo) pair (x >= hi, y capped below hi); variant "B" allows only (lo, hi) (x capped
+        # below hi, y >= hi) -- together the two variants force both orientations, regardless of
+        # which one packer3d ends up calling "xyz" and which "yxz".
+        lo, hi = sorted((float(fit["width"]), float(fit["depth"])))
+        mid = (lo + hi) / 2.0
+        pad = 0.05
+        if wanted == "A":
+            packer_x, packer_y = hi + pad, mid
+        else:
+            packer_x, packer_y = mid, hi + pad
+        suitcase_dims = (packer_x, float(fit["height"]) + pad, packer_y)  # app [width, height, depth]
+
+        item_id = f"lshape-gate-{wanted}-{uuid.uuid4().hex[:8]}"
+        status, suitcase_doc = post_json(f"{base}/suitcases",
+                                          {"name": f"gate check ({wanted})", "dimensions": list(suitcase_dims)})
+        if status != 200:
+            fail(f"POST /suitcases (gate check {wanted}) -> {status}: {suitcase_doc}")
+        doc = item_doc({"name": "lshape", "cell": 0.02}, fit, with_footprint=True, item_id=item_id)
+        doc["suitcaseId"] = suitcase_doc["id"]
+        status, resp = post_item(f"{base}/items", doc)
+        if status != 200:
+            fail(f"POST /items (gate check {wanted}) -> {status}: {resp}")
+        status, resp = call(f"{base}/items/{item_id}", data=json.dumps({"keepUpright": True}).encode(),
+                             content_type="application/json", method="PATCH")
+        if status != 200:
+            fail(f"PATCH /items/{item_id} keepUpright -> {status}: {resp}")
+        status, plan_doc = post_json(f"{base}/suitcases/{suitcase_doc['id']}/plan", {})
+        if status != 200:
+            fail(f"POST /plan (gate check {wanted}) -> {status}: {plan_doc}")
+
+        l_entry = next((p for p in plan_doc["solver"]["placements"] if p["item_id"] == item_id), None)
+        if l_entry is None:
+            fail(f"footprint gate check ({wanted}): the solver did not pack the L-shaped item in "
+                 f"a {suitcase_dims} m suitcase sized for exactly that orientation")
+        orientation = l_entry["orientation"]
+        exercised.append(orientation)
+
+        entry_with_fp = {"footprint": [(float(x), float(z)) for x, z in real_footprint]}
+        mapped = _oriented_footprint(entry_with_fp, orientation)
+        if mapped is None:
+            warn("footprint gate orientation", f"solver chose {orientation!r} for the {wanted!r} "
+                 f"suitcase, which isn't one of the two z-up orientations -- keepUpright should "
+                 f"have prevented this; skipping the flip check for this variant")
+            continue
+        hull = convex_hull_2d(mapped).tolist()
+        phys_dims = swap_yz(l_entry["dims"])
+        hx, hz = phys_dims[0] / 2.0, phys_dims[2] / 2.0
+        probe = notch_probe_local_point(hull, hx, hz)
+        if probe is None:
+            fail(f"footprint gate check ({wanted}, orientation {orientation}): every bounding-box "
+                 f"corner is inside the real scanned hull -- the scan produced no notch to probe")
+        lx, lz = probe
+
+        pebble_dims_packer = (0.02, 0.02, 0.02)
+        l_center_phys = physics_point(*l_entry["center"])
+        # resting on the floor (physics Y = 0), same as the L item itself -- not floating at the
+        # L's own centre height, so this doesn't also trip an unrelated "unsupported" violation
+        pebble_center_phys = (l_center_phys[0] + lx, pebble_dims_packer[2] / 2.0, l_center_phys[2] + lz)
+        pebble_center_packer = packer3d_point(*pebble_center_phys)
+        pebble_placement = {
+            "item_id": "pebble", "shape": "box",
+            "position": [pebble_center_packer[k] - pebble_dims_packer[k] / 2.0 for k in range(3)],
+            "dims": list(pebble_dims_packer), "center": list(pebble_center_packer),
+            "orientation": "xyz", "axis": None, "mass": 0.01, "fragile": False,
+        }
+        synthetic_result = {"container": plan_doc["solver"]["container"],
+                             "placements": [l_entry, pebble_placement], "unpacked": [], "metrics": {}}
+        items_with = {"items": [{"id": item_id, "footprint": real_footprint, "keep_upright": True,
+                                  "priority": 1.0}, {"id": "pebble", "keep_upright": False, "priority": 1.0}]}
+        items_without = {"items": [{"id": item_id, "keep_upright": True, "priority": 1.0},
+                                    {"id": "pebble", "keep_upright": False, "priority": 1.0}]}
+        with_fp = validate_packer3d(synthetic_result, items=items_with)
+        without_fp = validate_packer3d(synthetic_result, items=items_without)
+        with_types = {v["type"] for v in with_fp["violations"]}
+        without_types = {v["type"] for v in without_fp["violations"]}
+        if "OBJECT_COLLISION" not in without_types:
+            fail(f"footprint gate check ({wanted}, orientation {orientation}): expected the "
+                 f"box-only fallback to collide (the pebble sits in the L's full bbox), got "
+                 f"violations={without_fp['violations']}")
+        if "OBJECT_COLLISION" in with_types:
+            fail(f"footprint gate check ({wanted}, orientation {orientation}): the real scanned "
+                 f"footprint should clear the pebble (it's in the cut-away notch), got "
+                 f"violations={with_fp['violations']}")
+        print(f"[footprint-gate] orientation {orientation!r} (suitcase forced for {wanted!r}): "
+              f"collides without footprint, clean with it -- verdict flips through the real /plan path")
+
+    if set(exercised) != {"xyz", "yxz"}:
+        warn("footprint gate orientations", f"could only exercise {sorted(set(exercised))}, not "
+             f"both xyz and yxz -- asserted the flip for whichever orientation(s) were obtained")
     else:
-        # The goal, not an anomaly: once the physics gate grades the footprint and the solver
-        # packs the prism, the two runs SHOULD diverge. When that lands this becomes an
-        # assertion (footprint must change the verdict) rather than an observation.
-        print("[wiring] footprint now changes a real outcome -- the server half is wired up. "
-              f"with={with_metrics} without={without_metrics}")
+        print("[footprint-gate] both xyz and yxz exercised end-to-end through the real /plan path")
 
 
 def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item_fits: list[dict],
@@ -626,8 +796,8 @@ def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item
     """POST /suitcases, POST every item's scan under it, POST /plan; returns (placements, solver
     metrics). Used to solve a plan against a specific (e.g. ground-truth) suitcase, distinct from
     -- and not printed alongside -- the main pipeline's own suitcase/items/plan. `item_ids`, if
-    given, pins each item's id (see `footprint_wiring_check`); otherwise each gets a fresh
-    random one."""
+    given, pins each item's id (comparing two solves of "the same" item needs a stable id,
+    since the solver's own ordering can depend on it); otherwise each gets a fresh random one."""
     status, suitcase_doc = post_json(f"{base}/suitcases", {"name": name, "dimensions": dims})
     if status != 200:
         fail(f"POST /suitcases ({name}) -> {status}: {suitcase_doc}")
@@ -988,6 +1158,7 @@ def main() -> int:
     server: subprocess.Popen | None = None
     try:
         pin_nesting_overlap_check()
+        footprint_orientation_derivation_check()
         driver = build_driver(tmp_root)
 
         print(f"degradations active this run: "
@@ -1073,7 +1244,7 @@ def main() -> int:
         if not placements:
             fail("solver packed zero items; nothing to check the transform/containment against")
 
-        footprint_wiring_check(base, interior, items, item_fits)
+        footprint_gate_flip_check(driver, base)
 
         # 5) push placements through the real bag->world transform and check them
         transform_req = {"cmd": "transform", "transform": {

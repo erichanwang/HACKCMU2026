@@ -3,12 +3,19 @@ import unittest
 
 from physics.constraints import check_constraints
 from physics.schema import Constraints, Container, Object, Scene
+from physics.scene_geometry import precompute
 
 
 def quat_x_rot(deg: float) -> tuple[float, float, float, float]:
     """Quaternion for a rotation of `deg` about world X (tips local Y over)."""
     h = math.radians(deg) / 2.0
     return (math.sin(h), 0.0, 0.0, math.cos(h))
+
+
+def quat_y_rot(deg: float) -> tuple[float, float, float, float]:
+    """Quaternion for a yaw rotation of `deg` about world Y."""
+    h = math.radians(deg) / 2.0
+    return (0.0, math.sin(h), 0.0, math.cos(h))
 
 
 def make_scene(objects: list[Object]) -> Scene:
@@ -167,6 +174,186 @@ class TestHeavyOnTop(unittest.TestCase):
         self.assertEqual(len(heavy_warnings), 1)
         self.assertEqual(heavy_warnings[0].object_id, "heavybox")
         self.assertIn("base", heavy_warnings[0].details["resting_on"])
+
+
+class TestTransitiveLoad(unittest.TestCase):
+    def test_three_stack_propagates_to_fragile_base(self):
+        laptop = Object(
+            id="laptop",
+            dimensions=(0.3, 0.02, 0.2),
+            position=(0.0, 0.01, 0.0),
+            mass_kg=1.5,
+            constraints=Constraints(cannot_support_weight=True),
+        )
+        toiletry = Object(
+            id="toiletry",
+            dimensions=(0.2, 0.1, 0.15),
+            position=(0.0, 0.02 + 0.05, 0.0),
+            mass_kg=0.5,
+        )
+        shoe = Object(
+            id="shoe",
+            dimensions=(0.1, 0.1, 0.25),
+            position=(0.0, 0.12 + 0.05, 0.0),
+            mass_kg=0.3,
+        )
+        violations, _ = check_constraints(make_scene([laptop, toiletry, shoe]))
+        self.assertEqual(len(violations), 1)
+        v = violations[0]
+        self.assertEqual(v.type, "FRAGILE_OBJECT_OVERLOADED")
+        self.assertEqual(v.object_id, "laptop")
+        self.assertAlmostEqual(v.details["supported_weight_kg"], 0.8)
+        self.assertAlmostEqual(v.details["direct_weight_kg"], 0.5)
+
+    def test_straddling_bar_splits_load_50_50(self):
+        supp_a = Object(
+            id="supp_a",
+            dimensions=(0.2, 0.1, 0.2),
+            position=(-0.1, 0.05, 0.0),
+            mass_kg=0.01,
+            constraints=Constraints(cannot_support_weight=True),
+        )
+        supp_b = Object(
+            id="supp_b",
+            dimensions=(0.2, 0.1, 0.2),
+            position=(0.1, 0.05, 0.0),
+            mass_kg=0.01,
+            constraints=Constraints(cannot_support_weight=True),
+        )
+        bar = Object(
+            id="bar",
+            dimensions=(0.2, 0.05, 0.2),
+            position=(0.0, 0.1 + 0.025, 0.0),
+            mass_kg=1.0,
+        )
+        violations, _ = check_constraints(make_scene([supp_a, supp_b, bar]))
+        by_id = {v.object_id: v for v in violations}
+        self.assertEqual(set(by_id), {"supp_a", "supp_b"})
+        self.assertAlmostEqual(by_id["supp_a"].details["supported_weight_kg"], 0.5)
+        self.assertAlmostEqual(by_id["supp_b"].details["supported_weight_kg"], 0.5)
+
+    def test_straddling_bar_splits_load_25_75(self):
+        supp_a = Object(
+            id="supp_a",
+            dimensions=(0.2, 0.1, 0.2),
+            position=(-0.1, 0.05, 0.0),
+            mass_kg=0.01,
+            constraints=Constraints(cannot_support_weight=True),
+        )
+        supp_b = Object(
+            id="supp_b",
+            dimensions=(0.2, 0.1, 0.2),
+            position=(0.1, 0.05, 0.0),
+            mass_kg=0.01,
+            constraints=Constraints(cannot_support_weight=True),
+        )
+        bar = Object(
+            id="bar",
+            dimensions=(0.2, 0.05, 0.2),
+            position=(0.05, 0.1 + 0.025, 0.0),
+            mass_kg=1.0,
+        )
+        violations, _ = check_constraints(make_scene([supp_a, supp_b, bar]))
+        by_id = {v.object_id: v for v in violations}
+        self.assertEqual(set(by_id), {"supp_a", "supp_b"})
+        self.assertAlmostEqual(by_id["supp_a"].details["supported_weight_kg"], 0.25)
+        self.assertAlmostEqual(by_id["supp_b"].details["supported_weight_kg"], 0.75)
+
+
+class TestLoadPath(unittest.TestCase):
+    def test_heavy_at_top_of_stack_reports_load_path_to_floor(self):
+        laptop = Object(
+            id="laptop",
+            dimensions=(0.3, 0.02, 0.2),
+            position=(0.0, 0.01, 0.0),
+            mass_kg=1.5,
+        )
+        toiletry = Object(
+            id="toiletry",
+            dimensions=(0.2, 0.1, 0.15),
+            position=(0.0, 0.02 + 0.05, 0.0),
+            mass_kg=0.5,
+        )
+        shoe = Object(
+            id="shoe",
+            dimensions=(0.1, 0.1, 0.25),
+            position=(0.0, 0.12 + 0.05, 0.0),
+            mass_kg=0.3,
+            constraints=Constraints(heavy=True),
+        )
+        _, warnings = check_constraints(make_scene([laptop, toiletry, shoe]))
+        heavy_warnings = [w for w in warnings if w.type == "HEAVY_ON_TOP"]
+        self.assertEqual(len(heavy_warnings), 1)
+        self.assertEqual(heavy_warnings[0].details["load_path"], ["shoe", "toiletry", "laptop"])
+
+
+class TestPrecomputedGeom(unittest.TestCase):
+    def test_passing_geom_matches_computing_internally(self):
+        laptop = Object(
+            id="laptop",
+            dimensions=(0.3, 0.02, 0.2),
+            position=(0.0, 0.01, 0.0),
+            mass_kg=1.5,
+            constraints=Constraints(cannot_support_weight=True),
+        )
+        shoe = Object(
+            id="shoe",
+            dimensions=(0.1, 0.1, 0.25),
+            position=(0.0, 0.02 + 0.05, 0.0),
+            mass_kg=0.4,
+        )
+        scene = make_scene([laptop, shoe])
+        geom = precompute(scene)
+        v1, w1 = check_constraints(scene)
+        v2, w2 = check_constraints(scene, geom=geom)
+        self.assertEqual(v1, v2)
+        self.assertEqual(w1, w2)
+
+
+class TestDeterminism(unittest.TestCase):
+    def test_two_calls_identical(self):
+        laptop = Object(
+            id="laptop",
+            dimensions=(0.3, 0.02, 0.2),
+            position=(0.0, 0.01, 0.0),
+            mass_kg=1.5,
+            constraints=Constraints(cannot_support_weight=True, fragile=True),
+        )
+        shoe = Object(
+            id="shoe",
+            dimensions=(0.1, 0.1, 0.25),
+            position=(0.0, 0.02 + 0.05, 0.0),
+            mass_kg=0.4,
+            constraints=Constraints(heavy=True),
+        )
+        scene = make_scene([laptop, shoe])
+        v1, w1 = check_constraints(scene)
+        v2, w2 = check_constraints(scene)
+        self.assertEqual(v1, v2)
+        self.assertEqual(w1, w2)
+
+
+class TestRotatedResting(unittest.TestCase):
+    def test_yawed_box_resting_on_axis_aligned_box_registers_and_propagates(self):
+        base = Object(
+            id="base",
+            dimensions=(0.4, 0.1, 0.4),
+            position=(0.0, 0.05, 0.0),
+            mass_kg=2.0,
+            constraints=Constraints(cannot_support_weight=True),
+        )
+        yawed = Object(
+            id="yawed",
+            dimensions=(0.2, 0.1, 0.2),
+            position=(0.0, 0.1 + 0.05, 0.0),
+            rotation=quat_y_rot(45.0),
+            mass_kg=0.4,
+        )
+        violations, _ = check_constraints(make_scene([base, yawed]))
+        self.assertEqual(len(violations), 1)
+        v = violations[0]
+        self.assertEqual(v.object_id, "base")
+        self.assertAlmostEqual(v.details["supported_weight_kg"], 0.4)
 
 
 if __name__ == "__main__":

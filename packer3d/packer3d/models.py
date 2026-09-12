@@ -41,6 +41,131 @@ def _check_positive(value, what: str, allow_zero: bool = False):
         raise ValueError(f"{what} must be {'>= 0' if allow_zero else '> 0'}, got {value!r}")
 
 
+# --------------------------------------------------------------------------- footprints
+# A scanned item's real cross-section: a convex polygon in the item's own horizontal plane
+# (SCAN_OUTPUT.md's ``footprint``, at most 16 ``[x, z]`` vertices in metres relative to the
+# box centre).  The phone's ``z`` runs along the scan's *depth*, which is packer3d's local
+# ``y`` (``dims[1]``), so the pairs are stored here verbatim and read as (local x, local y) --
+# a relabel, never a conversion.
+#
+# The three helpers below mirror ``physics/geometry.py``'s ``convex_hull_2d`` /
+# ``polygon_area_2d`` / ``convex_clip_2d`` (same algorithms, same tolerances) on plain tuples
+# instead of numpy arrays: these polygons have 3-16 vertices, where array overhead costs more
+# than the arithmetic.  Deliberately not imported across that boundary -- packer3d imports
+# nothing outside itself (see physics_bridge.py's module docstring).
+FOOTPRINT_AREA_EPS = EPS * EPS   # 1e-12 m^2: an intersection smaller than this is a touch
+
+
+def convex_hull_2d(points) -> tuple:
+    """Convex hull of 2D points (Andrew's monotone chain), CCW, no duplicate or collinear
+    vertices.  May return 1 or 2 points for degenerate input."""
+    pts = sorted({(float(x), float(y)) for x, y in points})
+    if len(pts) <= 2:
+        return tuple(pts)
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return tuple(lower[:-1] + upper[:-1])
+
+
+def polygon_area_2d(poly) -> float:
+    """Shoelace area of a polygon (positive)."""
+    n = len(poly)
+    if n < 3:
+        return 0.0
+    s = 0.0
+    for i in range(n):
+        x0, y0 = poly[i]
+        x1, y1 = poly[(i + 1) % n]
+        s += x0 * y1 - x1 * y0
+    return abs(s) / 2.0
+
+
+def convex_clip_2d(subject, clipper) -> list:
+    """Sutherland-Hodgman intersection of two CCW convex polygons -> CCW polygon, possibly
+    empty."""
+    out = list(subject)
+    m = len(clipper)
+    for i in range(m):
+        if not out:
+            break
+        ax, ay = clipper[i]
+        bx, by = clipper[(i + 1) % m]
+        ex, ey = bx - ax, by - ay
+        nxt = []
+        prev = out[-1]
+        prev_in = ex * (prev[1] - ay) - ey * (prev[0] - ax) >= -1e-15
+        for cur in out:
+            cur_in = ex * (cur[1] - ay) - ey * (cur[0] - ax) >= -1e-15
+            if cur_in != prev_in:
+                dx, dy = cur[0] - prev[0], cur[1] - prev[1]
+                den = ex * dy - ey * dx
+                if abs(den) < 1e-18:
+                    nxt.append(cur)
+                else:
+                    t = (ex * (ay - prev[1]) - ey * (ax - prev[0])) / den
+                    nxt.append((prev[0] + t * dx, prev[1] + t * dy))
+            if cur_in:
+                nxt.append(cur)
+            prev, prev_in = cur, cur_in
+        out = nxt
+    return out
+
+
+def footprints_overlap(a, b) -> bool:
+    """Do two CCW convex polygons share more than a touching contact?  The ONE overlap rule
+    the decoder and ``verify()`` both call, so they can never disagree about a shape."""
+    return polygon_area_2d(convex_clip_2d(a, b)) > FOOTPRINT_AREA_EPS
+
+
+def rect_polygon(lo, hi) -> tuple:
+    """The CCW (x, y) rectangle of an axis-aligned box -- what an item with no scanned
+    footprint uses, which makes the polygon test identical to today's AABB test for it."""
+    return ((lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1]))
+
+
+def point_in_polygon_2d(p, poly) -> bool:
+    """Is ``p`` strictly inside a CCW convex polygon?  A point on an edge counts as outside,
+    so a candidate corner flush with a footprint stays alive (the feasibility test judges it)."""
+    n = len(poly)
+    for i in range(n):
+        ax, ay = poly[i]
+        bx, by = poly[(i + 1) % n]
+        if (bx - ax) * (p[1] - ay) - (by - ay) * (p[0] - ax) <= 0.0:
+            return False
+    return True
+
+
+def _check_footprint(fp, dims, what: str) -> tuple:
+    """Normalise a scanned footprint: hulled (CCW, convex, de-duplicated) and required to be a
+    real cross-section that stays inside the bounding box -- the box must remain a conservative
+    envelope of the prism, exactly as ``physics.geometry.footprint_local`` requires."""
+    pts = []
+    for p in fp:
+        if len(p) != 2 or not all(is_finite_number(v) for v in p):
+            raise ValueError(f"{what}: footprint vertex must be 2 finite numbers, got {p!r}")
+        pts.append((float(p[0]), float(p[1])))
+    hull = convex_hull_2d(pts)
+    if len(hull) < 3 or polygon_area_2d(hull) <= FOOTPRINT_AREA_EPS:
+        raise ValueError(f"{what}: footprint is degenerate (needs >= 3 non-collinear vertices)")
+    hx, hy = dims[0] / 2.0, dims[1] / 2.0
+    if any(abs(x) > hx + EPS or abs(y) > hy + EPS for x, y in hull):
+        raise ValueError(f"{what}: footprint exceeds dims {dims!r} in local x/y -- it must be "
+                         f"relative to the box centre, within +-({hx}, {hy})")
+    return hull
+
+
 def _check_dims(dims, what: str) -> tuple:
     if dims is None or len(dims) != 3:
         raise ValueError(f"{what} must have exactly 3 entries, got {dims!r}")
@@ -75,6 +200,9 @@ class Item:
     compressibility_k: float = 1.0       # loose volume / squeezed volume; dims are already the squeezed size (see compressed())
     height_grid: Optional[tuple] = None  # heightmap (metres, tuple of tuples), local (x=dims[0], y=dims[1]) frame
     grid_cell: Optional[float] = None    # side length of one height_grid cell, metres
+    footprint: Optional[tuple] = None    # convex (x, y) cross-section, metres, relative to the
+                                         # box CENTRE, local (x=dims[0], y=dims[1]) frame; see
+                                         # the "footprints" section above.  Boxes only.
 
     def __post_init__(self):
         if not isinstance(self.id, str) or not self.id:
@@ -91,12 +219,20 @@ class Item:
             _check_positive(self.height, f"item {self.id} height")
         object.__setattr__(self, "mass", float(self.mass))
         object.__setattr__(self, "priority", float(self.priority))
+        if self.footprint is not None:
+            if self.shape != "box":
+                raise ValueError(f"item {self.id}: only a box carries a footprint; a cylinder's "
+                                 f"cross-section is its circle (shape={self.shape!r})")
+            object.__setattr__(self, "footprint",
+                               _check_footprint(self.footprint, self.dims, f"item {self.id}"))
 
     # ---- constructors -------------------------------------------------
     @staticmethod
     def box(id: str, length: float, width: float, height: float, mass: float = 0.0, *,
-            fragile: bool = False, keep_upright: bool = False, priority: float = 1.0) -> "Item":
-        return Item(id, "box", (length, width, height), mass, fragile, keep_upright, True, priority)
+            fragile: bool = False, keep_upright: bool = False, priority: float = 1.0,
+            footprint=None) -> "Item":
+        return Item(id, "box", (length, width, height), mass, fragile, keep_upright, True, priority,
+                    footprint=footprint)
 
     @staticmethod
     def cylinder(id: str, radius: float, height: float, mass: float = 0.0, *,
@@ -224,9 +360,12 @@ class Item:
         ``classify=False``):
           * footprint mostly filled and volume ~ the full box -> **box**
           * roughly square footprint with a circular fill fraction (~ pi/4) -> **cylinder**
-          * otherwise -> **irregular** (packed as its bounding box, defaulting to both
-            ``fragile=True`` -- its top is not flat/complete -- and ``keep_upright=True`` --
-            never deliberately tipped onto its side by the solver; override either explicitly).
+          * otherwise -> **irregular** (packed as the sub-boxes its grid carves, defaulting to
+            ``keep_upright=True`` -- never deliberately tipped onto its side by the solver;
+            override explicitly).  NOT ``fragile`` by default, unlike ``from_scan``/``from_mesh``,
+            which have no grid: here the grid itself says where every surface is, and a blanket
+            "nothing may rest on it" would also forbid resting anything in the item's own cavity
+            (see the comment at the construction below).
         Real (heightmap-integrated) volume, not the bounding-box volume, is stored as
         ``true_volume`` and used for utilisation metrics.
 
@@ -278,14 +417,30 @@ class Item:
                     kind = "cylinder"
                 else:
                     kind = "irregular"
+        # `footprint` (SCAN_OUTPUT.md): [x, z] pairs about the box centre, z along the scan's
+        # depth == packer3d's local y.  Same units as the dims, so the same `scale`.
+        fp = data.get("footprint")
+        if fp is not None:
+            fp = [(float(x) * scale, float(z) * scale) for x, z in fp]
         if kind == "cylinder":
             it = Item.cylinder(iid, min(width, depth) / 2.0, height, mass, fragile=bool(fragile),
                                keep_upright=bool(keep_upright), allow_lay_down=allow_lay_down, priority=priority)
         else:
-            it = Item.box(iid, width, depth, height, mass,
-                          fragile=(kind == "irregular" if fragile is None else bool(fragile)),
+            # NOT fragile by default, even for an "irregular" scan.  ``fragile`` here would be a
+            # statement about the SHAPE ("the top is not flat, do not stack blind"), and the
+            # height grid already says exactly where every surface is -- while the decoder's
+            # fragile-below rule refuses to rest anything on ANY of the item's solids, the floor
+            # of its own cavity included.  Since a genuine cavity is what makes a scan irregular
+            # in the first place (volume/bbox < 0.9), those two defaults together meant no real
+            # solve could ever nest anything, in the one place resting is intended (FIXES.md
+            # section 4, 2026-09-12).  An object that really does break says so through
+            # ``rigidity: "fragile"`` -> ``physics.prepack`` -> an explicit ``fragile=True``
+            # here, and that still protects every one of its surfaces.
+            # ``keep_upright`` keeps its irregular default: an unrecognised scan is still never
+            # deliberately tipped onto its side.
+            it = Item.box(iid, width, depth, height, mass, fragile=bool(fragile),
                           keep_upright=(kind == "irregular" if keep_upright is None else bool(keep_upright)),
-                          priority=priority)
+                          priority=priority, footprint=fp)
         object.__setattr__(it, "scan_shape", kind)
         if vol is not None:
             object.__setattr__(it, "true_volume", float(vol))
@@ -311,6 +466,28 @@ class Item:
 
         Falls back to the plain bounding box when there's no height grid (a primitive box/
         cylinder, or a scan built with ``classify=False``).
+
+        THE CEILING THIS PUTS ON NESTING (measured 2026-09-12; don't rediscover it).  The pool is
+        4x4 whatever ``cellSize`` is, so a cavity is always a whole pooled block: a recess that
+        isn't block-aligned is pooled away entirely and the item ends up with NO cavity, even
+        though the full grid still counts it in ``true_volume``/the classifier.  Of the 16 cells,
+        two recessed blocks adjacent along an axis read as one recess spanning both, and index 0
+        or 3 touches the item's own wall (an open notch, not a rimmed cut-out), so only indices 1
+        and 2 are interior per axis -- and they are adjacent.  The only arrangement that yields
+        two fully rimmed cavity cells is the diagonal pair (1,1)/(2,2), meeting along one corner
+        line; **three rimmed cells cannot be expressed through a scan document at all**, at any
+        resolution.  A camera case with three foam cut-outs is out of reach.
+
+        Why it stays 4x4 anyway: ``tools/packbench/packbench.py`` at a fixed iteration cap,
+        pool 4x4 -> 6x6 -> 8x8, is 32 -> 72 -> 96 sub-boxes for two grid items and costs
+        5.9 -> 9.7 s (carryon_weekend) and 9.1 -> 15.0 -> 24.6 s (checked_heavy_light): +65% per
+        step and +170% at 8x8, for ZERO extra items packed on the corpus (8x8 bought 1.6 points
+        of utilisation on one fixture).  And ``physics.packer3d_adapter._cavity_local_boxes``
+        duplicates this pooling on the other side of the JSON boundary with its own
+        ``max_blocks=4``: raising it here alone would make the gate grade a shape the solver
+        never packed, which is the exact class of mismatch that has bitten nesting twice today.
+        A shoe or a dopp kit has one cavity, so the cap costs nothing real yet -- raise both
+        sides together, or nothing.
         """
         if self.height_grid is None:
             return [((0.0, 0.0, 0.0), self.dims)]
@@ -359,23 +536,41 @@ class Item:
         return self.dims[0] * self.dims[1] * self.dims[2]
 
     @property
+    def prism_volume(self) -> Optional[float]:
+        """Footprint area x height, or None without a scanned footprint."""
+        if self.footprint is None:
+            return None
+        return polygon_area_2d(self.footprint) * self.dims[2]
+
+    @property
     def volume(self) -> float:
-        """True volume (mesh volume if scanned, pi r^2 h for cylinders, else the box)."""
+        """True volume (mesh volume if scanned, pi r^2 h for cylinders, the footprint prism
+        for a scanned hull, else the box)."""
         if self.true_volume is not None:
             return min(self.true_volume, self.bbox_volume)
         if self.shape == "cylinder":
             return math.pi * self.radius ** 2 * self.height
+        if self.footprint is not None:
+            return min(self.prism_volume, self.bbox_volume)
         return self.bbox_volume
 
     @property
     def occupied_volume(self) -> float:
-        """Volume of ``solid_boxes()`` -- equals ``bbox_volume`` with no height grid, less
-        when the grid carves out a cavity. The decoder's capacity pre-check must use this,
-        not ``bbox_volume``: an item with a real cavity can leave a container with usable
-        space even though its bounding box alone would appear to fill it."""
-        if self.height_grid is None:
+        """How much space this item really takes: ``bbox_volume`` for a plain box, less when a
+        height grid carves a cavity or a footprint cuts the cross-section (the true solid is
+        inside both, so the smallest estimate is still conservative). The decoder's capacity
+        pre-check must use this, not ``bbox_volume``: an item with a real cavity or a narrow
+        footprint can leave a container with usable space even though its bounding box alone
+        would appear to fill it."""
+        if self.height_grid is None and self.footprint is None:
             return self.bbox_volume
-        return sum((hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]) for lo, hi in self.solid_boxes())
+        vols = [self.bbox_volume]
+        if self.footprint is not None:
+            vols.append(self.prism_volume)
+        if self.height_grid is not None:
+            vols.append(sum((hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2])
+                            for lo, hi in self.solid_boxes()))
+        return min(vols)
 
     def orientations(self) -> list:
         """Legal orientations, de-duplicated by oriented bounding box."""
@@ -443,6 +638,41 @@ def oriented_solid_boxes(item: Item, position, dims, orientation_name: str) -> l
         return out
     hi = tuple(lo[k] + dims[k] for k in range(3))
     return [(lo, hi)]
+
+
+def local_footprint_offsets(item: Item, dims, orientation_name: str) -> Optional[tuple]:
+    """``item.footprint`` as (x, y) offsets from the placed bounding box's MIN corner, CCW, or
+    None when this placement has no usable footprint.
+
+    Same gate as the height grid in ``oriented_solid_boxes``: only the two box orientations
+    that keep the item's own z pointing along world z (``"xyz"``/``"yxz"``).  Tipped onto its
+    side, a scanned horizontal cross-section describes nothing horizontal any more, so the
+    placement falls back to its bounding box.  ``physics.packer3d_adapter._FOOTPRINT_XZ`` gates
+    the physics prism on exactly these two orientations and maps the points the same way
+    (item-local ``(fx, fz)`` -> packer world ``(fx, fz)`` under "xyz", ``(fz, fx)`` under
+    "yxz"); honouring the footprint in more orientations than the gate does gets correct
+    placements rejected, in fewer loses packing -- keep the two in step.
+    """
+    fp = item.footprint if item is not None else None
+    if fp is None or item.shape != "box" or orientation_name not in ("xyz", "yxz"):
+        return None
+    hx, hy = dims[0] / 2.0, dims[1] / 2.0
+    if orientation_name == "xyz":
+        return tuple((hx + fx, hy + fy) for fx, fy in fp)
+    # "yxz" puts the item's own y on world x and vice versa; that swap mirrors the polygon, so
+    # walk it backwards to keep the winding CCW for convex_clip_2d.
+    return tuple((hx + fy, hy + fx) for fx, fy in reversed(fp))
+
+
+def oriented_footprint(item: Item, position, dims, orientation_name: str) -> Optional[tuple]:
+    """World-frame (x, y) convex polygon of a placement's scanned cross-section, or None.
+    The decoder offsets ``local_footprint_offsets`` by a candidate corner with the same
+    expression, so its candidate polygons are bit-identical to what ``verify()`` rebuilds."""
+    off = local_footprint_offsets(item, dims, orientation_name)
+    if off is None:
+        return None
+    x0, y0 = float(position[0]), float(position[1])
+    return tuple((x0 + ox, y0 + oy) for ox, oy in off)
 
 
 @dataclass(frozen=True)

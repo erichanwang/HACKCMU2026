@@ -8,10 +8,17 @@ bare "invalid" tells them nothing.
 Nesting: a placement is decomposed with ``oriented_solid_boxes`` into the same
 heightmap-derived sub-boxes the decoder placed against, so two bounding boxes that
 interpenetrate are legal exactly when one item really sits in the other's scanned cavity
-and are a collision otherwise.  That symmetry with the decoder is load-bearing -- verify
-re-derives every collision independently, but from the *same* notion of where an item is
-solid, or every correct nested placement would be reported as an overlap.  An item with no
-height grid decomposes to its plain bounding box: no scan, no cavity, no excuse.
+and are a collision otherwise.  That symmetry with the decoder is
+load-bearing -- verify re-derives every collision independently, but from the *same* notion
+of where an item is solid, or every correct nested placement would be reported as an
+overlap.  An item with no height grid decomposes to its plain bounding box: no scan, no
+cavity, no excuse.
+
+Footprints: a scanned item also carries a convex cross-section (``Item.footprint``), and
+two solids whose bounding boxes overlap are only a collision when their footprints really
+do (``footprints_overlap``, the decoder's own test).  An item without one uses its
+rectangle, which is exactly the bounding-box verdict, so a pair with no footprint at all is
+judged precisely as before.
 
 Support, by contrast, is a whole-body question and is judged once per placement over its whole
 bounding-box footprint -- again exactly as the decoder judges it -- because an item is a rigid
@@ -22,7 +29,8 @@ from __future__ import annotations
 import math
 
 from .geometry import EPS, is_finite_number, rnd3
-from .models import BOX_ORIENTATIONS, PackResult, oriented_solid_boxes
+from .models import (BOX_ORIENTATIONS, PackResult, footprints_overlap, oriented_footprint,
+                     oriented_solid_boxes, rect_polygon)
 
 # Orientations that leave the item's own z pointing up; anything else is a tipped item.
 UPRIGHT_ORIENTATIONS = frozenset(
@@ -65,7 +73,7 @@ def verify(result: PackResult, items) -> list:
         if iid not in seen:
             errors.append(f"item {iid!r} is neither placed nor reported unpacked")
 
-    solids = []  # (lo, hi, fragile, label, owner) for placement sub-boxes + obstacles
+    solids = []  # (lo, hi, fragile, label, owner, footprint) for placement sub-boxes + obstacles
     bboxes = []  # (lo, hi, label, owner) for whole placements -- the body support is judged on
     for owner, p in enumerate(result.placements):
         it = items_by_id.get(p.item_id)
@@ -122,13 +130,14 @@ def verify(result: PackResult, items) -> list:
         # against, instead of one solid bbox -- otherwise a real nested placement (a cup
         # sitting in a bowl's true-shape cavity) would misreport as an overlap here.
         sub_boxes = oriented_solid_boxes(it, lo, d, p.orientation) if it is not None else [(lo, hi)]
+        poly = oriented_footprint(it, lo, d, p.orientation) if it is not None else None
         for wlo, whi in sub_boxes:
-            solids.append((wlo, whi, bool(p.fragile), p.item_id, owner))
+            solids.append((wlo, whi, bool(p.fragile), p.item_id, owner, poly))
         bboxes.append((lo, hi, p.item_id, owner))
     for ob in c.obstacles:
         lo = tuple(float(v) for v in ob.position)
         hi = tuple(lo[k] + ob.dims[k] for k in range(3))
-        solids.append((lo, hi, False, f"obstacle {ob.id}", OBSTACLE))
+        solids.append((lo, hi, False, f"obstacle {ob.id}", OBSTACLE, None))
 
     # ---- pairwise overlap (items vs items, items vs obstacles).  Reported once per pair
     # of items, at the deepest sub-box clash, so one bad placement is one message.
@@ -141,6 +150,12 @@ def verify(result: PackResult, items) -> list:
             ov = [_overlap_len(a[0][k], a[1][k], b[0][k], b[1][k]) for k in range(3)]
             depth = min(ov)
             if depth <= EPS:
+                continue
+            # scanned cross-sections: overlapping boxes are only a collision when the real
+            # footprints meet.  Same rule, same helper, as the decoder used to accept this.
+            if (a[5] is not None or b[5] is not None) and not footprints_overlap(
+                    a[5] if a[5] is not None else rect_polygon(a[0], a[1]),
+                    b[5] if b[5] is not None else rect_polygon(b[0], b[1])):
                 continue
             key = (a[3], b[3])
             if key not in clashes or depth > clashes[key][0]:
@@ -171,7 +186,7 @@ def verify(result: PackResult, items) -> list:
                           f"bounding boxes do not overlap -- stale or invented nesting")
         if any(clo[k] < hlo[k] - EPS or chi[k] > hhi[k] + EPS for k in range(3)):
             errors.append(f"{p.item_id}: nested_in cavity {cav} is not inside {nest['item_id']}")
-        for blo, bhi, _bfrag, blabel, _bowner in solids:
+        for blo, bhi, _bfrag, blabel, _bowner, _bpoly in solids:
             if blabel == nest["item_id"] and all(
                     _overlap_len(clo[k], chi[k], blo[k], bhi[k]) > EPS for k in range(3)):
                 errors.append(f"{p.item_id}: nested_in cavity {cav} is solid part of "
@@ -198,7 +213,7 @@ def verify(result: PackResult, items) -> list:
         base = (hi[0] - lo[0]) * (hi[1] - lo[1])
         support = 0.0
         below = None   # (top z, label) of the nearest solid anywhere under this one
-        for blo, bhi, bfrag, blabel, bowner in solids:
+        for blo, bhi, bfrag, blabel, bowner, _bpoly in solids:
             if bowner == owner:
                 continue
             area = _overlap_len(lo[0], hi[0], blo[0], bhi[0]) * _overlap_len(lo[1], hi[1], blo[1], bhi[1])

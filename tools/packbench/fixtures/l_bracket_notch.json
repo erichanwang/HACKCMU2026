@@ -1,0 +1,25 @@
+{
+  "container": {
+    "id": "bracket_crate",
+    "dims": [0.40, 0.40, 0.12],
+    "gravity": true,
+    "min_support": 0.7
+  },
+  "items": [
+    {
+      "id": "l_bracket",
+      "shape": "box",
+      "dims": [0.40, 0.40, 0.12],
+      "mass": 1.2,
+      "keep_upright": true,
+      "footprint": [[-0.20, -0.20], [0.20, -0.20], [0.20, 0.00], [0.00, 0.20], [-0.20, 0.20]]
+    },
+    {
+      "id": "notch_box",
+      "shape": "box",
+      "dims": [0.08, 0.08, 0.12],
+      "mass": 0.3,
+      "keep_upright": true
+    }
+  ]
+}

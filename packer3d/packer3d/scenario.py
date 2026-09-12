@@ -172,7 +172,11 @@ def _item_from_dict(d: dict) -> list:
             dims = d["dims"]
             if len(dims) != 3:  # a 4th entry was silently dropped; 2 entries raised IndexError
                 raise ValueError(f"item {iid!r}: 'dims' must have exactly 3 entries, got {dims!r}")
-            out.append(Item.box(iid, dims[0], dims[1], dims[2], **common))
+            # `footprint` (SCAN_OUTPUT.md): the scanned convex cross-section, [x, z] pairs in
+            # metres about the box centre, z along depth == packer3d's local y.  Without this the
+            # field could only reach the solver through a `heights` payload, i.e. never for a
+            # hand-written scenario or a scan the classifier called a plain box.
+            out.append(Item.box(iid, dims[0], dims[1], dims[2], footprint=d.get("footprint"), **common))
         elif shape == "cylinder":
             if "radius" not in d or "height" not in d:
                 raise ValueError(f"item {iid!r}: shape 'cylinder' needs 'radius' and 'height' keys")

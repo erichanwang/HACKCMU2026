@@ -8,6 +8,12 @@ let paddingMeters: Float = 0.005
 let minHeightMeters: Float = 0.01
 /// Max horizontal distance from the tap to consider points.
 let searchRadiusMeters: Float = 0.5
+/// How far below the tap a plane can be and still count as "the table". Keeps a room's
+/// floor from being accepted when no real table plane has been found near the object yet.
+let maxTableDropMeters: Float = 1.0
+/// No single packed item or suitcase is bigger than this in any dimension. Catches a
+/// cluster that swallowed a wall or the floor before it reaches the server.
+let maxItemDimensionMeters: Float = 1.2
 /// Grid cell for separating the tapped object from its neighbours.
 let clusterCellMeters: Float = 0.02
 /// Resolution of the captured shape (heightmap cell). Mesh triangles are sampled at half this spacing.
@@ -61,13 +67,17 @@ struct ScanView: UIViewRepresentable {
             }
             let seed = SIMD3<Float>(hit.worldTransform.columns.3.x, hit.worldTransform.columns.3.y, hit.worldTransform.columns.3.z)
 
-            // Table: the horizontal plane just below the seed. Largest such plane wins.
-            let planes = frame.anchors.compactMap { $0 as? ARPlaneAnchor }
-                .filter { $0.alignment == .horizontal && $0.transform.columns.3.y < seed.y }
-            guard let table = planes.max(by: { $0.planeExtent.width * $0.planeExtent.height < $1.planeExtent.width * $1.planeExtent.height }) else {
-                status = "No table plane yet — pan around"; return
+            // Table: the horizontal plane nearest below the seed (see pickTablePlane).
+            let planeYs = frame.anchors.compactMap { anchor -> Float? in
+                guard let plane = anchor as? ARPlaneAnchor, plane.alignment == .horizontal else { return nil }
+                return plane.transform.columns.3.y
             }
-            let planeY = table.transform.columns.3.y
+            guard let planeY = pickTablePlane(planeYs: planeYs, seedY: seed.y, maxDrop: maxTableDropMeters) else {
+                status = "No table plane close enough — pan the table, then tap the object"; return
+            }
+            guard seed.y - planeY > minHeightMeters else {
+                status = "Tap the object, not the table"; return
+            }
 
             // Mesh surface above the table near the tap, sampled densely across each triangle.
             var pts: [SIMD3<Float>] = []
@@ -93,6 +103,9 @@ struct ScanView: UIViewRepresentable {
             guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
                 status = "Nothing above the table here (\(pts.count) pts)"; return
             }
+            guard isUsableBox(width: box.width, height: box.height, depth: box.depth, maxDimension: maxItemDimensionMeters) else {
+                status = "That doesn't look like one item — check for a nearby wall or the floor, then rescan"; return
+            }
             // Suitcase mode: the fitted box *is* the bag interior. No heightmap, no photo, no label.
             if mode == .suitcase {
                 show(box, in: view)
@@ -111,17 +124,27 @@ struct ScanView: UIViewRepresentable {
             guard let suitcaseId else { status = "Scan the suitcase first"; return }
 
             let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
+            guard isUsableHeightMap(heights) else {
+                status = "Nothing usable captured on top — move closer and rescan"; return
+            }
             var scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
             scanned.suitcaseId = suitcaseId
             item = scanned
             status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
             print(scanned.asciiMap)
-            print(String(data: try! JSONEncoder().encode(scanned), encoding: .utf8)!)
 
             // Photograph the object before the overlay covers it, then ask the server for label + rigidity.
-            let crop = screenRect(of: box, in: view)
+            guard let crop = screenRect(of: box, in: view) else {
+                status = "Object out of view for the photo — item saved without a label"
+                show(box, in: view)
+                return
+            }
             view.snapshot(saveToHDR: false) { [weak self] shot in
-                guard let self, let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else { return }
+                guard let self else { return }
+                guard let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else {
+                    Task { @MainActor in self.status = "Couldn't capture a photo — item saved without a label" }
+                    return
+                }
                 Task { @MainActor in
                     do {
                         self.item = try await API.upload(scanned, image: UIImage(cgImage: cg))
@@ -135,7 +158,8 @@ struct ScanView: UIViewRepresentable {
         }
 
         /// Screen-space rectangle around the box's projected corners, padded 15%, clamped to the view.
-        func screenRect(of box: BoxFit, in view: ARView) -> CGRect {
+        /// Nil when no corner projects (e.g. the box is behind the camera) — there's nothing sane to crop.
+        func screenRect(of box: BoxFit, in view: ARView) -> CGRect? {
             let perp = SIMD3<Float>(-box.axis.z, 0, box.axis.x)
             var pts: [CGPoint] = []
             for sx: Float in [-0.5, 0.5] { for sy: Float in [-0.5, 0.5] { for sz: Float in [-0.5, 0.5] {
@@ -143,7 +167,7 @@ struct ScanView: UIViewRepresentable {
                 if let p = view.project(corner) { pts.append(p) }
             } } }
             guard let minX = pts.map(\.x).min(), let maxX = pts.map(\.x).max(),
-                  let minY = pts.map(\.y).min(), let maxY = pts.map(\.y).max() else { return view.bounds }
+                  let minY = pts.map(\.y).min(), let maxY = pts.map(\.y).max() else { return nil }
             return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
                 .insetBy(dx: -(maxX - minX) * 0.15, dy: -(maxY - minY) * 0.15)
                 .intersection(view.bounds)

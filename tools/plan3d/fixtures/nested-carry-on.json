@@ -1,0 +1,288 @@
+{
+  "_comment": [
+    "plan3d fixture: the bundled demo carry-on plus three nested placements, because no producer",
+    "in the tree emits `nestedIn` yet (server/app_plan.py writes null for every placement) and the",
+    "renderer's nesting path has to be exercised against something. All values in METRES; position",
+    "is the MIN CORNER. Copied from packing-core/Sources/PackingPlan/Resources/plan.json, which is",
+    "packing-core's file and not this tool's - hence a copy rather than an edit.",
+    "Three nests, one per branch of the contract in packing-core/CLAUDE.md:",
+    "  socks-pair     -> shoes-pair, box fully inside the declared cavity. The legitimate case: the",
+    "                    two boxes intersect, geometryIssues() calls that an overlap, the cavity is",
+    "                    what says it is a nest.",
+    "  charger-pouch  -> toiletry-kit, box pokes 1 cm out of the cavity on +X while still inside the",
+    "                    host. Contract: overlap outside the cavity cell is still an overlap, so this",
+    "                    has to render as a violation and not be waved through.",
+    "  passport-pouch -> ghost-liner, an itemId no placement defines. Contract: treated as not",
+    "                    nested, and the dangling id raises its own issue rather than being ignored."
+  ],
+  "version": 1,
+  "units": "meters",
+  "container": {
+    "id": "demo-carry-on",
+    "label": "Demo carry-on (16 x 6 x 24 in)",
+    "dimensions": {
+      "x": 0.4064,
+      "y": 0.1524,
+      "z": 0.6096
+    },
+    "zones": [
+      {
+        "id": "end-well",
+        "label": "End well",
+        "origin": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "size": {
+          "x": 0.4064,
+          "y": 0.1524,
+          "z": 0.17
+        }
+      },
+      {
+        "id": "base",
+        "label": "Base layer",
+        "origin": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.17
+        },
+        "size": {
+          "x": 0.4064,
+          "y": 0.075,
+          "z": 0.4396
+        }
+      },
+      {
+        "id": "upper",
+        "label": "Upper layer",
+        "origin": {
+          "x": 0.0,
+          "y": 0.035,
+          "z": 0.17
+        },
+        "size": {
+          "x": 0.4064,
+          "y": 0.1174,
+          "z": 0.4396
+        }
+      }
+    ]
+  },
+  "placements": [
+    {
+      "step": 1,
+      "itemId": "shoes-pair",
+      "label": "Running shoes",
+      "zone": "end-well",
+      "position": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "size": {
+        "x": 0.3,
+        "y": 0.115,
+        "z": 0.15
+      },
+      "rotation": "XYZ",
+      "note": "Soles down, side by side, pushed flush into the end corner. Stuff socks inside.",
+      "nestedIn": null
+    },
+    {
+      "step": 2,
+      "itemId": "toiletry-kit",
+      "label": "Toiletry kit",
+      "zone": "end-well",
+      "position": {
+        "x": 0.3,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "size": {
+        "x": 0.1,
+        "y": 0.14,
+        "z": 0.16
+      },
+      "rotation": "ZYX",
+      "note": "Stood on end beside the shoes, zip facing up.",
+      "nestedIn": null
+    },
+    {
+      "step": 3,
+      "itemId": "jeans-folded",
+      "label": "Folded jeans",
+      "zone": "base",
+      "position": {
+        "x": 0.005,
+        "y": 0.0,
+        "z": 0.18
+      },
+      "size": {
+        "x": 0.39,
+        "y": 0.035,
+        "z": 0.3
+      },
+      "rotation": "XYZ",
+      "note": "Flat across the full width, starting just past the shoes.",
+      "nestedIn": null
+    },
+    {
+      "step": 4,
+      "itemId": "sweater-roll",
+      "label": "Rolled sweater",
+      "zone": "base",
+      "position": {
+        "x": 0.02,
+        "y": 0.0,
+        "z": 0.49
+      },
+      "size": {
+        "x": 0.36,
+        "y": 0.07,
+        "z": 0.115
+      },
+      "rotation": "XZY",
+      "note": "Rolled along the width and pressed into the far end of the base layer.",
+      "nestedIn": null
+    },
+    {
+      "step": 5,
+      "itemId": "shirt-stack",
+      "label": "Stack of shirts",
+      "zone": "upper",
+      "position": {
+        "x": 0.02,
+        "y": 0.035,
+        "z": 0.23
+      },
+      "size": {
+        "x": 0.3,
+        "y": 0.045,
+        "z": 0.16
+      },
+      "rotation": "XYZ",
+      "note": "Second layer, resting on the jeans with the folded edges outward.",
+      "nestedIn": null
+    },
+    {
+      "step": 6,
+      "itemId": "laptop-sleeve",
+      "label": "Laptop sleeve",
+      "zone": "upper",
+      "position": {
+        "x": 0.025,
+        "y": 0.08,
+        "z": 0.19
+      },
+      "size": {
+        "x": 0.355,
+        "y": 0.03,
+        "z": 0.24
+      },
+      "rotation": "XYZ",
+      "note": "Flat on top of the shirt stack, last in so it comes out first at security.",
+      "nestedIn": null
+    },
+    {
+      "step": 7,
+      "itemId": "socks-pair",
+      "label": "Socks",
+      "zone": "end-well",
+      "position": {
+        "x": 0.03,
+        "y": 0.035,
+        "z": 0.03
+      },
+      "size": {
+        "x": 0.08,
+        "y": 0.05,
+        "z": 0.08
+      },
+      "rotation": "XYZ",
+      "note": "Balled up and pushed into the shoes.",
+      "nestedIn": {
+        "itemId": "shoes-pair",
+        "cavity": {
+          "position": {
+            "x": 0.02,
+            "y": 0.03,
+            "z": 0.02
+          },
+          "size": {
+            "x": 0.1,
+            "y": 0.06,
+            "z": 0.1
+          }
+        }
+      }
+    },
+    {
+      "step": 8,
+      "itemId": "charger-pouch",
+      "label": "Charger pouch",
+      "zone": "end-well",
+      "position": {
+        "x": 0.33,
+        "y": 0.03,
+        "z": 0.04
+      },
+      "size": {
+        "x": 0.06,
+        "y": 0.06,
+        "z": 0.08
+      },
+      "rotation": "XYZ",
+      "note": "Dropped into the toiletry kit - and 1 cm wider than the cell says.",
+      "nestedIn": {
+        "itemId": "toiletry-kit",
+        "cavity": {
+          "position": {
+            "x": 0.32,
+            "y": 0.02,
+            "z": 0.03
+          },
+          "size": {
+            "x": 0.06,
+            "y": 0.08,
+            "z": 0.1
+          }
+        }
+      }
+    },
+    {
+      "step": 9,
+      "itemId": "passport-pouch",
+      "label": "Passport pouch",
+      "zone": "upper",
+      "position": {
+        "x": 0.05,
+        "y": 0.11,
+        "z": 0.2
+      },
+      "size": {
+        "x": 0.12,
+        "y": 0.02,
+        "z": 0.16
+      },
+      "rotation": "XYZ",
+      "note": "Flat on the laptop sleeve; its nestedIn names an item that is not here.",
+      "nestedIn": {
+        "itemId": "ghost-liner",
+        "cavity": {
+          "position": {
+            "x": 0.05,
+            "y": 0.11,
+            "z": 0.2
+          },
+          "size": {
+            "x": 0.12,
+            "y": 0.02,
+            "z": 0.16
+          }
+        }
+      }
+    }
+  ]
+}

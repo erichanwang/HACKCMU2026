@@ -76,6 +76,19 @@ struct ItemsScreen: View {
     /// `ItemEditor` the scan panel shows.
     private func detail(_ scanned: Binding<ScannedItem>) -> some View {
         Form {
+            Section("Scan") {
+                if scanned.wrappedValue.hasGeometry {
+                    // The real heightmap the scanner recorded, orbitable — not a stand-in
+                    // box. ScannedItemScene wraps it in a one-item plan at scale 1.
+                    ScannedItemScene(item: scanned.wrappedValue)
+                        .frame(height: 280)
+                        .listRowInsets(EdgeInsets())
+                } else {
+                    Text("No scan geometry stored for this item.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Section { ItemEditor(item: scanned) }
             Section("Suitcase") {
                 Menu {
@@ -179,6 +192,12 @@ struct StampIcon: View {
 }
 
 extension ScannedItem {
+    /// Whether there is a real surface to orbit. A one-cell grid is a box, not a scan,
+    /// and rendering it as a model would overstate what the scanner actually captured.
+    var hasGeometry: Bool {
+        heights.count >= 2 && (heights.first?.count ?? 0) >= 2
+    }
+
     /// Centimetres, no decimals — a measurement column, not a sentence.
     var manifestSize: String {
         String(format: "%.0f×%.0f×%.0f", width * 100, depth * 100, height * 100)

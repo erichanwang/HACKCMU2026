@@ -114,6 +114,10 @@ private struct LayeredPlanSceneContainer: UIViewRepresentable {
 /// diagram and the AR overlay; it also renders scanned heightmap meshes. Both
 /// were called `PlanSceneView` after the merge, which is why this one is not.
 struct LayeredPlanSceneView: View {
+    /// False when this is a block inside someone else's screen, so it does not
+    /// rename that screen to "Plan scene".
+    var showsTitle = true
+
     @StateObject private var controller: LayeredPlanSceneController
     /// Used when the caller does not supply a binding.
     @State private var ownTopLayer: Int
@@ -149,8 +153,11 @@ struct LayeredPlanSceneView: View {
     ///   - topLayer: a layer index owned by the caller, so it can be shared with
     ///     the other views of the same plan. When omitted the view keeps its own
     ///     and starts with every layer visible.
-    init(plan: PackingPlan, scans: [String: ScannedItem] = [:], topLayer: Binding<Int>? = nil) {
+    ///   - showsTitle: false when embedded in someone else's screen.
+    init(plan: PackingPlan, scans: [String: ScannedItem] = [:], topLayer: Binding<Int>? = nil,
+         showsTitle: Bool = true) {
         self.plan = plan
+        self.showsTitle = showsTitle
         let controller = LayeredPlanSceneController(plan: plan, scans: scans)
         _controller = StateObject(wrappedValue: controller)
         externalTopLayer = topLayer
@@ -180,7 +187,7 @@ struct LayeredPlanSceneView: View {
 
             controls
         }
-        .navigationTitle("Plan scene")
+        .navigationTitle(showsTitle ? "Plan scene" : "")
         .navigationBarTitleDisplayMode(.inline)
         // onChange does not fire for the initial value, so the starting position
         // has to be pushed in explicitly — and again whenever the shared index

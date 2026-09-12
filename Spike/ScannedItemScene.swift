@@ -14,7 +14,7 @@ struct ScannedItemScene: View {
     private static let soloItemID = "scanned-item"
 
     var body: some View {
-        LayeredPlanSceneView(plan: Self.soloPlan(for: item), scans: [Self.soloItemID: item])
+        LayeredPlanSceneView(plan: Self.soloPlan(for: item), scans: [Self.soloItemID: item], showsTitle: false)
     }
 
     static func soloPlan(for item: ScannedItem) -> PackingPlan {

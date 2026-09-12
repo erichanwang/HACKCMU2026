@@ -1,10 +1,10 @@
 import XCTest
 @testable import PackingPlan
 
-/// Note: `swift test` does not run on Linux here — the sibling `PackingPlanUI`
-/// test target imports SwiftUI. These run on macOS; the same assertions were
-/// checked on Linux against the solver's own `full.json` / `full_over.json`
-/// through a throwaway executable driving `PlanStats`.
+/// These run on Linux as well as macOS: `PackingPlanUI`'s SwiftUI and CoreGraphics
+/// imports are behind `canImport` guards, so `swift test` builds the whole package
+/// here. The assertions were first checked against the solver's own `full.json`
+/// and `full_over.json` before that was true.
 final class PlanStatsTests: XCTestCase {
 
     private let accuracy: Float = 1e-5

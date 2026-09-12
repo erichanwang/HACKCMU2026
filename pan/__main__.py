@@ -34,13 +34,29 @@ def main(argv: list[str] | None = None) -> int:
     demo_p.add_argument("--steps", type=int, default=2)
     demo_p.add_argument("--frames", type=int, default=8)
     demo_p.add_argument("--viewpoint", default="overhead_45")
+    demo_p.add_argument("--from-packer3d", help="packer3d result JSON: build the state/candidates from the solver")
+    demo_p.add_argument("--scenario", help="the packer3d scenario JSON that produced --from-packer3d (required with it)")
+    demo_p.add_argument("--strategy-a", default="naive")
+    demo_p.add_argument("--strategy-b", default="optimized")
 
     sub.add_parser("status", help="show which world-model backend is resolved and why")
 
     args = parser.parse_args(argv)
 
     if args.command == "demo":
-        run_demo(args.out, backend=args.backend, steps=args.steps, num_frames=args.frames, viewpoint=args.viewpoint)
+        if args.from_packer3d and not args.scenario:
+            parser.error("--from-packer3d needs --scenario")
+        run_demo(
+            args.out,
+            backend=args.backend,
+            steps=args.steps,
+            num_frames=args.frames,
+            viewpoint=args.viewpoint,
+            from_packer3d=args.from_packer3d,
+            scenario=args.scenario,
+            strategy_a=args.strategy_a,
+            strategy_b=args.strategy_b,
+        )
         print((Path(args.out) / "summary.txt").read_text())
         return 0
     if args.command == "status":

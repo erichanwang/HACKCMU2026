@@ -70,6 +70,23 @@ class TestCenterOfMass(unittest.TestCase):
         for v in m["com_offset_m"]:
             self.assertAlmostEqual(v, 0.0, places=9)
 
+    def test_zero_total_mass_falls_back_to_the_container_center(self):
+        # Massless objects are legitimate (packing-solver obstacles are mass 0):
+        # a mass-weighted COM is undefined, so it must not come back NaN.
+        container = make_container(position=(1.0, 2.0, 3.0))
+        scene = Scene(
+            container=container,
+            objects=[
+                make_object("a", (0.2, 0.2, 0.2), (0.5, 0.0, 0.0), mass_kg=0.0),
+                make_object("b", (0.2, 0.2, 0.2), (-0.5, 0.0, 0.0), mass_kg=0.0),
+            ],
+        )
+        m = scene_metrics(precompute(scene))
+        self.assertEqual(m["total_mass_kg"], 0.0)
+        self.assertEqual(m["center_of_mass"], list(container.position))
+        for v in m["center_of_mass"] + m["com_offset_m"]:
+            self.assertTrue(math.isfinite(v))
+
 
 class TestWallClearance(unittest.TestCase):
     def test_flush_object_has_near_zero_clearance(self):

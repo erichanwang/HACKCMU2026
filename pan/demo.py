@@ -29,6 +29,7 @@ from pan.actions import describe_action
 from pan.evaluate import compose_side_by_side, evaluate_rollout, save_png
 from pan.observation import observation_from_scene, save_observation
 from pan.rollouts import RolloutManager
+from pan.solver_bridge import candidates_from_packer3d, first_divergence
 from pan.types import CandidateSequence, PackingAction, Scene, SimulationResult, apply_action, apply_sequence
 from pan.world_model import get_world_model
 from tests.fixtures import valid_packed_scene
@@ -122,6 +123,38 @@ def build_demo_state() -> tuple[Scene, list[CandidateSequence], dict[str, str]]:
     return state, candidates, dict(LABELS)
 
 
+def build_solver_state(
+    result_path: str | Path,
+    scenario_path: str | Path,
+    *,
+    strategy_a: str = "naive",
+    strategy_b: str = "optimized",
+) -> tuple[Scene, list[CandidateSequence], dict[str, str], str]:
+    """Same contract as `build_demo_state()` plus a note line, but built from a
+    packer3d result (`pan.solver_bridge`) instead of the hard-coded carry-on.
+
+    The two strategies usually share a prefix of identical placements; those are
+    applied to the scene up front so the rollout starts at `first_divergence` -- the
+    only step where the candidates actually differ (and the only interesting
+    counterfactual). The note records that for `summary.txt`.
+    """
+    result = json.loads(Path(result_path).read_text())
+    scenario = json.loads(Path(scenario_path).read_text())
+    state, candidates, labels = candidates_from_packer3d(result, scenario)
+    wanted = [s for s in (strategy_a, strategy_b) if s]
+    picked = [c for c in candidates if c.candidate_id in wanted] or candidates
+
+    k = first_divergence(picked) or 0
+    state = apply_sequence(state, picked[0].actions, upto=k)
+    picked = [
+        replace(c, actions=[replace(a, order_index=i) for i, a in enumerate(c.actions[k:])])
+        for c in picked
+    ]
+    head = f"steps 1–{k} identical; " if k else "no common prefix; "
+    places = ", ".join(f"{c.candidate_id} places {c.actions[0].object_id}" for c in picked if c.actions)
+    return state, picked, labels, f"{head}imagining step {k + 1}: {places}"
+
+
 def persist_result(result: SimulationResult, out_dir: str | Path) -> SimulationResult:
     """Write frame_00.png..frame_NN.png + rollout.gif into `out_dir` (mirrors
     `MockPanBackend.persist`, but works for any backend's result). Returns a
@@ -159,14 +192,18 @@ def _relativize_reports(dicts: list[dict], base: Path) -> None:
             d[key] = _relativize(d.get(key), base)
 
 
-def _write_summary(out_dir: Path, rollups: list) -> None:
+def _write_summary(out_dir: Path, rollups: list, note: Optional[str] = None) -> None:
     """PAN.md sec 20 judge-readable block, exact shape:
 
         Candidate A  shoe first
           physics: valid   PAN: complete   execution risk: low
           action: ...
+
+    `note` (the solver path's divergence line) is prepended when given.
     """
     lines: list[str] = []
+    if note:
+        lines += [note, ""]
     for r in rollups:
         lines.append(f"Candidate {r.candidate_id}  {r.label}")
         lines.append(f"  physics: {r.physics_status}   PAN: {r.simulation_status}   execution risk: {r.execution_risk or 'n/a'}")
@@ -183,11 +220,26 @@ def run_demo(
     num_frames: int = 8,
     viewpoint: str = "overhead_45",
     timeout_s: float = 120.0,
+    from_packer3d: str | Path | None = None,
+    scenario: str | Path | None = None,
+    strategy_a: str = "naive",
+    strategy_b: str = "optimized",
 ) -> dict:
+    """`from_packer3d` (a packer3d result JSON) + `scenario` (its input JSON) swap the
+    hard-coded carry-on state for the solver's own candidates via `build_solver_state`;
+    without them the default demo path is unchanged."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    state, candidates, labels = build_demo_state()
+    note = None
+    if from_packer3d is not None:
+        if scenario is None:
+            raise ValueError("from_packer3d needs the matching scenario= JSON (it lists every item)")
+        state, candidates, labels, note = build_solver_state(
+            from_packer3d, scenario, strategy_a=strategy_a, strategy_b=strategy_b
+        )
+    else:
+        state, candidates, labels = build_demo_state()
 
     state_obs = observation_from_scene(state, viewpoint)
     save_observation(state_obs, out_dir / "state_observation.png")
@@ -260,8 +312,10 @@ def run_demo(
         "candidates": candidate_dicts,
         "steps": step_dicts,
     }
+    if note:
+        payload["divergence"] = note
     (out_dir / "candidates.json").write_text(json.dumps(payload, indent=2))
-    _write_summary(out_dir, candidate_rollups)
+    _write_summary(out_dir, candidate_rollups, note=note)
 
     manager.shutdown(wait=False)
     return payload

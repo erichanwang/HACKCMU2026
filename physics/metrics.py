@@ -49,7 +49,12 @@ def scene_metrics(geom: SceneGeometry) -> dict:
         }
 
     total_mass_kg = float(geom.masses.sum())
-    center_of_mass = (geom.masses[:, None] * geom.centers).sum(axis=0) / total_mass_kg
+    if total_mass_kg > 0.0:
+        center_of_mass = (geom.masses[:, None] * geom.centers).sum(axis=0) / total_mass_kg
+    else:
+        # All-massless scene (e.g. solver obstacles, mass_kg=0): a mass-weighted COM is
+        # undefined, so fall back to the container centre instead of dividing by zero.
+        center_of_mass = container.center
     com_offset_m = (center_of_mass - container.center) @ container.axes  # world -> container-local
 
     object_volumes_m3 = 8.0 * np.prod(geom.half_extents, axis=1)  # (n,)

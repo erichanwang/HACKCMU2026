@@ -75,6 +75,14 @@ from .search import OptimizerConfig
 # ceiling.  (Independent smell test: a Rimowa Classic Cabin is 55 x 40 x 23 cm = 50.6 L
 # outside and sells as 36 L inside; most of that gap is shell thickness, which the LiDAR scan
 # already sees, but wheels and handle are in there too.)
+# WHICH end is the wheel end is this module's own convention, not a measured fact. A single-tap
+# LiDAR scan carries no signal for which real side of the bag the frame's origin lands on
+# (docs/AR_BUILD.md, "Which physical wall is back?"), so a profile places its wheel wells and
+# handle rails at *an* end, not necessarily the end they are on in the bag being scanned. Getting
+# it backwards reserves space at the lid end and leaves the real wheel wells packable, which is
+# worse than modelling nothing. That is survivable only because profiles are opt-in and nothing
+# on the server path sets `container.profile`; do not turn them on for a real scan until the app
+# captures a lid or wheel cue and the scan says which end is which.
 SUITCASE_PROFILES = {
     # two wheels at the rear floor corners, handle rails inside the shell (classic carry-on)
     "two_wheel": {"wheel_well": (0.15, 0.18, 0.22), "wheel_corners": 2,

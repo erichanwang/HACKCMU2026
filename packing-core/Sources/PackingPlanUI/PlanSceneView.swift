@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import PackingPlan
 import SwiftUI
 
@@ -433,3 +434,4 @@ public struct PlanSceneView: View {
         Text("Could not load the bundled mock plan.")
     }
 }
+#endif  // canImport(SwiftUI) -- SwiftUI is Apple-only; the view vanishes on Linux so `swift test` can run

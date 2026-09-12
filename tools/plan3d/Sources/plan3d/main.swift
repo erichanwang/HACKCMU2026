@@ -1,10 +1,13 @@
 import Foundation
 import PackingPlan
+import PackingPlanUI
 
-// plan3d — render a PackingPlan to SVG so the 3D projection can be inspected on
-// a machine with no Mac and no simulator. See docs/PLAN_3D.md.
+// plan3d — render a PackingPlan to SVG so the 3D projection and the 2D fallback
+// diagram can be inspected on a machine with no Mac and no simulator. See
+// docs/PLAN_3D.md.
 //
-//   swift run plan3d <plan.json> <out-dir> [--steps] [--cutaway] [--unpacked] [--violations]
+//   swift run plan3d <plan.json> <out-dir> [--steps] [--cutaway] [--unpacked]
+//                                          [--violations] [--layers]
 
 let width: Float = 900
 let height: Float = 700
@@ -481,6 +484,189 @@ func explodedCavities(_ nests: [Nest], original: PackingPlan, opened: PackingPla
     }
 }
 
+// MARK: - The 2D layer diagram (--layers)
+
+/// `--layers` draws `PlanDiagramView`'s picture: the top-down layer diagram that
+/// is the demo's fallback when there is no AR session, no plane detection and no
+/// camera permission. That view is SwiftUI, so on this box it is the one part of
+/// the plan pipeline nobody can see — this is how it gets looked at.
+///
+/// Every number and every rectangle comes from the same `PackingPlanUI` calls the
+/// view makes: `plan.layers()` for the grouping, `plan.protrusions(into:)` for the
+/// items from lower layers that poke up through this floor, and
+/// `FootprintProjection` for the placement rects. No layout is recomputed here; a
+/// second copy would drift from the view it exists to show.
+///
+/// The two things that are *not* shared, because both are behind
+/// `#if canImport(SwiftUI)` in the library and therefore do not exist on Linux:
+/// `Placement.diagramColor` (so the item colours are this tool's `palette`, the
+/// same colour per step as the 3D mode — a cross-check the view does not offer)
+/// and `centimetres(_:decimals:)`, which is `internal` as well; `PlanStats`'
+/// public formatters stand in.
+
+/// The footprint gets the left column; the legend gets the rest of the 900.
+let diagramSize = CGSize(width: 560, height: 680)
+let diagramOrigin = SIMD2<Float>(20, 10)
+let legendX: Float = 600
+
+/// `PlanDiagramView`'s own thresholds, below which the text does not fit the
+/// rectangle and the legend carries the label instead — plus a width check the
+/// view does not need. SwiftUI wraps the label to two lines and shrinks it to fit
+/// its box; SVG `<text>` does neither, so a long label in a small rect spills
+/// across its neighbours (`8. Charger pouch` in a 67 px box, in the fixture).
+/// ~0.55 em per character at this font, which is close enough for a threshold.
+func labelFits(_ r: CGRect, _ label: String) -> Bool {
+    r.width >= 54 && r.height >= 28 && Float(label.count) * 6.6 <= Float(r.width) - 12
+}
+func sizeFits(_ r: CGRect) -> Bool { r.width >= 74 && r.height >= 44 }
+
+/// A projected rect as SVG attributes, shifted into the diagram column.
+func rectAttributes(_ r: CGRect) -> String {
+    String(
+        format: "x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"4\"",
+        Float(r.minX) + diagramOrigin.x, Float(r.minY) + diagramOrigin.y,
+        Float(r.width), Float(r.height)
+    )
+}
+
+func text(_ x: Float, _ y: Float, _ body: String, size: Float = 12, fill: String = "#c9ced6",
+          anchor: String = "start", family: String = "sans-serif") -> String {
+    String(format: "  <text x=\"%.2f\" y=\"%.2f\" ", x, y)
+        + "font-family=\"\(family)\" font-size=\"\(size)\" text-anchor=\"\(anchor)\" "
+        + "fill=\"\(fill)\">\(escaped(body))</text>\n"
+}
+
+/// Whole centimetres, the shorter form the view uses inside a rectangle where the
+/// millimetre in `PlanStats.lengthText` would not earn its width.
+func wholeCentimetres(_ metres: Float) -> String { String(format: "%.0f cm", metres * 100) }
+
+func layerSVG(
+    _ plan: PackingPlan,
+    layer: PlanLayer,
+    of count: Int,
+    protrusions: [Placement],
+    flags: [String: String],
+    title: String,
+    header: [String],
+    caption: String
+) -> String {
+    let band: Float = 30 + Float(header.count) * 17 + 24
+    // 680 of footprint from y = 10, then a strip for the axis note. The note used
+    // to sit at 690 and was half off the canvas and half on the container's bottom
+    // wall — a to-scale footprint fills its column by construction, so nothing can
+    // share those rows.
+    let footer = diagramOrigin.y + Float(diagramSize.height) + 18
+    let canvasHeight = band + footer + 26
+    let projection = FootprintProjection(footprint: plan.container.dimensions, in: diagramSize)
+
+    var out = """
+    <svg xmlns="http://www.w3.org/2000/svg" width="\(Int(width))" height="\(Int(canvasHeight))" \
+    viewBox="0 0 \(Int(width)) \(Int(canvasHeight))">
+    <rect width="\(Int(width))" height="\(Int(canvasHeight))" fill="#16181c"/>
+
+    """
+    out += text(12, 20, title, size: 14, fill: "#8a8f98", family: "monospace")
+    for (i, line) in header.enumerated() {
+        out += text(12, 40 + Float(i) * 17, line, size: 13)
+    }
+    // The layer's own caption sits directly above its picture, last line of the
+    // band: the header above it describes the whole bag, this line describes only
+    // what is drawn below.
+    out += text(12, band - 6, caption, size: 13, fill: "#e8d654")
+    out += "<g transform=\"translate(0,\(Int(band)))\">\n"
+
+    // Container footprint, to scale.
+    out += "  <rect \(rectAttributes(projection.footprintRect)) "
+    out += "fill=\"#2a2e35\" stroke=\"#5d636d\" stroke-width=\"2\"/>\n"
+
+    // Items from lower layers still standing in the way at this height: outlines
+    // only, exactly as the view draws them, so the diagram cannot imply free floor
+    // where a tall item from below is actually there.
+    for placement in protrusions {
+        let r = projection.rect(for: placement)
+        out += "  <rect \(rectAttributes(r)) fill=\"none\" stroke=\"#8a8f98\" stroke-width=\"1.5\" "
+        out += "stroke-dasharray=\"5 4\"/>\n"
+        // The step number only, and inside the rect's own top-left corner. The view
+        // draws no label at all here — the legend sentence names them — and the
+        // full name centred under each outline was worse than nothing: two items
+        // standing side by side in the end well have almost the same footprint
+        // bottom edge, so the captions landed on each other and the right-hand one
+        // ran off the container. The number is enough to match to the legend.
+        out += text(
+            Float(r.minX) + diagramOrigin.x + 6, Float(r.minY) + diagramOrigin.y + 15,
+            "\(placement.step)", size: 11, fill: "#8a8f98", family: "monospace"
+        )
+    }
+
+    // This layer's own items, in packing order, so a later step paints over an
+    // earlier one — the same order the view's ZStack gives.
+    for placement in layer.placements {
+        let r = projection.rect(for: placement)
+        let rgb = palette[(placement.step - 1) % palette.count]
+        let colour = hex(rgb, 1)
+        out += "  <rect \(rectAttributes(r)) fill=\"\(colour)\" fill-opacity=\"0.25\" "
+        out += "stroke=\"\(colour)\" stroke-width=\"2\"/>\n"
+        let x = Float(r.minX) + diagramOrigin.x + 6
+        let y = Float(r.minY) + diagramOrigin.y + 16
+        let label = "\(placement.step). \(placement.label)"
+        if labelFits(r, label) {
+            out += text(x, y, label, size: 12, fill: colour)
+            if sizeFits(r) {
+                let size = "\(wholeCentimetres(placement.size.x)) × \(wholeCentimetres(placement.size.z))"
+                out += text(x, y + 14, size, size: 10, fill: "#c9ced6", family: "monospace")
+            }
+        } else {
+            out += text(x, y, "\(placement.step)", size: 11, fill: colour, family: "monospace")
+        }
+    }
+
+    // The renderer's own flags, in the same red as the 3D mode and drawn after
+    // every item for the same reason: in draw order an offender would be half
+    // covered by whatever is packed over it. `PlanDiagramView` has no red outline
+    // — it shows an orange `geometryIssues()` banner above the diagram instead —
+    // so this, like the header band, is plan3d's annotation over the view's picture.
+    for placement in layer.placements {
+        guard let reason = flags[placement.itemID] else { continue }
+        let r = projection.rect(for: placement)
+        out += "  <rect \(rectAttributes(r)) fill=\"none\" stroke=\"#ff4d4d\" stroke-width=\"3\"/>\n"
+        out += text(
+            Float(r.midX) + diagramOrigin.x, Float(r.maxY) + diagramOrigin.y + 14, reason,
+            size: 11, fill: "#ff4d4d", anchor: "middle", family: "monospace"
+        )
+    }
+
+    // Legend, one row per item, then the protrusion sentence and the axis note —
+    // the same three blocks, in the same order, as the view's legend.
+    var y: Float = 26
+    for placement in layer.placements {
+        let colour = hex(palette[(placement.step - 1) % palette.count], 1)
+        out += String(format: "  <circle cx=\"%.1f\" cy=\"%.1f\" r=\"9\" ", legendX + 9, y - 4)
+        out += "fill=\"\(colour)\"/>\n"
+        out += text(legendX + 9, y, "\(placement.step)", size: 11, fill: "#16181c",
+                    anchor: "middle", family: "monospace")
+        out += text(legendX + 26, y - 4, placement.label, size: 12)
+        for (i, line) in wrapped(placement.note, 34).enumerated() {
+            out += text(legendX + 26, y + 10 + Float(i) * 12, line, size: 10, fill: "#8a8f98")
+        }
+        y += 26 + Float(wrapped(placement.note, 34).count) * 12
+    }
+    if !protrusions.isEmpty {
+        let names = protrusions.map(\.label).joined(separator: ", ")
+        let verb = protrusions.count == 1 ? "stands" : "stand"
+        y += 8
+        for line in wrapped("Dashed: \(names) \(verb) up through this layer.", 38) {
+            out += text(legendX, y, line, size: 11, fill: "#8a8f98")
+            y += 13
+        }
+    }
+    out += text(legendX, footer, "Seen from above · X across, Z down", size: 10, fill: "#6d727a")
+    out += text(legendX, footer + 12, "origin at the footprint's top-left", size: 10, fill: "#6d727a")
+    out += text(12, footer, "layer \(layer.index + 1) of \(count)", size: 10, fill: "#6d727a",
+                family: "monospace")
+
+    return out + "</g>\n</svg>\n"
+}
+
 // MARK: - The rest of the server document
 
 // `solver.unpacked` and `validation.violations` sit beside the plan in the
@@ -522,10 +708,12 @@ let steps = args.contains("--steps")
 let cutaway = args.contains("--cutaway")
 let wantUnpacked = args.contains("--unpacked")
 let wantViolations = args.contains("--violations")
+let wantLayers = args.contains("--layers")
 let positional = args.filter { !$0.hasPrefix("--") }
 guard positional.count == 2 else {
     FileHandle.standardError.write(Data(
-        "usage: plan3d <plan.json> <out-dir> [--steps] [--cutaway] [--unpacked] [--violations]\n".utf8
+        ("usage: plan3d <plan.json> <out-dir> [--steps] [--cutaway] [--unpacked] "
+            + "[--violations] [--layers]\n").utf8
     ))
     exit(2)
 }
@@ -674,6 +862,70 @@ if cutaway {
         // no slab of its own in the picture at all.
         header.append(layer.summaryText + (away > 0 ? " · \(away) nested, drawn with the host" : ""))
     }
+}
+
+// The 2D fallback. Its own output entirely: one SVG per layer, no cameras, and
+// always from the plan as loaded — `--cutaway` grows the container, which a
+// to-scale footprint cannot survive, and pulling layers apart is what this mode
+// does by construction anyway.
+if wantLayers {
+    if cutaway {
+        print("layers: --cutaway is a 3D mode — the layer diagram already separates the layers, ignored")
+    }
+    let layers = loaded.layers()
+    let layerOf = Dictionary(
+        layers.flatMap { layer in layer.placements.map { ($0.itemID, layer.index) } },
+        uniquingKeysWith: { a, _ in a }
+    )
+    // The library groups layers twice — `PackingPlan.layers()` in PackingPlanUI for
+    // the view, `PackingPlan.layerStats()` in PackingPlan for the numbers — with
+    // the same rule and the same 5 mm tolerance restated in each. Saying so when
+    // they disagree is the cheapest possible guard on that duplication.
+    if layers.count != stats.layers.count {
+        print("layers: WARNING the view's grouping says \(layers.count) layers and "
+            + "PlanStats says \(stats.layers.count) — the two 5 mm rules have drifted apart")
+    }
+    for nest in nests where layerOf[nest.itemID] != layerOf[nest.hostID] {
+        print("layers: \(nest.itemID) is drawn in layer \((layerOf[nest.itemID] ?? 0) + 1) and its "
+            + "host \(nest.hostID) in layer \((layerOf[nest.hostID] ?? 0) + 1) — the nest is split "
+            + "across two pictures, as the view splits it")
+    }
+
+    guard !layers.isEmpty else {
+        print("layers: no placements — the view shows 'This plan has no placements.' and no diagram")
+        exit(0)
+    }
+
+    for layer in layers {
+        let protrusions = loaded.protrusions(into: layer)
+        let items = layer.placements.count == 1 ? "1 item" : "\(layer.placements.count) items"
+        let caption = "Layer \(layer.index + 1) of \(layers.count) · floor at "
+            + "\(PlanStats.lengthText(layer.floorY)) · "
+            + "\(PlanStats.lengthText(layer.thickness)) thick · \(items)"
+        let name = String(format: "layer-%02d.svg", layer.index + 1)
+        try layerSVG(
+            loaded,
+            layer: layer,
+            of: layers.count,
+            protrusions: protrusions,
+            flags: violations,
+            title: "top-down layer \(layer.index + 1)/\(layers.count)  "
+                + "\(loaded.container.label)\(violations.isEmpty ? "" : "  violations(\(violations.count))")",
+            header: header,
+            caption: caption
+        ).write(to: outDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
+
+        // `summaryText` is PlanStats' line, the same one the 3D `--cutaway` header
+        // prints, so the two modes cannot describe the same layer differently.
+        let summary = stats.layers.indices.contains(layer.index)
+            ? stats.layers[layer.index].summaryText
+            : caption
+        let through = protrusions.isEmpty
+            ? "nothing from below"
+            : "\(protrusions.count) up through the floor: \(protrusions.map(\.label).joined(separator: ", "))"
+        print("\(name)  \(summary) · \(through)")
+    }
+    exit(0)
 }
 
 for (name, camera) in cameras {

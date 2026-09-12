@@ -1,4 +1,8 @@
-# Looking at the 3D plan view on Linux
+# Looking at the plan views on Linux
+
+Both of them: the interactive 3D view, and — via `--layers` — the 2D top-down layer
+diagram that is the demo's fallback. Neither can be built on this box; `tools/plan3d`
+renders what they render, to SVG.
 
 ## What the 3D view is
 
@@ -23,7 +27,8 @@ draws what comes back. If the SVG is wrong, the projection is wrong.
 source swift/PackPhysics/swiftenv.sh          # Swift 6.3.3 via swiftly, + libxml2 compat
 cd tools/plan3d
 swift build --scratch-path /tmp/plan3d            # `.build` is contended when agents overlap
-/tmp/plan3d/debug/plan3d <plan.json> <out-dir> [--steps] [--cutaway] [--unpacked] [--violations]
+/tmp/plan3d/debug/plan3d <plan.json> <out-dir> \
+    [--steps] [--cutaway] [--unpacked] [--violations] [--layers]
 ```
 
 Both plan shapes are accepted: the raw `PackingPlan` document, and the server document
@@ -35,6 +40,9 @@ Three cameras are written every run — `three-quarter.svg` (the default over-th
 view), `front.svg` (yaw 0, pitch 0, straight at the far wall) and `top.svg` (pitch 1.4,
 nearly straight down). `--steps` additionally writes `step-01.svg …` at the default
 camera, one per packing step, so the reveal sequence can be flipped through.
+
+`--layers` is a different mode, not a flag on those: it writes `layer-01.svg …`, the 2D
+top-down diagram, and no cameras. See **The 2D fallback** below.
 
 Write the output to a scratch directory. **Do not commit the SVGs** — they are a
 verification artefact, not a build product.
@@ -200,6 +208,99 @@ inside the cavity]; toiletry-kit overlaps charger-pouch by (0.060, 0.060, 0.080)
 Dropping the first would hide a real one the day the cavity check breaks; leaving it
 unexplained trains you to skim the line that reports the second.
 
+## The 2D fallback — `--layers`
+
+**What it is for.** `PlanDiagramView` is the view PackAR falls back to when there is no
+AR session, no plane detection or no camera permission — the one that has to work on
+stage. It is SwiftUI, nobody on this team has a Mac, and so until this mode existed
+nobody had ever seen it. `--layers` is how anyone without a Mac checks the demo fallback
+before relying on it.
+
+```sh
+/tmp/plan3d/debug/plan3d packing-core/Sources/PackingPlan/Resources/plan.json /tmp/out --layers
+```
+
+One SVG per layer, `layer-01.svg` upward, plus one summary line each on the terminal:
+
+```
+layer-01.svg  Layer 1 · 4 items · 14.0 cm thick · 89% of the floor · nothing from below
+layer-02.svg  Layer 2 · 1 item · 4.5 cm thick · 19% of the floor · 3 up through the floor:
+              Running shoes, Toiletry kit, Rolled sweater
+```
+
+**It is not a second layout.** `plan3d` links `PackingPlanUI` — that target compiles on
+Linux because both its SwiftUI and its CoreGraphics imports are guarded, which is also
+why `swift test` runs here — and calls exactly what the view calls:
+`plan.layers()` for the grouping, `plan.protrusions(into:)` for the items from lower
+layers that poke up through this layer's floor, and `FootprintProjection` for every
+rectangle on the picture. If the diagram is wrong, the view is wrong. A second copy of
+the maths would have been a diagram that agrees with nothing.
+
+Each picture holds the container footprint to scale, this layer's items as filled
+labelled rectangles inside it, the protrusions as dashed outlines tagged with their step
+number, the layer caption (`Layer 2 of 3 · floor at 3.5 cm · 4.5 cm thick · 1 item`, the
+view's own caption line), and a legend of item labels and notes with the view's "Dashed:
+… stand up through this layer." sentence. The stats band above is the same `PlanStats`
+band the 3D mode carries, built from the plan as loaded.
+
+Four things are `plan3d`'s and **not** the view's, so do not read them as fidelity:
+
+* the `PlanStats` header band and the `Nested:` row (the view has no header band; it
+  shows an orange `geometryIssues()` banner instead, which this mode prints to the
+  terminal);
+* the red `OUTSIDE CAVITY` / `NESTED IN MISSING` outlines, which are the renderer's own
+  nesting checks, same as in the 3D mode;
+* item colours, which are `plan3d`'s per-step palette — the same colour per step as the
+  3D mode, which the view does not offer — because `Placement.diagramColor` is inside the
+  library's `#if canImport(SwiftUI)` and does not exist on Linux at all;
+* the step-number tag on a protrusion outline. The view draws protrusions bare and names
+  them only in the legend. The full name centred under each outline was tried and was
+  worse: two items standing side by side in the end well have almost the same footprint
+  bottom edge, so the captions landed on each other and the right-hand one ran off the
+  container.
+
+Two honest gaps in what the picture can tell you:
+
+* **It is more generous with labels than a phone.** The view hides an item's label when
+  its rectangle is under 54 × 28 pt and shrinks it to fit otherwise; this renders at about
+  1115 px/m against a phone's ~570, so an item that gets a label here may be a bare step
+  number on the device. SVG `<text>` also cannot shrink or wrap, so a label wider than its
+  box falls back to the step number — a case the view would have squeezed in.
+* **`--cutaway` is ignored** (the run says so). It grows the container, which a to-scale
+  footprint cannot survive, and separating the layers is what this mode does anyway.
+
+### Checking a layer diagram is right
+
+**1. Every rectangle inside the footprint, and the footprint the right shape.** This is
+the honest X/Z view — there is no projection to hide behind. An item crossing the grey
+wall is a solver bug and `geometryIssues()` at the top of the run should already say so.
+
+**2. The protrusions are the tall items from below, and nothing else.** In the demo plan,
+layer 2 (floor 3.5 cm) must show the shoes (11.5 cm), the dopp kit (14 cm) and the sweater
+roll (7 cm) as dashed outlines, and layer 3 (floor 8 cm) must show the first two and *not*
+the sweater, which stops at 7 cm. If a layer shows free floor where a tall item stands,
+the diagram is inviting the user to pack into a space that is occupied — the exact failure
+this outline exists to prevent, and worth re-checking after any change to
+`protrusions(into:)`.
+
+**3. The captions climb.** `layer-01` must be the lowest floor and each next one higher,
+with the `Layer n of m` tag bottom-left agreeing with the filename. The 3D `--cutaway`
+mode got this wrong once by pinning captions to slabs.
+
+**4. Cross-check the terminal against the pictures.** The per-layer line is
+`PlanStats.Layer.summaryText` — the same string the 3D `--cutaway` header prints — while
+the picture is grouped by `PackingPlanUI`'s `layers()`. Those are two separate
+implementations of the same 5 mm floor rule in the library, and the run prints a `WARNING`
+if their layer counts ever disagree.
+
+**5. Nested items.** A nest is *not* a thing the 2D view knows about: a nested item is
+drawn as an ordinary rectangle in whatever layer its own floor puts it in, and its host is
+usually a dashed protrusion from a lower layer. That reads correctly — in
+`fixtures/nested-carry-on.json` the socks sit inside the shoes' dashed outline on layer 3
+— but nothing on the picture says "nested", and if the item's floor lands in a different
+layer from its host's, the two halves of the nest are in two different pictures. The run
+prints which items those are.
+
 ## Checking the projection is right
 
 Open the SVGs in a browser, or rasterise them:
@@ -208,6 +309,9 @@ Open the SVGs in a browser, or rasterise them:
 google-chrome --headless --disable-gpu --window-size=900,700 \
   --screenshot=out.png file://$PWD/three-quarter.svg
 ```
+
+A `--layers` SVG is taller than 700 — the header band grows with the stats — so use
+`--window-size=900,860` for those or the axis note at the bottom is cut off.
 
 Then look for these three things, in this order.
 

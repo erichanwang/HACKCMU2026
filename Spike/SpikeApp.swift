@@ -70,9 +70,12 @@ struct ContentView: View {
         Task {
             defer { packing = false }
             do {
-                plan = try await API.plan(suitcaseId: suitcaseId)
+                let (fetchedPlan, unpacked) = try await API.plan(suitcaseId: suitcaseId)
+                plan = fetchedPlan
                 showingDiagram = true
-                status = "Packed \(plan?.placements.count ?? 0) items — close the sheet to see it in the bag"
+                status = unpacked.isEmpty
+                    ? "Packed \(fetchedPlan.placements.count) items"
+                    : "Packed \(fetchedPlan.placements.count), didn't fit: \(unpacked.map(\.label).joined(separator: ", "))"
             } catch {
                 status = "plan: \(error.localizedDescription)"
             }

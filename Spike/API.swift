@@ -47,12 +47,26 @@ enum API {
         return try JSONDecoder().decode(SuitcaseResponse.self, from: data).id
     }
 
-    /// Runs the solver server-side and returns what it actually produced. Throws with the
-    /// server's message ("suitcase has no scanned items to pack") when there is nothing to pack.
-    static func plan(suitcaseId: String) async throws -> PackingPlan {
+    /// One item the solver could not fit; alongside `plan` in the server's plan document.
+    struct UnpackedItem: Decodable {
+        let itemId: String
+        let label: String
+    }
+
+    /// The document's top-level `unpacked` field. Tolerated as absent (an older server).
+    private struct Unpacked: Decodable {
+        let unpacked: [UnpackedItem]?
+    }
+
+    /// Runs the solver server-side and returns what it actually produced, plus any items it
+    /// couldn't fit. Throws with the server's message ("suitcase has no scanned items to pack")
+    /// when there is nothing to pack.
+    static func plan(suitcaseId: String) async throws -> (plan: PackingPlan, unpacked: [UnpackedItem]) {
         let req = request("suitcases/\(suitcaseId)/plan", "POST")
         let data = try await body(of: req)
-        return try PlanLoader.plan(fromServerDocument: data)
+        let plan = try PlanLoader.plan(fromServerDocument: data)
+        let unpacked = (try? JSONDecoder().decode(Unpacked.self, from: data))?.unpacked ?? []
+        return (plan, unpacked)
     }
 
     static func upload(_ item: ScannedItem, image: UIImage) async throws -> ScannedItem {

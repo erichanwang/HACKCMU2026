@@ -81,9 +81,14 @@ OCCLUDE_CROP = 0.02            # metres cropped off one edge of the "box" item b
 TABLE_BLEED_EXTRA = 0.03       # metres the "open-tray" item's cluster bleeds into the table on one side
 LID_LEAN_DEG = 20.0             # degrees the open lid leans back past vertical, in frame
 LID_CAPTURE_M = 0.08            # metres of the lid captured near the hinge (not the whole panel)
-# tests/swift/drift/main.swift's own mid/worst-realistic combos (planeY cm, axis deg, drift cm)
-DRIFT_MID = (1.0, 2.0, 2.0)
-DRIFT_WORST = (3.0, 5.0, 5.0)
+# tests/swift/drift/main.swift's own mid/worst-realistic combos, split the way its Section 4
+# (before/after Spike/ScanView.swift's planeY-re-resolution fix) splits them: a small plane-fit
+# noise that a live reread does NOT remove (plane_cm), a vertical world-drift component that live
+# rereading DOES correct for (vertical_cm), an axis error, and a horizontal drift -- neither of
+# the last two touched by that fix.
+# (plane_cm, vertical_cm, axis_deg, horizontal_cm)
+DRIFT_MID = (1.0, 2.0, 2.0, 2.0)
+DRIFT_WORST = (3.0, 5.0, 5.0, 5.0)
 
 
 def skip(message: str) -> None:
@@ -525,6 +530,26 @@ def post_item(url: str, item: dict) -> dict:
     return call(url, data=body, content_type=f"multipart/form-data; boundary={boundary}", method="POST")
 
 
+def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item_fits: list[dict]) -> list[dict]:
+    """POST /suitcases, POST every item's scan under it, POST /plan; returns the placements.
+    Used to solve a plan against a specific (e.g. ground-truth) suitcase, distinct from -- and not
+    printed alongside -- the main pipeline's own suitcase/items/plan."""
+    status, suitcase_doc = post_json(f"{base}/suitcases", {"name": name, "dimensions": dims})
+    if status != 200:
+        fail(f"POST /suitcases ({name}) -> {status}: {suitcase_doc}")
+    for it, fit in zip(items, item_fits):
+        doc = {"id": f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": suitcase_doc["id"],
+               "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
+               "heights": fit["heights"]}
+        status, resp = post_item(f"{base}/items", doc)
+        if status != 200:
+            fail(f"POST /items ({name}/{it['name']}) -> {status}: {resp}")
+    status, plan_doc = post_json(f"{base}/suitcases/{suitcase_doc['id']}/plan", {})
+    if status != 200:
+        fail(f"POST /suitcases/{{id}}/plan ({name}) -> {status}: {plan_doc}")
+    return plan_doc["plan"]["placements"]
+
+
 # --- checks -----------------------------------------------------------------------------
 
 
@@ -664,37 +689,78 @@ def clutter_check(driver: Path) -> None:
     print("")
 
 
+def _drift_fit(driver: Path, true_points: np.ndarray, pivot: np.ndarray, axis_deg: float, horizontal_cm: float,
+               plane_y: float, placements: list[dict]) -> dict:
+    """Rotate+translate the true suitcase cloud horizontally (world-origin drift) and refit with
+    `plane_y` as the table-height assumption, then transform `placements` through the result."""
+    theta = math.radians(axis_deg)
+    xz = true_points[:, [0, 2]] - pivot
+    xz = xz @ _rot(theta).T + pivot + np.array([1, 1]) / math.sqrt(2) * (horizontal_cm / 100)
+    points = true_points.copy()
+    points[:, 0], points[:, 2] = xz[:, 0], xz[:, 1]
+    return run_driver(driver, {"cmd": "transform", "transform": {
+        "suitcasePoints": points.tolist(), "planeY": plane_y, "wall": WALL,
+        "placements": [{"position": [p["position"]["x"], p["position"]["y"], p["position"]["z"]],
+                         "size": [p["size"]["x"], p["size"]["y"], p["size"]["z"]]} for p in placements]}})
+
+
+def _drift_corner_err(true_out: dict, drifted_out: dict, placements: list[dict]) -> float:
+    max_err = 0.0
+    for p in placements:
+        pos = [p["position"]["x"], p["position"]["y"], p["position"]["z"]]
+        size = [p["size"]["x"], p["size"]["y"], p["size"]["z"]]
+        true_c = placement_corners(true_out["axis"], true_out["perp"], true_out["origin"], pos, size)
+        drift_c = placement_corners(drifted_out["axis"], drifted_out["perp"], drifted_out["origin"], pos, size)
+        max_err = max(max_err, max(float(np.linalg.norm(dc - tc)) for tc, dc in zip(true_c, drift_c)))
+    return max_err
+
+
 def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, placements: list[dict]) -> None:
     """World-origin drift + plane error between scan time and overlay time, at the mid/worst
-    magnitudes tests/swift/drift/main.swift itself characterised (median max-corner error there:
-    4.84cm over the full realistic Monte Carlo range). Rotate+translate the SAME suitcase cloud
-    the real fitBox already fit, re-fit it, and check the SAME solved plan against the true bag."""
+    magnitudes tests/swift/drift/main.swift itself characterised. `placements` must come from a
+    plan solved against `true_out`'s own (undegraded) suitcase -- otherwise this just re-reports
+    whatever degradation inflated the bag, mis-attributed to drift.
+
+    Spike/ScanView.swift (commit ec6019a) no longer freezes `planeY` at the scan tap; it re-reads
+    the nearest live ARPlaneAnchor every frame. tests/swift/drift's own before/after (Section 4)
+    shows this corrects for *vertical* world drift (the table's estimated height changing between
+    scan and overlay) but not the one-time plane-fit noise a fresh reading still carries, and not
+    at all for horizontal drift or axis error -- re-resolving "the bag's floor" only ever touches
+    height. Modelled the same way here: `plane_cm` (unreduced) and `vertical_cm` (corrected, shown
+    only for contrast) are kept separate, and only the corrected ("today") row drives the verdict."""
     pivot = np.array([SUITCASE_ARGS["cx"], SUITCASE_ARGS["cz"]])
     print("== drift: world-origin drift + plane/axis error between scan and overlay ==")
-    print(f"{'scenario':<45} {'max corner err':<16} {'max escape from true bag':<26} fits?")
-    for label, (dplaney_cm, daxis_deg, ddrift_cm) in (("mid-range", DRIFT_MID), ("worst realistic", DRIFT_WORST)):
-        theta = math.radians(daxis_deg)
-        xz = true_suitcase_points[:, [0, 2]] - pivot
-        xz = xz @ _rot(theta).T + pivot + np.array([1, 1]) / math.sqrt(2) * (ddrift_cm / 100)
-        drifted_points = true_suitcase_points.copy()
-        drifted_points[:, 0], drifted_points[:, 2] = xz[:, 0], xz[:, 1]
-        drifted_out = run_driver(driver, {"cmd": "transform", "transform": {
-            "suitcasePoints": drifted_points.tolist(), "planeY": TABLE_Y + dplaney_cm / 100, "wall": WALL,
-            "placements": [{"position": [p["position"]["x"], p["position"]["y"], p["position"]["z"]],
-                             "size": [p["size"]["x"], p["size"]["y"], p["size"]["z"]]} for p in placements]}})
-        max_corner_err = 0.0
-        for p in placements:
-            pos = [p["position"]["x"], p["position"]["y"], p["position"]["z"]]
-            size = [p["size"]["x"], p["size"]["y"], p["size"]["z"]]
-            true_c = placement_corners(true_out["axis"], true_out["perp"], true_out["origin"], pos, size)
-            drift_c = placement_corners(drifted_out["axis"], drifted_out["perp"], drifted_out["origin"], pos, size)
-            max_corner_err = max(max_corner_err, max(float(np.linalg.norm(dc - tc)) for tc, dc in zip(true_c, drift_c)))
+    print("(planeY is re-resolved live -- Spike/ScanView.swift's refreshPlaneY -- so vertical world "
+          "drift is now largely corrected; horizontal drift and axis error are not)")
+    print(f"{'scenario':<58} {'corner err (today/frozen)':<28} {'escape (today/frozen)':<28} fits? (today)")
+    for label, (plane_cm, vertical_cm, axis_deg, horizontal_cm) in (
+            ("mid-range", DRIFT_MID), ("worst realistic", DRIFT_WORST)):
+        # The real table never moves -- what drifts is ARKit's world-frame belief about its
+        # height, i.e. purely a planeY *input* error, not a change in the points LiDAR would see.
+        # frozen bakes in both the tap-time reading noise (plane_cm) and everything the world
+        # frame has since drifted by (vertical_cm); today re-reads live, so only the reading
+        # noise -- present at any instant -- survives.
+        today = _drift_fit(driver, true_suitcase_points, pivot, axis_deg, horizontal_cm,
+                            TABLE_Y + plane_cm / 100, placements)
+        frozen = _drift_fit(driver, true_suitcase_points, pivot, axis_deg, horizontal_cm,
+                             TABLE_Y + plane_cm / 100 + vertical_cm / 100, placements)
+
+        corner_err = _drift_corner_err(true_out, today, placements)
+        frozen_corner_err = _drift_corner_err(true_out, frozen, placements)
         max_esc, escaped = worst_case_containment(
-            placements, drifted_out["axis"], drifted_out["perp"], drifted_out["origin"],
+            placements, today["axis"], today["perp"], today["origin"],
             true_out["axis"], true_out["perp"], true_out["origin"], true_out["interior"])
-        verdict = "NO -- overlay escapes the real bag" if max_esc > 1e-4 else "yes"
-        print(f"{label + f' ({dplaney_cm:.0f}cm plane, {daxis_deg:.0f}deg axis, {ddrift_cm:.0f}cm drift)':<45} "
-              f"{max_corner_err * 100:6.2f} cm       {max_esc * 100:6.2f} cm ({escaped} corners)      {verdict}")
+        frozen_esc, _ = worst_case_containment(
+            placements, frozen["axis"], frozen["perp"], frozen["origin"],
+            true_out["axis"], true_out["perp"], true_out["origin"], true_out["interior"])
+        verdict = "NO -- still escapes the real bag" if max_esc > 1e-4 else "yes"
+        scenario = (f"{label} ({plane_cm:.0f}cm plane, {vertical_cm:.0f}cm vertical drift, "
+                    f"{axis_deg:.0f}deg axis, {horizontal_cm:.0f}cm horizontal drift)")
+        print(f"{scenario:<58} {corner_err * 100:5.2f} / {frozen_corner_err * 100:5.2f} cm         "
+              f"{max_esc * 100:5.2f} / {frozen_esc * 100:5.2f} cm ({escaped} corners)   {verdict}")
+    print("note: horizontal drift + axis error dominate both columns here (the interior is tall "
+          "enough that the vertical shift alone doesn't threaten containment); it still shows up "
+          "as the small today/frozen gap in corner err, all of it in the corrected Y term.")
     print("")
 
 
@@ -847,7 +913,12 @@ def main() -> int:
         lid_open_true_interior_check(true_out, out, placements)
         if args.adversarial:
             clutter_check(driver)
-            drift_check(driver, true_suitcase_cloud, true_out, placements)
+            # A plan solved against the SAME (true, undegraded) bag the drift sweep measures
+            # against -- reusing `placements` here would confound drift with whatever degraded
+            # the suitcase (e.g. lid-open inflation), mis-attributing that error to drift.
+            true_placements = post_suitcase_items_plan(base, "sim suitcase (true bag, for drift)",
+                                                         true_out["interior"], items, item_fits)
+            drift_check(driver, true_suitcase_cloud, true_out, true_placements)
 
         return 0
     finally:

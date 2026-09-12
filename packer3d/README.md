@@ -82,6 +82,21 @@ entry can also carry the server's scan-document fields (`SCAN_OUTPUT.md`) direct
 item is packed at `height / k` via `Item.compressed(k)` (`compressibility_k` on the resulting
 `Item`; `k == 1` is a no-op). A `"heights"` key routes the item through `Item.from_scanned_heightmap`.
 
+A scanned item's height grid is also used for **nesting**: `Item.solid_boxes()` max-pools the
+grid to at most 4x4 cells and emits one box per cell, so a bowl or an open shoe is packed as its
+real cavity rather than its bounding box, and a smaller item can sit inside it. `verify()`
+decomposes placements the same way — it re-derives collisions from `Placement.dims`
+independently, so decomposing in only one of the two would make it flag every correct nested
+placement as an overlap. Two limits worth knowing before you trust a nested plan:
+
+* **A `0` cell is ambiguous.** `SCAN_OUTPUT.md` gives no separate "not observed" signal, so a
+  cell the LiDAR never saw — the occluded far side of an object — is indistinguishable from a
+  genuine hole, and the solver will pack into a cavity that is solid in reality. Every other
+  consumer of this field (volume, classification) already makes the same assumption, but this is
+  the one where the consequence shows up on stage instead of in a test.
+* **Nesting only fires for box-classified items** with a height grid, in the two z-preserving
+  orientations (`xyz`/`yxz`). Cylinders and tipped items still pack as bounding boxes.
+
 ### Output JSON contract (what the frontend consumes)
 
 ```jsonc

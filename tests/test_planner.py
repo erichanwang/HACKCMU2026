@@ -93,6 +93,71 @@ class TestTimeBudgetEnv(unittest.TestCase):
         importlib.reload(planner)  # restore the default for the rest of the suite
 
 
+class TestFixedIterations(unittest.TestCase):
+    """`PLAN_ITERATIONS` makes a plan reproducible: same scan in, same plan out.
+
+    The default wall-clock budget cannot promise that -- the search stops when the clock says
+    so, and a loaded laptop reaches a different place in the same second, so the same bag can
+    yield a different layout between the rehearsal and the demo.
+    """
+
+    def test_env_var_switches_to_fixed_work(self):
+        with mock.patch.dict(os.environ, {"PLAN_ITERATIONS": "25"}):
+            importlib.reload(planner)
+            self.assertEqual(planner.PLAN_ITERATIONS, 25)
+        importlib.reload(planner)
+        self.assertEqual(planner.PLAN_ITERATIONS, 0, "default must stay on the wall-clock budget")
+
+    def _configs_used(self, env):
+        """The OptimizerConfig each optimised candidate is actually solved with."""
+        suitcase = {"_id": "s1", "name": "test", "dimensions": [0.4, 0.2, 0.3]}
+        items = [scan("shirts", 0.3, 0.1, 0.2, rigidity="soft", compressibility=2.0),
+                 scan("bottle", 0.07, 0.18, 0.07, keepUpright=True),
+                 scan("book", 0.15, 0.04, 0.2)]
+        seen = []
+        with mock.patch.dict(os.environ, env):
+            importlib.reload(planner)
+            real = planner.pack_optimized
+
+            def spy(container, packer_items, config=None, **kw):
+                seen.append(config)
+                return real(container, packer_items, config=config, **kw)
+
+            with mock.patch.object(planner, "pack_optimized", spy):
+                doc = planner.plan(suitcase, items)
+        importlib.reload(planner)
+        return seen, doc
+
+    def test_fixed_iterations_bounds_the_work_not_the_clock(self):
+        """The mechanism, asserted directly.
+
+        Two runs comparing equal is necessary but NOT sufficient: on a small scenario the
+        annealing makes no improvement at all (`stats.sa_improvements == 0`), so the wall-clock
+        default also repeats itself and an equality-only test passes without proving anything.
+        What actually delivers reproducibility is the config the solver is handed, so check that.
+        """
+        seen, _ = self._configs_used({"PLAN_ITERATIONS": "25"})
+        self.assertTrue(seen, "no optimised candidate was solved")
+        for config in seen:
+            self.assertEqual(config.time_budget_s, 0.0, "the clock must not bound a fixed-work run")
+            self.assertEqual(config.max_iterations, 25)
+        self.assertEqual(len({c.seed for c in seen}), len(seen), "each candidate keeps its own seed")
+
+    def test_default_still_bounds_the_clock(self):
+        """Unset, the wall-clock budget stays -- for an unknown bag, bounding the wait a judge
+        sits through is safer than bounding the work."""
+        seen, _ = self._configs_used({"PLAN_ITERATIONS": "0"})
+        for config in seen:
+            self.assertGreater(config.time_budget_s, 0.0)
+            self.assertIsNone(config.max_iterations)
+
+    def test_two_runs_at_fixed_iterations_agree(self):
+        """Weaker regression guard: see the docstring above for why this alone proves little."""
+        _, first = self._configs_used({"PLAN_ITERATIONS": "10"})
+        _, second = self._configs_used({"PLAN_ITERATIONS": "10"})
+        self.assertEqual(first["plan"], second["plan"])
+
+
 class TestLock(unittest.TestCase):
     def test_plan_holds_the_lock_while_solving(self):
         real_pack_naive = planner.pack_naive

@@ -576,21 +576,32 @@ func sizeFits(_ r: CGRect) -> Bool { r.width >= 74 && r.height >= 44 }
 /// How the label goes into its rectangle, or nil for "it does not, draw the step
 /// number".
 ///
-/// This is `PlanDiagramView`'s `.lineLimit(2).minimumScaleFactor(0.75)`, expressed
+/// This is `PlanDiagramView`'s `.lineLimit(2).minimumScaleFactor(planDiagramLabelFloorSize / 11)`,
+/// i.e. shrink to a 7 pt floor before giving up, expressed
 /// as the two things SVG `<text>` can actually do: one line at full size, or two
 /// at 75%. Before this existed the picture fell back to a bare step number
 /// wherever one line overflowed, which on the demo plan meant drawing `2` for the
 /// toiletry kit while the phone was showing "2. Toiletry kit" over two lines —
 /// the picture under-reporting the device on the very item the scale question is
 /// about.
+// Copies of `PlanDiagramView`'s label rules, which are `internal` to PackingPlanUI and so
+// cannot be linked. They were 54/28 and 0.75 until the floor landed: the gate is now the size
+// two 7 pt lines need, and the shrink runs down to that 7 pt floor instead of stopping at
+// 0.75 x 11 = 8.25 pt. Keep these three in step with PlanDiagramView or this tool's `view:`
+// column lies about the device -- which it did, for exactly one item, until this was updated.
+let LABEL_GATE_W: CGFloat = 32
+let LABEL_GATE_H: CGFloat = 26
+let LABEL_FLOOR_PT: Float = 7
+let LABEL_MIN_SCALE: Float = 7.0 / 11.0
+
 func labelLayout(_ r: CGRect, _ label: String) -> (lines: [String], size: Float)? {
     // The view's own gate. Under this it draws the step number and nothing else,
     // however short the label is.
-    guard r.width >= 54, r.height >= 28 else { return nil }
+    guard r.width >= LABEL_GATE_W, r.height >= LABEL_GATE_H else { return nil }
     let room = Float(r.width) - 2 * layout.pad
     if Float(label.count) * layout.label * 0.55 <= room { return ([label], layout.label) }
 
-    let shrunk = layout.label * 0.75
+    let shrunk = max(LABEL_FLOOR_PT, layout.label * LABEL_MIN_SCALE)
     let lines = wrapped(label, max(1, Int(room / (shrunk * 0.55))))
     guard lines.count <= 2,
           lines.allSatisfy({ Float($0.count) * shrunk * 0.55 <= room }),
@@ -607,7 +618,7 @@ func labelLayout(_ r: CGRect, _ label: String) -> (lines: [String], size: Float)
 /// number. Reported as two columns rather than papered over — `svg` is what you
 /// are looking at, `view` is what the judge sees.
 func legibility(_ r: CGRect, _ label: String) -> (view: String, svg: String) {
-    let view = (r.width >= 54 && r.height >= 28) ? (sizeFits(r) ? "label+size" : "label") : "step only"
+    let view = (r.width >= LABEL_GATE_W && r.height >= LABEL_GATE_H) ? (sizeFits(r) ? "label+size" : "label") : "step only"
     guard let fit = labelLayout(r, label) else { return (view, "step only") }
     let wrap = fit.lines.count > 1 ? "*" : ""
     return (view, (sizeFits(r) ? "label+size" : "label") + wrap)

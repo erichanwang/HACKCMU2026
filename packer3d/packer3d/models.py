@@ -587,6 +587,11 @@ class Placement:
     priority: float = 1.0
     scan_shape: Optional[str] = None
     scan_yaw_deg: float = 0.0
+    # Set by the decoder when it placed this item inside another item's scanned cavity:
+    # ``{"item_id": host, "cavity": [x, y, z, dx, dy, dz]}`` (min corner + extents, same frame
+    # as ``position``/``dims``).  ``None`` for an ordinary placement.  Consumers that model an
+    # item as one bounding box need it to tell a legal nest from a collision.
+    nested_in: Optional[dict] = None
 
     def to_dict(self) -> dict:
         d = {
@@ -601,6 +606,9 @@ class Placement:
         if self.scan_shape is not None:          # let the frontend draw the real scanned mesh
             d["scan_shape"] = self.scan_shape
             d["scan_yaw_deg"] = self.scan_yaw_deg
+        if self.nested_in is not None:           # omitted entirely for an un-nested placement
+            d["nested_in"] = {"item_id": self.nested_in["item_id"],
+                              "cavity": list(self.nested_in["cavity"])}
         return d
 
 

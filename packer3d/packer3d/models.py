@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import NamedTuple, Optional, Sequence
 
 from .geometry import EPS, is_finite_number, rnd3
@@ -72,6 +72,7 @@ class Item:
     scan_shape: Optional[str] = None     # original scanned shape ("box","cylinder","irregular",...) if any
     true_volume: Optional[float] = None  # measured volume from a mesh, overrides the analytic volume
     scan_yaw_deg: float = 0.0            # rotation about z applied to the scan to get the tight bbox
+    compressibility_k: float = 1.0       # loose volume / squeezed volume; dims are already the squeezed size (see compressed())
 
     def __post_init__(self):
         if not isinstance(self.id, str) or not self.id:
@@ -232,6 +233,9 @@ class Item:
         non-finite -- rather than letting a raw ``KeyError``/numpy error leak out.
         """
         import numpy as np
+        if "dimensions" in data and "width" not in data:  # server document form: [width, height, depth] in metres
+            w, h, dp = data["dimensions"]
+            data, units = {**data, "width": w, "height": h, "depth": dp}, "m"
         for key in ("id", "width", "depth", "height"):
             if key not in data:
                 raise ValueError(f"scan payload is missing required key {key!r}: {data!r}")
@@ -284,6 +288,23 @@ class Item:
         if vol is not None:
             object.__setattr__(it, "true_volume", float(vol))
         return it
+
+    def compressed(self, k: float) -> "Item":
+        """Copy of this item at its squeezed size: ``k`` = loose volume / squeezed volume (>= 1).
+
+        Height (item z) is divided by ``k`` so the item takes ``k`` times less space, the way
+        clothes fold flat and squash down. ``k == 1`` returns ``self`` unchanged.
+        """
+        k = float(k)
+        if not is_finite_number(k) or k < 1.0:
+            raise ValueError(f"item {self.id}: compressibility_k must be >= 1, got {k!r}")
+        if k == 1.0:
+            return self
+        # ponytail: squashes along height only; go isotropic (each dim / k**(1/3)) if items ever need it.
+        d = self.dims
+        return replace(self, dims=(d[0], d[1], d[2] / k), compressibility_k=k,
+                       height=None if self.height is None else self.height / k,
+                       true_volume=None if self.true_volume is None else self.true_volume / k)
 
     # ---- derived ------------------------------------------------------
     @property

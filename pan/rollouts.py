@@ -282,7 +282,7 @@ class RolloutBatch:
                 if s.backend is not None:
                     backend, backend_note = s.backend, s.backend_note
 
-            keys = {k for s in step_reports for k in s.score_components}
+            keys = sorted({k for s in step_reports for k in s.score_components})  # deterministic report order
             components: dict[str, float] = {}
             for k in keys:
                 values = [s.score_components[k] for s in step_reports if s.score_components.get(k) is not None]

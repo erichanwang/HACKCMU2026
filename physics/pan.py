@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json as _json
+import logging
 import math
 import os
 import time
@@ -44,11 +45,15 @@ IFM_BASE_URL = "https://api.ifm.ai/v1"
 IFM_MODEL = "IFM/K2-Horizon-375B-A23B"  # only model with hosted API access, per docs.ifm.ai/#/model-catalog
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
+_LOG = logging.getLogger("physics.pan")
+
 
 def _load_ifm_api_key() -> Optional[str]:
-    """`IFM_API_KEY` env var, else `.env` at the repo root (either
-    `IFM_API_KEY=...` or a bare token on its own line)."""
-    key = os.environ.get("IFM_API_KEY")
+    """`IFM_API_KEY` env var (`PAN_API_KEY` is an accepted alias -- Eric's `.env`
+    names it that), else an `IFM_API_KEY=...` line in `.env` at the repo root.
+    A bare token on its own line is NOT taken as the key: that once turned a pasted
+    unrelated secret into a live IFM key and made the test suite call the network."""
+    key = os.environ.get("IFM_API_KEY") or os.environ.get("PAN_API_KEY")
     if key:
         return key.strip()
     if not _ENV_PATH.exists():
@@ -61,8 +66,6 @@ def _load_ifm_api_key() -> Optional[str]:
             name, _, value = line.partition("=")
             if name.strip() == "IFM_API_KEY":
                 return value.strip().strip('"')
-        else:
-            return line
     return None
 
 
@@ -140,6 +143,15 @@ _RISK_SCHEMA = {
 }
 
 
+def _is_retryable(exc: Exception) -> bool:
+    """Timeout or 5xx -- the two failures worth one more try. A 4xx (bad key,
+    bad request) and a DNS/refused error are retried by fixing something, not
+    by asking again."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code >= 500
+    return isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+
+
 class RealPanBackend:
     """Textual simulative-reasoning backend using IFM's hosted K2 Horizon
     model. See the module docstring for why this isn't a visual rollout.
@@ -148,11 +160,15 @@ class RealPanBackend:
     not depend on it) -- a missing key, network error, or malformed
     response all come back as a `SimulationResult` with `status` set
     instead of an exception.
+
+    `timeout` is per call and the call is retried ONCE on a timeout/5xx, so
+    the worst case is 2x `timeout` instead of one 45 s hang that only a manual
+    re-run recovered from.
     """
 
     name = "ifm-k2-horizon"
 
-    def __init__(self, api_key: Optional[str] = None, *, model: str = IFM_MODEL, timeout: float = 45.0):
+    def __init__(self, api_key: Optional[str] = None, *, model: str = IFM_MODEL, timeout: float = 20.0):
         self.api_key = api_key or _load_ifm_api_key()
         self.model = model
         self.timeout = timeout
@@ -184,13 +200,18 @@ class RealPanBackend:
         )
 
         start = time.monotonic()
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                payload = _json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError) as e:
-            return SimulationResult(
-                status="failed", backend=self.name, error=str(e), latency_ms=(time.monotonic() - start) * 1000.0
-            )
+        for attempt in (1, 2):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    payload = _json.loads(resp.read().decode("utf-8"))
+            except (urllib.error.URLError, TimeoutError) as e:
+                if attempt == 1 and _is_retryable(e):
+                    _LOG.warning("IFM call failed (%s); retrying once at %.0fs timeout", e, self.timeout)
+                    continue
+                return SimulationResult(
+                    status="failed", backend=self.name, error=str(e), latency_ms=(time.monotonic() - start) * 1000.0
+                )
+            break
 
         latency_ms = (time.monotonic() - start) * 1000.0
         try:

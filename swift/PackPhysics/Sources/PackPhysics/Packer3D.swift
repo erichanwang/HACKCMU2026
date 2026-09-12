@@ -21,9 +21,11 @@
 // below is that single formula applied to points (position/center) and,
 // ignoring sign (extents have none), to dims (swap y/z).
 //
-// Orientation is never represented as a physics quaternion here: packer3d's
-// orientation permutation is already baked into each placement's `dims`
-// (the oriented bbox), so every mapped object keeps `rotation: .identity`.
+// packer3d's orientation permutation is already baked into each placement's
+// `dims` (the oriented bbox), so every mapped object keeps `rotation: .identity`
+// by default. `scene(fromPacker3D:oriented: false)` gives the other (equivalent)
+// form -- the item's own dims with the orientation as the pose; see its doc
+// comment, and `rotationFromOrientation` for the quaternion.
 
 import Foundation
 
@@ -44,6 +46,73 @@ import Foundation
 /// matter for a size -- this permutation is its own inverse, so it is used
 /// both packer3d -> physics and physics -> packer3d.
 @inlinable public func swapYZ(_ v: Vec3) -> Vec3 { Vec3(v.x, v.z, v.y) }
+
+// MARK: - Orientation -> quaternion
+
+/// packer3d orientation name -> axis permutation: world axis k takes the item's
+/// own axis `perm[k]` (`packer3d.models.BOX_ORIENTATIONS`). A cylinder's bbox
+/// permutes the same way, since its item frame is (2r, 2r, h) with the axis
+/// along item z. An unknown name falls back to "xyz" (Python raises `KeyError`;
+/// nothing on this side is allowed to trap on decoded JSON).
+private let orientationPerm: [String: [Int]] = [
+    "xyz": [0, 1, 2], "xzy": [0, 2, 1], "yxz": [1, 0, 2],
+    "yzx": [1, 2, 0], "zxy": [2, 0, 1], "zyx": [2, 1, 0],
+    "cyl_axis_z": [0, 1, 2], "cyl_axis_x": [2, 1, 0], "cyl_axis_y": [0, 2, 1],
+]
+
+private func perm(_ orientation: String) -> [Int] { orientationPerm[orientation] ?? [0, 1, 2] }
+
+/// packer3d basis -> physics basis, i.e. the matrix of `physicsPoint`.
+private let packerToPhysicsBasis = Mat3(columns: Vec3(1, 0, 0), Vec3(0, 0, -1), Vec3(0, 1, 0))
+
+/// Rotation matrix -> (x, y, z, w) (Shepperd's method, largest-component branch).
+private func quatFromMatrix(_ m: Mat3) -> Quat {
+    let t = m[0, 0] + m[1, 1] + m[2, 2]
+    if t > 0.0 {
+        let s = (t + 1.0).squareRoot() * 2.0
+        return Quat(x: (m[2, 1] - m[1, 2]) / s, y: (m[0, 2] - m[2, 0]) / s,
+                    z: (m[1, 0] - m[0, 1]) / s, w: 0.25 * s)
+    }
+    let diagonal = [m[0, 0], m[1, 1], m[2, 2]]
+    let i = diagonal.firstIndex(of: diagonal.max()!)!  // numpy argmax: first maximum wins
+    let (j, k) = ((i + 1) % 3, (i + 2) % 3)
+    let s = (1.0 + m[i, i] - m[j, j] - m[k, k]).squareRoot() * 2.0
+    var q = Vec3.zero
+    q[i] = 0.25 * s
+    q[j] = (m[j, i] + m[i, j]) / s
+    q[k] = (m[k, i] + m[i, k]) / s
+    return Quat(x: q.x, y: q.y, z: q.z, w: (m[k, j] - m[j, k]) / s)
+}
+
+/// packer3d `placement.orientation` -> physics quaternion. Needed whenever the
+/// object carries its OWN (unoriented) dimensions and only the pose moves it --
+/// `placements(fromPacker3D:)` + `applyPlacements`. (`scene(fromPacker3D:)`
+/// instead builds objects straight from the already-oriented `placement.dims`,
+/// so those keep identity rotation; both forms produce the same world OBB, which
+/// the tests assert.)
+///
+/// Derivation: the permutation matrix `M[k, perm[k]] = 1` maps an item-frame
+/// vector to the packer world frame. An odd permutation has det -1 (a reflection,
+/// not a rotation), so one column is negated -- a 180-degree flip, which leaves a
+/// box's (symmetric) extents untouched and makes det +1. The physics-frame
+/// rotation is then `R = P M P^T` with `P` = the matrix of `physicsPoint`.
+public func rotationFromOrientation(_ orientation: String) -> Quat {
+    var columns = [Vec3.zero, Vec3.zero, Vec3.zero]
+    for (k, src) in perm(orientation).enumerated() { columns[src][k] = 1.0 }
+    var m = Mat3(columns: columns[0], columns[1], columns[2])
+    if dot(cross(m.c0, m.c1), m.c2) < 0.0 { m.c0 = -m.c0 }
+    return quatFromMatrix(packerToPhysicsBasis * m * packerToPhysicsBasis.transposed)
+}
+
+/// Undo the solver's axis permutation: the oriented bbox `placement.dims` -> the
+/// item's OWN extents. `M` above puts item axis `perm[k]` on world axis `k`, so
+/// extents map back with `own[perm[k]] = dims[k]`. Pairs with
+/// `rotationFromOrientation`.
+private func unorientedDims(_ dims: Vec3, _ orientation: String) -> Vec3 {
+    var own = Vec3.zero
+    for (k, src) in perm(orientation).enumerated() { own[src] = dims[k] }
+    return own
+}
 
 // MARK: - Codable models (packer3d result JSON contract)
 
@@ -351,13 +420,15 @@ public func container(fromPacker3D c: Packer3DContainer) -> Container {
 
 /// Map one placement to a `SceneObject`. `keepUpright` isn't in the placement
 /// JSON (only the scenario item has it) -- pass it in from the scenario, or
-/// leave `false` when validating a result with no scenario at hand.
-public func sceneObject(fromPlacement p: Packer3DPlacement, keepUpright: Bool = false) -> SceneObject {
+/// leave `false` when validating a result with no scenario at hand. `oriented`
+/// picks the form (see `scene(fromPacker3D:scenario:includeObstacles:oriented:)`).
+public func sceneObject(fromPlacement p: Packer3DPlacement, keepUpright: Bool = false,
+                        oriented: Bool = true) -> SceneObject {
     SceneObject(
         id: p.itemId,
-        dimensions: swapYZ(p.dims),
+        dimensions: swapYZ(oriented ? p.dims : unorientedDims(p.dims, p.orientation)),
         position: physicsPoint(p.center),
-        rotation: .identity,
+        rotation: oriented ? .identity : rotationFromOrientation(p.orientation),
         massKg: p.mass,
         constraints: Constraints(fragile: p.fragile, keepUpright: keepUpright, cannotSupportWeight: p.fragile),
         rigidity: .rigid
@@ -385,12 +456,26 @@ public func sceneObject(fromObstacle o: Packer3DObstacle) -> SceneObject {
 /// solver's `unpacked` list (never part of the scene) and a lookup back to
 /// each placement's original packer3d record -- shape/radius/height/axis for
 /// a renderer that wants to draw a real cylinder instead of its bounding box.
+///
+/// `oriented` picks which of the two equivalent forms the placed objects take.
+/// Both occupy exactly the same world box, so the validator's verdict is the same:
+///
+/// * `true` (default) -- the solver's already-oriented `dims` with identity
+///   rotation. Axis-aligned and exact, so this stays the canonical form for
+///   everything that only GRADES a finished layout (`validatePacker3D`, the CLI):
+///   those never apply placements on top.
+/// * `false` -- the item's own dims with the orientation carried in the pose. Use
+///   this, and only this, when the scene is then moved by
+///   `placements(fromPacker3D:)` (`applyPlacements`); pairing those rotations with
+///   the default oriented dims applies the permutation twice and the physics gate
+///   rejects the solver's own valid plan.
 public func scene(
-    fromPacker3D result: Packer3DResult, scenario: Packer3DScenario? = nil, includeObstacles: Bool = true
+    fromPacker3D result: Packer3DResult, scenario: Packer3DScenario? = nil, includeObstacles: Bool = true,
+    oriented: Bool = true
 ) -> (scene: Scene, unpacked: [Packer3DUnpacked], shapes: [String: Packer3DPlacement]) {
     let keepUprightIds = scenario.map(expandedKeepUprightIds) ?? []
     var objects = result.placements.map { p in
-        sceneObject(fromPlacement: p, keepUpright: keepUprightIds.contains(p.itemId))
+        sceneObject(fromPlacement: p, keepUpright: keepUprightIds.contains(p.itemId), oriented: oriented)
     }
     if includeObstacles {
         objects += result.container.obstacles.map(sceneObject(fromObstacle:))
@@ -399,11 +484,20 @@ public func scene(
     return (Scene(container: container(fromPacker3D: result.container), objects: objects), result.unpacked, shapes)
 }
 
-/// Map a packer3d result's placements to our `Placement` (IO.swift) records
-/// -- position only, identity rotation (packer3d never expresses orientation
-/// as a physics quaternion; see the file header).
+/// Map a packer3d result's placements to our `Placement` (IO.swift) records.
+/// `rotation` is `rotationFromOrientation(p.orientation)`, NOT identity: those
+/// objects carry their own unoriented dimensions, so the solver's axis
+/// permutation has to travel in the pose or the item lands rotated 90 degrees
+/// wrong.
+///
+/// So the scene these are applied to must be in the own-dims form --
+/// `unpackedState(fromScenario:)` or `scene(fromPacker3D:oriented: false)`, never
+/// the default oriented scene (that double-rotates; see `scene(fromPacker3D:)`).
 public func placements(fromPacker3D result: Packer3DResult) -> [Placement] {
-    result.placements.map { p in Placement(id: p.itemId, position: physicsPoint(p.center), rotation: .identity) }
+    result.placements.map { p in
+        Placement(id: p.itemId, position: physicsPoint(p.center),
+                  rotation: rotationFromOrientation(p.orientation))
+    }
 }
 
 /// The "before" state a scenario describes: the container plus every

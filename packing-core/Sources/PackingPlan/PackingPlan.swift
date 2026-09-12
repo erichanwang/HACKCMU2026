@@ -55,6 +55,48 @@ public struct Container: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// The solver's claim that a placement sits inside another item's scanned cavity —
+/// socks in a shoe, a charger in the dip of a dopp kit. Such a pair shares volume
+/// legitimately, which is why the geometry checks need to be told about it.
+///
+/// It is an **assertion by the producer, not a fact**. `geometryIssues()` honours it
+/// only as far as `cavity` reaches: overlap outside that box is still an overlap.
+/// A host the plan does not contain, a self-reference, or a loop of hosts is
+/// ignored outright — see `honouredNesting()`.
+public struct Nesting: Codable, Hashable, Sendable {
+    /// `Placement.itemID` of the host whose cavity holds this item.
+    public let itemID: String
+
+    /// The host's cavity, in the **bag frame**: min corner plus full extent, the
+    /// same convention as `Placement.position` and `Placement.size`.
+    public let cavity: Cavity
+
+    public struct Cavity: Codable, Hashable, Sendable {
+        /// **Min corner** of the cavity, not its center.
+        public let position: Vector3
+        public let size: Vector3
+
+        public init(position: Vector3, size: Vector3) {
+            self.position = position
+            self.size = size
+        }
+
+        public var box: BoundingBox {
+            BoundingBox(minCorner: position, size: size)
+        }
+    }
+
+    public init(itemID: String, cavity: Cavity) {
+        self.itemID = itemID
+        self.cavity = cavity
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case itemID = "itemId"
+        case cavity
+    }
+}
+
 /// One item in one spot, at one step of the packing sequence.
 public struct Placement: Codable, Hashable, Identifiable, Sendable {
     /// 1-based position in the packing sequence. The AR view highlights the
@@ -83,6 +125,10 @@ public struct Placement: Codable, Hashable, Identifiable, Sendable {
     /// end wall"). Presentation only; never parsed.
     public let note: String
 
+    /// Set when the solver put this item inside another item's cavity. Absent or
+    /// `null` in the JSON — the common case — decodes to `nil`.
+    public let nestedIn: Nesting?
+
     public init(
         step: Int,
         itemID: String,
@@ -91,7 +137,8 @@ public struct Placement: Codable, Hashable, Identifiable, Sendable {
         position: Vector3,
         size: Vector3,
         rotation: AxisRotation,
-        note: String
+        note: String,
+        nestedIn: Nesting? = nil
     ) {
         self.step = step
         self.itemID = itemID
@@ -101,6 +148,7 @@ public struct Placement: Codable, Hashable, Identifiable, Sendable {
         self.size = size
         self.rotation = rotation
         self.note = note
+        self.nestedIn = nestedIn
     }
 
     public var id: String { itemID }
@@ -123,6 +171,7 @@ public struct Placement: Codable, Hashable, Identifiable, Sendable {
         case size
         case rotation
         case note
+        case nestedIn
     }
 }
 

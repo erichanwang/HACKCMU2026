@@ -135,6 +135,67 @@ final class Packer3DTests: XCTestCase {
         XCTAssertNil(violationCounts["CONTAINER_PENETRATION"], "unexpected CONTAINER_PENETRATION in \(strategy): \(validation.violations)")
     }
 
+    // MARK: - Orientation -> quaternion
+
+    /// Every packer3d orientation name, against Python's
+    /// `rotation_from_orientation` (printed from `physics/packer3d_adapter.py`) --
+    /// the branch and the sign have to agree, not just the rotation.
+    func testRotationFromOrientationMatchesPython() {
+        let r = 0.7071067811865476, r1 = 0.7071067811865475
+        let expected: [String: Quat] = [
+            "xyz": Quat(x: 0, y: 0, z: 0, w: 1),
+            "xzy": Quat(x: 0, y: r, z: -r1, w: 0),
+            "yxz": Quat(x: 0, y: -r1, z: 0, w: r),
+            "yzx": Quat(x: 0.5, y: 0.5, z: -0.5, w: -0.5),
+            "zxy": Quat(x: 0.5, y: 0.5, z: -0.5, w: 0.5),
+            "zyx": Quat(x: 0, y: 0, z: -r1, w: r),
+            "cyl_axis_z": Quat(x: 0, y: 0, z: 0, w: 1),
+            "cyl_axis_x": Quat(x: 0, y: 0, z: -r1, w: r),
+            "cyl_axis_y": Quat(x: 0, y: r, z: -r1, w: 0),
+        ]
+        for (name, q) in expected {
+            XCTAssertEqual(rotationFromOrientation(name), q, name)
+        }
+    }
+
+    // MARK: - The result's own scene, moved by its own placements
+
+    /// `oriented: false` gives the objects their own dims, so the orientation is
+    /// applied exactly once and the layout is the solver's own valid one; with the
+    /// default oriented dims every permuted item rotates a second time and the gate
+    /// rejects the plan. Mirrors the Python
+    /// `MappingTests::test_result_scene_paired_with_its_own_placements_passes_the_physics_gate`.
+    func testResultSceneWithItsOwnPlacementsPassesThePhysicsGate() throws {
+        let scenario = try packer3dScenario(from: try suitcaseScenarioData())
+        for strategy in ["naive", "optimized"] {
+            let result = try packer3dResult(from: try suitcaseResultData(), strategy: strategy)
+            let direct = scene(fromPacker3D: result, scenario: scenario)
+            let own = scene(fromPacker3D: result, scenario: scenario, oriented: false)
+            let moved = try applyPlacements(own.scene, placements(fromPacker3D: result))
+
+            for o in direct.scene.objects {  // same world boxes: the permutation was applied once
+                let a = bounds(obbVertices(try obbFrom(o)))
+                let b = bounds(obbVertices(try obbFrom(moved.object(id: o.id)!)))
+                for k in 0..<3 {
+                    XCTAssertEqual(a.min[k], b.min[k], accuracy: 1e-9, "\(strategy) \(o.id) min[\(k)]")
+                    XCTAssertEqual(a.max[k], b.max[k], accuracy: 1e-9, "\(strategy) \(o.id) max[\(k)]")
+                }
+            }
+
+            XCTAssertTrue(validateLayout(moved).valid, "\(strategy): \(validateLayout(moved).violations)")
+            let pv = try PlacementValidator(container: moved.container)  // and the incremental gate, in solver order
+            for o in moved.objects {
+                XCTAssertTrue(pv.place(o).valid, "\(strategy) \(o.id)")
+            }
+        }
+    }
+
+    /// Axis-aligned bounds of a set of world-space corners.
+    private func bounds(_ vertices: [Vec3]) -> (min: Vec3, max: Vec3) {
+        (Vec3(vertices.map(\.x).min()!, vertices.map(\.y).min()!, vertices.map(\.z).min()!),
+         Vec3(vertices.map(\.x).max()!, vertices.map(\.y).max()!, vertices.map(\.z).max()!))
+    }
+
     // MARK: - Dragon: obstacles + fake collision with the hatch
 
     func testDragonObstaclesAppearInScene() throws {

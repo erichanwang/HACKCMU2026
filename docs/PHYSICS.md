@@ -2,7 +2,7 @@
 
 Validates a suitcase-packing layout: are objects inside the container, not
 overlapping, adequately supported, and consistent with travel-specific
-constraints (fragile, keep upright, etc.)? Ten modules, each independently
+constraints (fragile, keep upright, etc.)? Fifteen modules, each independently
 tested; `physics/validator.py` composes them into one API (§10). Teammate
 -facing integration walkthrough (iOS scan → JSON → validate → solver loop →
 renderer fields): `docs/INTEGRATION.md`.
@@ -751,6 +751,7 @@ dataclasses (nothing here re-implements physics; it's the boundary):
 | Command | Does |
 |---|---|
 | `validate scene.json [--placements p.json] [--pretty]` | `scene_from_dict` → `validate(scene, placements)` → prints `result_to_json`. `--placements` file may be a bare list or the `{"placements": [...]}` wrapper — both accepted. |
+| `validate-packer3d result.json [--strategy naive\|optimized] [--items scenario.json] [--pretty]` | packer3d solver result JSON → `validate_packer3d` (`physics/packer3d_adapter.py`) → prints `result_to_json`. `--strategy` picks a side of a `--compare` result; `--items` supplies the scenario JSON for `keep_upright`/`priority`. |
 | `example` | Prints `tests.fixtures.valid_packed_scene()`'s JSON shape. |
 | `scan-to-object item.json` | `ScannedItem` JSON (cm) → `Object` dict (m), via `object_from_scanned_item`. |
 

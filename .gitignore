@@ -24,3 +24,8 @@ graphify-out/cache/
 .swiftpm/
 # Python
 .venv/
+*.egg-info/
+.pytest_cache/
+packer3d/uv.lock
+packer3d/.venv/
+tests/swift/typecheck/.modcache/

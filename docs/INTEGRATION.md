@@ -107,6 +107,16 @@ placed — **or** the equivalent `target_position`/`target_rotation` spelling
 (A bare list `[{...}, ...]` works too — the CLI and `apply_placements` both
 accept either shape.) Example: `examples/placements_collision.json`.
 
+When the placements come from packer3d
+(`physics.packer3d_adapter.placements_from_packer3d`), their `rotation` carries
+the solver's axis permutation, so the scene they are applied to must hold each
+item's **own** dimensions: `scene_from_packer3d_scenario(scenario)` or
+`scene_from_packer3d(result, oriented=False)`. Plain
+`scene_from_packer3d(result)` has already baked that permutation into
+`dimensions` (identity rotation) — that form is for *grading* a finished layout
+(`validate_packer3d`), and applying the placements on top of it rotates every
+permuted item twice.
+
 ```python
 from physics.io import validate
 result = validate(scene, placements)   # apply_placements, then validate_layout

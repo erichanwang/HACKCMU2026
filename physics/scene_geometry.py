@@ -28,7 +28,18 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from physics.geometry import OBB, SIGNS, obb_from, obb_vertices
+from physics.geometry import (
+    OBB,
+    SIGNS,
+    convex_clip_2d,
+    convex_hull_2d,
+    footprint_local,
+    obb_from,
+    obb_vertices,
+    polygon_area_2d,
+    polygon_centroid_2d,
+    prism_vertices,
+)
 from physics.schema import Object, Scene
 
 
@@ -62,10 +73,24 @@ class SceneGeometry:
     centers: np.ndarray  # (n, 3)
     axes: np.ndarray  # (n, 3, 3), axes[n][:, k] is object n's local axis k in world
     half_extents: np.ndarray  # (n, 3)
-    vertices: np.ndarray  # (n, 8, 3) world-space corners, SIGNS order
-    aabb_min: np.ndarray  # (n, 3)
+    vertices: np.ndarray  # (n, 8, 3) world-space OBB corners, SIGNS order (the box envelope)
+    aabb_min: np.ndarray  # (n, 3) from the prism vertices (== OBB corners for boxes)
     aabb_max: np.ndarray  # (n, 3)
     masses: np.ndarray  # (n,)
+    # Scanned-footprint support. Boxes are 4-point prisms, so every consumer can
+    # treat all objects uniformly: footprints[i] is the CCW local (x, z) polygon
+    # (m_i, 2); prism_vertices[i] is (2 m_i, 3) world points, bottom ring then
+    # top ring; is_prism[i] is True only when the object supplied a footprint;
+    # yaw_only[i] is True when the object's local y axis is world +-Y (the
+    # prism's side faces are then vertical and its footprint is exact in XZ).
+    footprints: list
+    prism_vertices: list
+    is_prism: np.ndarray
+    yaw_only: np.ndarray
+    # World center of mass under uniform density: the OBB center for boxes, the
+    # footprint's area centroid (at mid-height) mapped to world for prisms.
+    # Use this -- not `centers` -- for COM projections and mass-weighted metrics.
+    com: np.ndarray
 
     @property
     def n(self) -> int:
@@ -118,6 +143,8 @@ def precompute(scene: Scene) -> SceneGeometry:
         return SceneGeometry(
             scene, objects, [], {}, container_obb, container_vertices, floor_y, [],
             empty3, np.zeros((0, 3, 3)), empty3, np.zeros((0, 8, 3)), empty3, empty3, np.zeros(0),
+            footprints=[], prism_vertices=[], is_prism=np.zeros(0, dtype=bool), yaw_only=np.zeros(0, dtype=bool),
+            com=empty3,
         )
 
     try:
@@ -143,6 +170,35 @@ def precompute(scene: Scene) -> SceneGeometry:
     # vertices[n, v, j] = centers[n, j] + sum_k SIGNS[v, k] * he[n, k] * axes[n, j, k]
     vertices = centers[:, None, :] + np.einsum("vk,nk,njk->nvj", SIGNS, half_extents, axes)
     ids = [o.id for o in objects]
+    obbs = [OBB(center=centers[i], axes=axes[i], half_extents=half_extents[i], id=ids[i]) for i in range(n)]
+
+    # Footprints / prisms. Boxes get their 4 rectangle corners, so the AABB of
+    # the prism vertices equals the AABB of the OBB corners for them; scanned
+    # prisms get a tighter AABB than their box envelope.
+    footprints: list[np.ndarray] = []
+    prisms: list[np.ndarray] = []
+    is_prism = np.zeros(n, dtype=bool)
+    for i, o in enumerate(objects):
+        try:
+            fp = footprint_local(o)
+        except ValueError as e:
+            raise MalformedSceneError(o.id, str(e)) from e
+        footprints.append(fp)
+        prisms.append(prism_vertices(obbs[i], fp))
+        is_prism[i] = o.footprint is not None
+    # Boxes keep the bit-identical AABB of their 8 OBB corners (the snapshot
+    # regression guard depends on it); only scanned prisms use their ring.
+    aabb_min = vertices.min(axis=1)
+    aabb_max = vertices.max(axis=1)
+    for i in np.nonzero(is_prism)[0]:
+        aabb_min[i] = prisms[i].min(axis=0)
+        aabb_max[i] = prisms[i].max(axis=0)
+    yaw_only = np.abs(axes[:, 1, 1]) > 1.0 - 1e-9
+    com = centers.copy()
+    for i in np.nonzero(is_prism)[0]:
+        cx, cz = polygon_centroid_2d(footprints[i])
+        com[i] = centers[i] + axes[i] @ np.array([cx, 0.0, cz])
+
     return SceneGeometry(
         scene=scene,
         objects=objects,
@@ -151,15 +207,41 @@ def precompute(scene: Scene) -> SceneGeometry:
         container_obb=container_obb,
         container_vertices=container_vertices,
         container_floor_y=floor_y,
-        obbs=[OBB(center=centers[i], axes=axes[i], half_extents=half_extents[i], id=ids[i]) for i in range(n)],
+        obbs=obbs,
         centers=centers,
         axes=axes,
         half_extents=half_extents,
         vertices=vertices,
-        aabb_min=vertices.min(axis=1),
-        aabb_max=vertices.max(axis=1),
+        aabb_min=aabb_min,
+        aabb_max=aabb_max,
         masses=np.array([o.mass_kg for o in objects], dtype=float),
+        footprints=footprints,
+        prism_vertices=prisms,
+        is_prism=is_prism,
+        yaw_only=yaw_only,
+        com=com,
     )
+
+
+def container_local_vertices(geom: SceneGeometry) -> np.ndarray:
+    """(n, 8, 3) object corners in the CONTAINER's frame: origin at the container
+    centre, axis k = container axis k. Same projection `physics.containment` uses
+    for per-wall depths, so `container.half_extents - |result|` is the remaining
+    room before each wall. One einsum, O(n)."""
+    c = geom.container_obb
+    return np.einsum("nvj,jk->nvk", geom.vertices - c.center, c.axes)
+
+
+def container_up_axis(geom: SceneGeometry) -> tuple[int, float]:
+    """`(axis_index, sign)` of the container-local axis that points most nearly
+    along world up. `sign` is +1 or -1: `sign * local_coord[axis]` grows upward.
+
+    For the usual axis-aligned container this is `(1, +1.0)` (local y = world Y).
+    Ties (a container tipped exactly 45 degrees) resolve to the lowest index --
+    arbitrary, but deterministic."""
+    world_y = geom.container_obb.axes[1, :]  # world-Y component of each local axis
+    k = int(np.argmax(np.abs(world_y)))
+    return k, (1.0 if world_y[k] >= 0.0 else -1.0)
 
 
 def aabb_candidate_pairs(geom: SceneGeometry, epsilon: float = 0.0) -> np.ndarray:
@@ -178,16 +260,31 @@ def aabb_candidate_pairs(geom: SceneGeometry, epsilon: float = 0.0) -> np.ndarra
 
 
 def xz_overlap_area(geom: SceneGeometry, i: int, j: int) -> float:
-    """Overlap area of objects i and j's XZ axis-aligned footprints (from
-    their AABBs). 0.0 when disjoint. Exact for yaw-only rotation, conservative
-    (over-estimate) otherwise. Modules needing exact rotated footprints clip
-    polygons themselves; this is the shared *topology* test (touching or not)."""
+    """Overlap area of objects i and j's XZ footprints. 0.0 when disjoint.
+
+    Box-box pairs use the AABB rectangles (bit-identical to v2; exact for
+    yaw-only rotation, conservative otherwise). When either object is a scanned
+    prism, the AABB test is only the cheap reject and the area is the exact
+    intersection of the two world-XZ footprint hulls -- so a shoe's tapered toe
+    no longer "rests on" or "neighbours" something that only its box touches."""
     lo_i, hi_i, lo_j, hi_j = geom.aabb_min[i], geom.aabb_max[i], geom.aabb_min[j], geom.aabb_max[j]
     dx = min(hi_i[0], hi_j[0]) - max(lo_i[0], lo_j[0])
     dz = min(hi_i[2], hi_j[2]) - max(lo_i[2], lo_j[2])
     if dx <= 0.0 or dz <= 0.0:
         return 0.0
-    return float(dx * dz)
+    if not (geom.is_prism[i] or geom.is_prism[j]):
+        return float(dx * dz)
+    hull_i = convex_hull_2d(geom.prism_vertices[i][:, [0, 2]])
+    hull_j = convex_hull_2d(geom.prism_vertices[j][:, [0, 2]])
+    if len(hull_i) < 3 or len(hull_j) < 3:
+        return 0.0
+    return polygon_area_2d(convex_clip_2d(hull_i, hull_j))
+
+
+# Below this XZ overlap area a "contact" is a float artifact, not a contact: two boxes
+# packed flush edge to edge come out of the OBB vertex math overlapping by ~1e-17 m^2,
+# which `area > 0.0` admitted as one resting on the other.
+MIN_CONTACT_AREA_M2 = 1e-9
 
 
 def resting_pairs(geom: SceneGeometry, contact_eps: float) -> list[tuple[int, int, float]]:
@@ -210,7 +307,7 @@ def resting_pairs(geom: SceneGeometry, contact_eps: float) -> list[tuple[int, in
     out: list[tuple[int, int, float]] = []
     for t, b in zip(*np.nonzero(close)):
         area = xz_overlap_area(geom, int(t), int(b))
-        if area > 0.0:
+        if area > MIN_CONTACT_AREA_M2:
             out.append((int(t), int(b), area))
     return out
 

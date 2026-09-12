@@ -1,0 +1,162 @@
+{
+  "container": {
+    "id": "carryon_interior",
+    "shape": "box",
+    "dims": [0.52, 0.365, 0.2],
+    "gravity": true,
+    "max_mass": 10.0,
+    "min_support": 0.6
+  },
+  "items": [
+    {
+      "id": "tshirt_folded",
+      "shape": "box",
+      "dims": [0.25, 0.2, 0.03],
+      "mass": 0.15,
+      "rigidity": "soft",
+      "compressibility": 1.8,
+      "count": 8
+    },
+    {
+      "id": "dress_shirt_folded",
+      "shape": "box",
+      "dims": [0.28, 0.22, 0.035],
+      "mass": 0.22,
+      "rigidity": "soft",
+      "compressibility": 1.5,
+      "count": 3
+    },
+    {
+      "id": "jeans_folded",
+      "shape": "box",
+      "dims": [0.33, 0.28, 0.05],
+      "mass": 0.62,
+      "rigidity": "soft",
+      "compressibility": 1.6,
+      "count": 2
+    },
+    {
+      "id": "chinos_folded",
+      "shape": "box",
+      "dims": [0.33, 0.27, 0.045],
+      "mass": 0.52,
+      "rigidity": "soft",
+      "compressibility": 1.6,
+      "count": 2
+    },
+    {
+      "id": "shorts_folded",
+      "shape": "box",
+      "dims": [0.26, 0.22, 0.035],
+      "mass": 0.28,
+      "rigidity": "soft",
+      "compressibility": 1.8,
+      "count": 2
+    },
+    {
+      "id": "wool_sweater",
+      "shape": "box",
+      "dims": [0.32, 0.26, 0.08],
+      "mass": 0.45,
+      "rigidity": "soft",
+      "compressibility": 2.2,
+      "count": 2
+    },
+    {
+      "id": "hoodie_rolled",
+      "shape": "box",
+      "dims": [0.29, 0.18, 0.17],
+      "mass": 0.6,
+      "rigidity": "soft",
+      "compressibility": 2.4
+    },
+    {
+      "id": "fleece_rolled",
+      "shape": "box",
+      "dims": [0.26, 0.17, 0.15],
+      "mass": 0.38,
+      "rigidity": "soft",
+      "compressibility": 2.6
+    },
+    {
+      "id": "summer_dress_rolled",
+      "shape": "box",
+      "dims": [0.3, 0.13, 0.13],
+      "mass": 0.26,
+      "rigidity": "soft",
+      "compressibility": 2.8
+    },
+    {
+      "id": "socks_bundle",
+      "shape": "box",
+      "dims": [0.11, 0.09, 0.07],
+      "mass": 0.08,
+      "rigidity": "soft",
+      "compressibility": 2.0,
+      "count": 8
+    },
+    {
+      "id": "underwear_bundle",
+      "shape": "box",
+      "dims": [0.12, 0.1, 0.06],
+      "mass": 0.07,
+      "rigidity": "soft",
+      "compressibility": 2.2,
+      "count": 8
+    },
+    {
+      "id": "towel_rolled",
+      "shape": "box",
+      "dims": [0.3, 0.15, 0.15],
+      "mass": 0.42,
+      "rigidity": "soft",
+      "compressibility": 2.5
+    },
+    {
+      "id": "packing_cube_half_full",
+      "width": 35,
+      "depth": 25,
+      "height": 12,
+      "cellSize": 2.5,
+      "heights": [
+        [12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0],
+        [12.0, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 12.0],
+        [12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0]
+      ],
+      "mass": 1.85,
+      "fragile": false
+    },
+    {
+      "id": "laundry_bag_empty",
+      "shape": "box",
+      "dims": [0.18, 0.12, 0.03],
+      "mass": 0.09,
+      "rigidity": "rigid",
+      "priority": 0.5
+    },
+    {
+      "id": "dopp_kit",
+      "shape": "box",
+      "dims": [0.24, 0.125, 0.11],
+      "mass": 1.05,
+      "rigidity": "rigid"
+    }
+  ],
+  "optimizer": {
+    "time_budget_s": 6,
+    "seed": 0
+  },
+  "weights": {
+    "unpacked": 12,
+    "compact": 1,
+    "com": 4,
+    "height": 0.5
+  }
+}

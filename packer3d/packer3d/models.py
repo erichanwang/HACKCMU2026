@@ -73,6 +73,8 @@ class Item:
     true_volume: Optional[float] = None  # measured volume from a mesh, overrides the analytic volume
     scan_yaw_deg: float = 0.0            # rotation about z applied to the scan to get the tight bbox
     compressibility_k: float = 1.0       # loose volume / squeezed volume; dims are already the squeezed size (see compressed())
+    height_grid: Optional[tuple] = None  # heightmap (metres, tuple of tuples), local (x=dims[0], y=dims[1]) frame
+    grid_cell: Optional[float] = None    # side length of one height_grid cell, metres
 
     def __post_init__(self):
         if not isinstance(self.id, str) or not self.id:
@@ -287,7 +289,50 @@ class Item:
         object.__setattr__(it, "scan_shape", kind)
         if vol is not None:
             object.__setattr__(it, "true_volume", float(vol))
+            object.__setattr__(it, "height_grid", tuple(tuple(row) for row in arr.tolist()))
+            object.__setattr__(it, "grid_cell", cell)
         return it
+
+    def solid_boxes(self, max_blocks: int = 4) -> list:
+        """Axis-aligned boxes (local ``(lo, hi)`` tuples, item's own x/y/z frame) that
+        approximate the scanned shape, instead of treating the whole bounding box as solid.
+
+        Built by max-pooling ``height_grid`` down to at most ``max_blocks`` x ``max_blocks``
+        cells (bounds how many solids one item turns into) and emitting one box per cell, from
+        the floor up to that cell's tallest point. Max-pooling (not averaging) is deliberate:
+        it can only overstate a cell's height, never carve out cavity that isn't really there.
+
+        A cell at height ~0 gets no box at all -- a real hole clear through the item, open for
+        gravity or a smaller item's bounding box to occupy (an open shoe's throat, a bowl's
+        interior). ``height_grid`` uses the scanner's own convention (SCAN_OUTPUT.md): ``0``
+        means "nothing observed here", which does not distinguish a genuine gap from an
+        occluded-but-solid interior cell -- we take it at face value and treat it as empty,
+        same as the scanner's contract for every other consumer of this field.
+
+        Falls back to the plain bounding box when there's no height grid (a primitive box/
+        cylinder, or a scan built with ``classify=False``).
+        """
+        if self.height_grid is None:
+            return [((0.0, 0.0, 0.0), self.dims)]
+        import numpy as np
+        arr = np.asarray(self.height_grid, dtype=float)
+        dx, dy, dz = self.dims
+        rows, cols = arr.shape
+        row_blocks = np.array_split(np.arange(rows), min(max_blocks, rows))
+        col_blocks = np.array_split(np.arange(cols), min(max_blocks, cols))
+        boxes = []
+        x0 = 0.0
+        for ri in row_blocks:
+            x1 = x0 + len(ri) / rows * dx
+            y0 = 0.0
+            for cj in col_blocks:
+                y1 = y0 + len(cj) / cols * dy
+                h = float(arr[np.ix_(ri, cj)].max())
+                if h > EPS:
+                    boxes.append(((x0, y0, 0.0), (x1, y1, min(h, dz))))
+                y0 = y1
+            x0 = x1
+        return boxes or [((0.0, 0.0, 0.0), self.dims)]
 
     def compressed(self, k: float) -> "Item":
         """Copy of this item at its squeezed size: ``k`` = loose volume / squeezed volume (>= 1).
@@ -304,7 +349,9 @@ class Item:
         d = self.dims
         return replace(self, dims=(d[0], d[1], d[2] / k), compressibility_k=k,
                        height=None if self.height is None else self.height / k,
-                       true_volume=None if self.true_volume is None else self.true_volume / k)
+                       true_volume=None if self.true_volume is None else self.true_volume / k,
+                       height_grid=None if self.height_grid is None
+                       else tuple(tuple(v / k for v in row) for row in self.height_grid))
 
     # ---- derived ------------------------------------------------------
     @property
@@ -319,6 +366,16 @@ class Item:
         if self.shape == "cylinder":
             return math.pi * self.radius ** 2 * self.height
         return self.bbox_volume
+
+    @property
+    def occupied_volume(self) -> float:
+        """Volume of ``solid_boxes()`` -- equals ``bbox_volume`` with no height grid, less
+        when the grid carves out a cavity. The decoder's capacity pre-check must use this,
+        not ``bbox_volume``: an item with a real cavity can leave a container with usable
+        space even though its bounding box alone would appear to fill it."""
+        if self.height_grid is None:
+            return self.bbox_volume
+        return sum((hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]) for lo, hi in self.solid_boxes())
 
     def orientations(self) -> list:
         """Legal orientations, de-duplicated by oriented bounding box."""
@@ -347,8 +404,45 @@ class Item:
         return out
 
     def fits_in(self, container: "Container") -> bool:
-        """Static check: some legal orientation fits inside the empty container."""
-        return any(container.fits_dims(o.dims) for o in self.orientations())
+        """Static check: some legal orientation fits inside the empty container.
+
+        An upright cylinder in a cylindrical container only has to clear the bore
+        (2r <= 2R); ``fits_dims`` would make it clear the diagonal of its bounding
+        square instead, which rejects anything wider than R * sqrt(2). A cylinder
+        laid on its side really does sweep a rectangle, so it keeps that test.
+        """
+        for o in self.orientations():
+            if container.fits_dims(o.dims):
+                return True
+            if (container.shape == "cylinder" and o.axis == "z"
+                    and all(o.dims[k] <= container.dims[k] + EPS for k in range(3))):
+                return True
+        return False
+
+
+def oriented_solid_boxes(item: Item, position, dims, orientation_name: str) -> list:
+    """World-frame ``(lo, hi)`` boxes occupied by ``item`` placed with its bounding box's min
+    corner at ``position`` and oriented dims ``dims`` under orientation ``orientation_name``.
+
+    Uses ``item.solid_boxes()`` (the height-grid decomposition) only when it's meaningful:
+    a box-shaped item with a height grid, in one of the two orientations that keep the grid's
+    "up" pointing along world z (``"xyz"``/``"yxz"`` -- the only two of the six box permutations
+    with ``perm[2] == 2``). Both permutations are pure axis swaps (no reflection), so a local
+    box corner maps to world via ``world[k] = position[k] + local[perm[k]]``. Everything else
+    (cylinders, an item tipped onto its side) packs/verifies as the plain bounding box, since
+    the grid's own up axis is no longer world-up there.
+    """
+    lo = tuple(float(v) for v in position)
+    if item.shape == "box" and item.height_grid is not None and orientation_name in ("xyz", "yxz"):
+        perm = BOX_ORIENTATIONS[orientation_name]
+        out = []
+        for blo, bhi in item.solid_boxes():
+            wlo = tuple(lo[k] + blo[perm[k]] for k in range(3))
+            whi = tuple(lo[k] + bhi[perm[k]] for k in range(3))
+            out.append((wlo, whi))
+        return out
+    hi = tuple(lo[k] + dims[k] for k in range(3))
+    return [(lo, hi)]
 
 
 @dataclass(frozen=True)
@@ -493,6 +587,11 @@ class Placement:
     priority: float = 1.0
     scan_shape: Optional[str] = None
     scan_yaw_deg: float = 0.0
+    # Set by the decoder when it placed this item inside another item's scanned cavity:
+    # ``{"item_id": host, "cavity": [x, y, z, dx, dy, dz]}`` (min corner + extents, same frame
+    # as ``position``/``dims``).  ``None`` for an ordinary placement.  Consumers that model an
+    # item as one bounding box need it to tell a legal nest from a collision.
+    nested_in: Optional[dict] = None
 
     def to_dict(self) -> dict:
         d = {
@@ -507,6 +606,13 @@ class Placement:
         if self.scan_shape is not None:          # let the frontend draw the real scanned mesh
             d["scan_shape"] = self.scan_shape
             d["scan_yaw_deg"] = self.scan_yaw_deg
+        if self.nested_in is not None:           # omitted entirely for an un-nested placement
+            # Wire form is `position` + `dims`, the same spelling a placement uses, because that
+            # is what `server/app_plan.py::_nesting` reads to build the plan JSON's `nestedIn`.
+            # Internally the cavity travels as one 6-list; only the serialised shape splits it.
+            cav = list(self.nested_in["cavity"])
+            d["nested_in"] = {"item_id": self.nested_in["item_id"],
+                              "position": cav[:3], "dims": cav[3:]}
         return d
 
 

@@ -39,7 +39,10 @@ public func sceneMetrics(_ g: SceneGeometry) -> JSONValue {
 
     let totalMassKg = g.masses.reduce(0.0, +)
     var weightedSum = Vec3(0, 0, 0)
-    for i in 0..<n { weightedSum += g.masses[i] * g.obbs[i].center }
+    // `g.com` -- the OBB center for a box, the footprint's area centroid for a
+    // scanned prism -- not the raw OBB center (identical arrays when every
+    // object is a box).
+    for i in 0..<n { weightedSum += g.masses[i] * g.com[i] }
     // A massless scene (every `mass_kg` 0, or masses that cancel) has no
     // mass-weighted centroid. Fall back to the unweighted centroid -- the limit
     // as all masses become equal -- so `center_of_mass`/`com_offset_m` stay
@@ -49,7 +52,7 @@ public func sceneMetrics(_ g: SceneGeometry) -> JSONValue {
     // which is not valid JSON and no strict parser downstream can read back.)
     let centerOfMass = totalMassKg > 0
         ? weightedSum / totalMassKg
-        : g.obbs.reduce(Vec3(0, 0, 0)) { $0 + $1.center } / Double(n)
+        : g.com.reduce(Vec3(0, 0, 0), +) / Double(n)
     // world -> container-local, same convention as Containment.swift.
     let comOffsetM = container.axes.transposeMultiply(centerOfMass - container.center)
 
@@ -58,8 +61,6 @@ public func sceneMetrics(_ g: SceneGeometry) -> JSONValue {
         let he = g.obbs[i].halfExtents
         objectVolumesM3[i] = 8.0 * he.x * he.y * he.z
     }
-    let fillRatio = objectVolumesM3.reduce(0.0, +) / containerVolumeM3
-
     // Wall clearance: same vertex-into-container-frame projection as
     // Containment.swift, but reported as remaining room (can go negative)
     // rather than filtered to violations only.
@@ -108,16 +109,41 @@ public func sceneMetrics(_ g: SceneGeometry) -> JSONValue {
         heightAboveFloorM[i] = g.aabbMin[i].y - g.containerFloorY
     }
 
+    // Scanned prisms: exact hull area / prism volume / ring-vertex clearance
+    // instead of the box-envelope values. Boxes never enter this loop.
+    for i in 0..<n where g.isPrism[i] {
+        let ring = g.prismVerts[i]
+        footprintAreaM2[i] = polygonArea2D(convexHull2D(ring.map { FootprintPoint(x: $0.x, z: $0.z) }))
+        // Exact prism volume at any orientation: LOCAL footprint area x height.
+        objectVolumesM3[i] = polygonArea2D(g.footprints[i]) * 2.0 * g.obbs[i].halfExtents.y
+        var minClear = Double.infinity
+        for p in ring {
+            let local = container.axes.transposeMultiply(p - container.center)
+            for k in 0..<3 { minClear = min(minClear, container.halfExtents[k] - abs(local[k])) }
+        }
+        wallClearanceM[i] = minClear
+    }
+
+    let fillRatio = objectVolumesM3.reduce(0.0, +) / containerVolumeM3
+
     var perObject: [String: JSONValue] = [:]
     for i in 0..<n {
-        perObject[g.ids[i]] = .object([
+        var obj: [String: JSONValue] = [
             "wall_clearance_m": .number(wallClearanceM[i]),
             "nearest_neighbor_gap_m": hasNeighbour ? .number(nearestGapM[i]) : .null,
             "nearest_neighbor_id": hasNeighbour ? .string(g.ids[nearestIdx[i]]) : .null,
             "height_above_floor_m": .number(heightAboveFloorM[i]),
             "footprint_area_m2": .number(footprintAreaM2[i]),
             "volume_m3": .number(objectVolumesM3[i]),
-        ])
+        ]
+        if g.isPrism[i] {
+            // Only a scanned object carries these -- a box-only scene's
+            // per_object shape must stay byte-identical to the pre-prism
+            // contract (tests/test_stability_metrics.py's key-shape guard).
+            obj["geometry"] = .string("prism")
+            obj["footprint_vertices"] = .number(Double(g.footprints[i].count))
+        }
+        perObject[g.ids[i]] = .object(obj)
     }
 
     return .object([

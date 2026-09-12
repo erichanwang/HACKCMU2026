@@ -42,6 +42,12 @@ from physics.schema import Container, Object, Scene
 # picked because it keeps all ids in tests/fixtures.py's valid_packed_scene()
 # collision-free (verified by hand); if a future id set collides, widen the
 # palette rather than special-casing ids.
+# pan/evaluate.py segments frames back into objects by hue direction, so a face's shade
+# (1.0 top, 0.9 front, 0.82 side, the only three the fixed light can show) never moves a
+# pixel onto another entry. Measured minimum separation in that space across all 12
+# entries and shades: 64.9 (index 5 vs 7) against color_tol = 60, an 8% margin. A 13th
+# colour, a near-grey (saturation < ~0.5), or a wider tolerance can silently merge two
+# objects again; re-measure before touching either.
 _PALETTE: tuple[tuple[int, int, int], ...] = (
     (230, 25, 75), (60, 180, 75), (255, 195, 0), (0, 130, 200),
     (245, 130, 48), (145, 30, 180), (70, 240, 240), (240, 50, 230),

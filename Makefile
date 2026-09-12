@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: test-python test-swift test bench demo docker-test setup-linux
+.PHONY: test-python test-swift test-swift-app test bench demo docker-test setup-linux mongo server pipeline
 
 test-python:
 	python3 -m unittest discover
@@ -9,7 +9,29 @@ test-swift:
 	@if ! command -v swift >/dev/null 2>&1; then . swift/PackPhysics/swiftenv.sh; fi; \
 	cd swift/PackPhysics && swift test
 
+test-swift-app:
+	@ok=1; for f in tests/swift/*/run.sh; do [ -e "$$f" ] || continue; bash "$$f" || ok=0; done; [ "$$ok" = 1 ]
+
 test: test-python test-swift
+
+mongo:
+	@if docker ps --format '{{.Names}}' | grep -qx suitcase-mongo; then \
+		echo "suitcase-mongo already running"; \
+	elif docker ps -a --format '{{.Names}}' | grep -qx suitcase-mongo; then \
+		docker start suitcase-mongo; \
+	else \
+		docker run -d --name suitcase-mongo -p 27017:27017 mongo:7; \
+	fi
+
+server:
+	@if [ -f .env ]; then \
+		cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0 --port 8000; \
+	else \
+		cd server && uv run uvicorn main:app --host 0.0.0.0 --port 8000; \
+	fi
+
+pipeline:
+	bash scripts/pipeline_check.sh
 
 bench:
 	@for f in tests/benchmark_*.py; do [ -e "$$f" ] && PYTHONPATH=. python3 "$$f"; done

@@ -1,11 +1,46 @@
-"""OBB-vs-OBB collision test via the Separating Axis Theorem (SAT).
+"""Convex-prism / OBB collision tests via the Separating Axis Theorem (SAT).
+
+Geometry model
+--------------
+Every object is a convex PRISM: a convex polygon footprint in its LOCAL (x, z)
+plane, extruded over `dimensions[1]` along local y (`physics.schema.Object.
+footprint`, `physics.geometry.footprint_local`). A plain box is the 4-point
+prism whose footprint is its dimensions' rectangle, so the two cases are one
+model; a LiDAR-scanned object is the m-point prism of its 2D hull. `dimensions`
+always stays the footprint's bounding box, which gives the invariant this
+module leans on everywhere:
+
+    a prism never collides where its box envelope does not.
+
+So the box path is always a conservative (superset) answer, and the prism path
+only ever *removes* collisions the envelope invented -- the demo point: "the
+box said collision; the scan says it fits".
+
+Which narrow phase runs (`CollisionResult.narrow_phase`)
+--------------------------------------------------------
+- `"sat_obb"` -- neither object supplied a footprint (`geom.is_prism` false for
+  both). The 15-axis OBB SAT below, byte-for-byte the pre-footprint behaviour:
+  every existing box-only result, depth and contact point is unchanged.
+- `"sat_prism"` -- at least one prism AND both objects `yaw_only` (local y is
+  world +-Y, so the side faces are vertical and the XZ footprint is exact).
+  This is the LiDAR case: objects scanned upright, yaw from the min-area
+  rectangle. The test is exact: a vertical interval overlap plus 2D
+  convex-polygon SAT in world XZ (see `check_prism_pair`).
+- `"sat_obb_envelope"`, `approximate=True` -- at least one prism, but one of
+  them is rolled/pitched, so its footprint is no longer a vertical extrusion in
+  world XZ. Falls back to the 15-axis OBB SAT on the two box envelopes, which
+  by the invariant above can only over-report. Upgrade path: exact tilted-prism
+  SAT -- the face normals of both prisms (2 caps + m_a and m_b side faces) plus
+  every edge x edge pair (O(m_a * m_b) axes), all built in world space; that
+  removes the approximation at the cost of a much larger axis set.
 
 Assumptions
 -----------
 - Both boxes are convex, oriented bounding boxes (`OBB` from `physics.geometry`):
   a center, 3 orthonormal world-space axes (columns of `axes`), and 3 half-extents.
-  This module tests boxes only, not the underlying meshes -- an OBB is a
-  conservative/approximate proxy for whatever object it represents.
+  The `check_collision` / `check_pairs` entry points test boxes only, not the
+  underlying meshes -- an OBB is a conservative/approximate proxy for whatever
+  object it represents. `check_prism_pair` is the footprint-aware path.
 - Coordinate system matches `physics.schema`: meters, X=right/Y=up/Z=forward,
   right-handed. SAT itself is coordinate-free; this just fixes units for
   `penetration_depth_m`.
@@ -84,10 +119,15 @@ implementation of the SAT math in this module.
 `check_pairs(geom, pairs)`: all m pairs at once, numpy-batched, no Python loop
 over pairs -- the 15 axis tests are (m, 15) array ops.
 `aabb_overlap`: O(1) -- 8 vertices per box via `obb_vertices`, one bbox each.
+`check_prism_pair(geom, i, j)`: O(m_a + m_b) candidate axes (the outward edge
+normals of both footprints plus world Y), each projected over m_a + m_b
+vertices, so O((m_a + m_b)^2) scalar work in a handful of numpy calls -- and
+that only for pairs that reach it. Per pair it is ~10x a batched OBB pair.
 `collide_scene(geom)`: O(n^2) broad phase (one numpy broadcast in
-`scene_geometry.aabb_candidate_pairs`) plus one batched narrow phase over the
-surviving pairs. There is still no spatial index; at hackathon scale (n <= ~40)
-the O(n^2) broad phase is microseconds.
+`scene_geometry.aabb_candidate_pairs`) plus ONE batched OBB narrow phase over
+the surviving box-box pairs and a Python loop over the surviving
+prism-involving pairs. There is still no spatial index; at hackathon scale
+(n <= ~40) the O(n^2) broad phase is microseconds.
 Measured (python 3.14 / numpy 2.4, single core): single-pair `check_collision`
 ~210 us colliding / ~160 us separated (vs ~700 us / ~490 us for the old
 per-axis Python loop); `collide_scene` on a dense 20-object scene (100 of the
@@ -98,8 +138,10 @@ can.
 
 Known failure modes
 --------------------
-- Boxes only: concave or non-box shapes are not modeled; an OBB may report a
-  collision (or lack of one) that the true mesh would not.
+- Convex only: a concave scan is represented by its convex hull, so the prism
+  may report a collision the true mesh would not (never the reverse).
+- A tilted (non-`yaw_only`) prism degrades to its box envelope -- see
+  "Which narrow phase runs" above.
 - Near-parallel edges: handled by padding, not skipping (see `EPS_PARALLEL`
   above). The cross-axis test for two nearly-parallel edges is numerically
   unreliable, so it is biased towards "not separated": two boxes separated
@@ -120,7 +162,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from physics.geometry import OBB, obb_vertices
+from physics.geometry import OBB, obb_vertices, polygon_area_2d, polygon_centroid_2d
 from physics.scene_geometry import SceneGeometry, aabb_candidate_pairs
 
 EPS_PARALLEL = 1e-8  # padding on cross-axis AbsR terms; makes near-parallel edges conservative
@@ -140,6 +182,13 @@ class CollisionResult:
     contact_point: np.ndarray = None  # approximate, see check_collision docstring
     a_id: str | None = None  # OBB.id of `a`, for callers that don't thread ids themselves
     b_id: str | None = None  # OBB.id of `b`
+    # The true XZ contact patch as [[x, z], ...] -- only the prism path fills it
+    # (the OBB path has no polygon to report, see `check_collision`'s docstring).
+    contact_polygon: list | None = None
+    # Which narrow phase produced this: "sat_obb" | "sat_prism" | "sat_obb_envelope".
+    narrow_phase: str = "sat_obb"
+    # True when the shapes were approximated (box envelopes for a tilted prism).
+    approximate: bool = False
 
 
 def aabb_overlap(a: OBB, b: OBB) -> bool:
@@ -279,6 +328,145 @@ def check_collision(a: OBB, b: OBB, epsilon: float = 1e-6) -> CollisionResult:
     return CollisionResult(True, float(depth[0]), axis[0], contact[0], a.id, b.id)
 
 
+def _outward_normals_2d(poly: np.ndarray) -> np.ndarray:
+    """Unit outward edge normals of a CCW convex polygon (m, 2) -> (m, 2).
+    For edge p -> q with d = q - p, the outward normal is (d_z, -d_x)."""
+    d = np.empty_like(poly)
+    d[:-1] = poly[1:] - poly[:-1]
+    d[-1] = poly[0] - poly[-1]
+    n = np.column_stack((d[:, 1], -d[:, 0]))
+    ln = np.sqrt(n[:, 0] ** 2 + n[:, 1] ** 2)
+    return n / np.where(ln > 0.0, ln, 1.0)[:, None]
+
+
+def _prism_xz(geom: SceneGeometry, i: int, cache: dict | None = None):
+    """Object i's bottom prism ring in world XZ, (m, 2) CCW, plus its unit
+    outward edge normals. Only valid for a `yaw_only` object.
+
+    The ring is already in footprint (CCW) order, and a yaw-only rotation whose
+    local y is world +Y maps local (x, z) to world (x, z) by a proper rotation,
+    which preserves the winding. Local y = world -Y makes the XZ block a
+    reflection (its determinant must be -1 for the full rotation to be +1), so
+    the winding flips and the ring is reversed -- exact, and cheaper than
+    re-hulling or measuring the signed area. `cache` (per object index) is worth
+    passing whenever one object is tested against several others.
+    """
+    if cache is not None and i in cache:
+        return cache[i]
+    ring = geom.prism_vertices[i][: len(geom.footprints[i]), ::2]  # columns x, z
+    if geom.axes[i][1, 1] < 0.0:
+        ring = ring[::-1]
+    out = (ring, _outward_normals_2d(ring))
+    if cache is not None:
+        cache[i] = out
+    return out
+
+
+def _clip_convex_2d(poly: np.ndarray, clip: np.ndarray) -> list:
+    """Sutherland-Hodgman: the convex polygon `poly` clipped by every half-plane
+    of the CCW convex polygon `clip`. Both CCW; result CCW as a list of [x, z],
+    possibly empty. Plain Python floats -- at m <= ~12 vertices that beats numpy
+    row indexing by an order of magnitude."""
+    out, cl = poly.tolist(), clip.tolist()
+    for k in range(len(cl)):
+        if len(out) < 3:
+            return []
+        (ax, az), (bx, bz) = cl[k], cl[(k + 1) % len(cl)]
+        ex, ez = bx - ax, bz - az
+        # >= 0 == left of the directed edge == inside, for a CCW clip polygon.
+        s = [ex * (pz - az) - ez * (px - ax) for px, pz in out]
+        if min(s) >= 0.0:
+            continue
+        kept = []
+        for t in range(len(out)):
+            u = (t + 1) % len(out)
+            if s[t] >= 0.0:
+                kept.append(out[t])
+            if (s[t] >= 0.0) != (s[u] >= 0.0):
+                f = s[t] / (s[t] - s[u])
+                kept.append([out[t][0] + (out[u][0] - out[t][0]) * f,
+                             out[t][1] + (out[u][1] - out[t][1]) * f])
+        out = kept
+    return out
+
+
+def check_prism_pair(
+    geom: SceneGeometry, i: int, j: int, epsilon: float = 1e-6, cache: dict | None = None
+) -> CollisionResult:
+    """Footprint-aware narrow phase for objects i and j of `geom`.
+
+    Both `yaw_only` (the LiDAR case): exact, and cheaper than an unbatched
+    15-axis OBB test. A vertical prism is the Cartesian product of its XZ
+    footprint and its Y interval, so it separates iff the footprints separate in
+    XZ or the Y intervals do. Candidate axes: the outward edge normals of both
+    world-XZ footprints (a 2D convex polygon's only face normals) plus world Y,
+    checked in that order -- ties in the smallest-overlap search keep whichever
+    axis was checked first, as in the OBB path. That set is the FULL 3D SAT set
+    for two vertical prisms, so the reported depth is the true MTV magnitude:
+    the side-face normals are the XZ edge normals, the caps' are +-Y, and every
+    edge x edge axis collapses into those (vertical x vertical = 0; vertical x
+    horizontal is the horizontal edge's own XZ normal; horizontal x horizontal
+    is +-Y, both edges lying in the XZ plane). Per-axis overlap is
+    `min(maxA, maxB) - max(minA, minB)` over the projected vertices (Y straight
+    from the AABBs, which are exact for a yaw-only object). Same `epsilon`
+    semantics as `check_collision`: overlap <= epsilon on ANY axis => not
+    colliding, so exactly-stacked prisms report clear.
+
+    Either object tilted: the OBB-envelope fallback, `approximate=True`.
+
+    On a collision, `contact_polygon` is the true XZ contact patch (A's
+    footprint clipped by B's) as [[x, z], ...] and `contact_point` is its area
+    centroid lifted to the middle of the Y overlap interval -- a real point
+    inside the intersection, unlike the OBB path's interval midpoint. If the
+    clip degenerates (a knife-edge touch), the polygon is empty and the point
+    falls back to the midpoint of the two footprint centroids.
+    """
+    if not (geom.yaw_only[i] and geom.yaw_only[j]):
+        res = check_collision(geom.obbs[i], geom.obbs[j], epsilon)  # ids come from the OBBs
+        res.narrow_phase, res.approximate = "sat_obb_envelope", True
+        return res
+
+    ids = geom.ids
+    clear = CollisionResult(False, 0.0, a_id=ids[i], b_id=ids[j], narrow_phase="sat_prism")
+    y_lo = max(geom.aabb_min[i, 1], geom.aabb_min[j, 1])
+    y_hi = min(geom.aabb_max[i, 1], geom.aabb_max[j, 1])
+    y_ovl = y_hi - y_lo
+    if y_ovl <= epsilon:  # two scalars decide it; skip the XZ polygons entirely
+        return clear
+
+    (pa, na), (pb, nb) = _prism_xz(geom, i, cache), _prism_xz(geom, j, cache)
+    axes2 = np.concatenate([na, nb])
+    proj_a, proj_b = pa @ axes2.T, pb @ axes2.T  # (m_a, k), (m_b, k)
+    ovl_xz = np.minimum(proj_a.max(axis=0), proj_b.max(axis=0)) - np.maximum(
+        proj_a.min(axis=0), proj_b.min(axis=0)
+    )
+    k = int(ovl_xz.argmin())
+    depth = float(min(ovl_xz[k], y_ovl))
+    if depth <= epsilon:
+        return clear
+
+    if ovl_xz[k] <= y_ovl:  # XZ normals win ties, matching the axis order
+        axis = np.array([axes2[k, 0], 0.0, axes2[k, 1]])
+    else:
+        axis = np.array([0.0, 1.0, 0.0])
+    d = geom.centers[j] - geom.centers[i]
+    if float(axis @ d) < 0.0:  # orient A -> B, same rule as the OBB path
+        axis = -axis
+
+    polygon = _clip_convex_2d(pa, pb)
+    patch = np.asarray(polygon, dtype=float).reshape(-1, 2)
+    if len(patch) >= 3 and polygon_area_2d(patch) > 0.0:
+        cx, cz = polygon_centroid_2d(patch)
+    else:  # knife-edge touch: no patch to report, keep a point between the two
+        cx, cz = (polygon_centroid_2d(pa) + polygon_centroid_2d(pb)) / 2.0
+        polygon = []
+    contact = np.array([cx, (y_lo + y_hi) / 2.0, cz])
+    return CollisionResult(
+        True, depth, axis, contact, ids[i], ids[j],
+        contact_polygon=polygon, narrow_phase="sat_prism",
+    )
+
+
 def collide_scene(
     geom: SceneGeometry, epsilon: float = 1e-6, broad_phase_epsilon: float | None = None
 ) -> list[CollisionResult]:
@@ -286,9 +474,30 @@ def collide_scene(
 
     `broad_phase_epsilon` (default: `epsilon`) pads the AABBs in the broad
     phase, so a pair can only be pruned when it is further apart than the
-    narrow phase's own slack -- no pair that SAT would call colliding is lost.
-    Only colliding results are returned (order: `aabb_candidate_pairs`, i.e.
-    ascending (i, j)).
+    narrow phase's own slack -- no pair that SAT would call colliding is lost
+    (for a prism the AABB is its own, tighter than its box envelope's, which
+    only prunes harder -- allowed, by the envelope invariant).
+
+    Pairs where neither object is a prism go through the batched `check_pairs`
+    exactly as before; pairs involving a prism go one at a time through
+    `check_prism_pair`. Only colliding results are returned (order:
+    `aabb_candidate_pairs`, i.e. ascending (i, j)).
     """
     eps = epsilon if broad_phase_epsilon is None else broad_phase_epsilon
-    return [r for r in check_pairs(geom, aabb_candidate_pairs(geom, eps), epsilon) if r.colliding]
+    pairs = aabb_candidate_pairs(geom, eps)
+    if geom.is_prism is None or not geom.is_prism.any():
+        return [r for r in check_pairs(geom, pairs, epsilon) if r.colliding]
+    prism = geom.is_prism[pairs[:, 0]] | geom.is_prism[pairs[:, 1]]
+    out: list[CollisionResult | None] = [None] * len(pairs)
+    box_rows = np.nonzero(~prism)[0]
+    for row, res in zip(box_rows, check_pairs(geom, pairs[box_rows], epsilon)):
+        out[row] = res
+    cache: dict = {}  # world XZ ring + normals per object, built at most once each
+    # ponytail: one Python call per prism pair, ~50 us clear / ~150 us colliding
+    # (numpy overhead at m ~ 8, not arithmetic) vs ~7 us for a batched box pair --
+    # 9 ms for a pathological 20-object scene with 78 prism pairs. Upgrade, if a
+    # profile ever asks: pad every footprint to max(m) and do the projections for
+    # all prism pairs in one (pairs, m, axes) einsum, as `_sat_batch` does.
+    for row in np.nonzero(prism)[0]:
+        out[row] = check_prism_pair(geom, int(pairs[row, 0]), int(pairs[row, 1]), epsilon, cache)
+    return [r for r in out if r.colliding]

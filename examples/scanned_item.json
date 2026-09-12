@@ -1,6 +1,10 @@
 {
   "id": "C5C90A5F-D4B7-4DEC-A2D6-ADF729FF5272",
-  "width": 29.0,
-  "depth": 12.0,
-  "height": 11.0
+  "suitcaseId": "9B2C1A3E-6D4F-4B8C-9A1D-3E5F7A2B4C6D",
+  "dimensions": [0.29, 0.11, 0.12],
+  "cellSize": 0.01,
+  "heights": [
+    [0.11, 0.11, 0.10, 0.0],
+    [0.11, 0.11, 0.09, 0.0]
+  ]
 }

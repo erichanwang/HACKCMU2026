@@ -1,0 +1,168 @@
+{
+  "container": {
+    "id": "carryon_interior",
+    "shape": "box",
+    "dims": [0.52, 0.365, 0.2],
+    "gravity": true,
+    "max_mass": 10.0,
+    "min_support": 0.6
+  },
+  "items": [
+    {
+      "id": "body_sony_a7iv",
+      "shape": "box",
+      "dims": [0.1313, 0.0964, 0.0798],
+      "mass": 0.658,
+      "rigidity": "rigid",
+      "fragile": true,
+      "keepUpright": true,
+      "priority": 5
+    },
+    {
+      "id": "body_sony_a7iii_backup",
+      "shape": "box",
+      "dims": [0.1269, 0.0958, 0.0738],
+      "mass": 0.65,
+      "rigidity": "rigid",
+      "fragile": true,
+      "keepUpright": true,
+      "priority": 3
+    },
+    {
+      "id": "lens_fe_24_70_gm2",
+      "shape": "cylinder",
+      "radius": 0.0439,
+      "height": 0.1199,
+      "mass": 0.695,
+      "fragile": true,
+      "keepUpright": true,
+      "priority": 4
+    },
+    {
+      "id": "lens_fe_70_200_gm2",
+      "shape": "cylinder",
+      "radius": 0.044,
+      "height": 0.2,
+      "mass": 1.045,
+      "fragile": true,
+      "priority": 3
+    },
+    {
+      "id": "lens_fe_16_35_gm",
+      "shape": "cylinder",
+      "radius": 0.0445,
+      "height": 0.1118,
+      "mass": 0.547,
+      "fragile": true,
+      "keepUpright": true,
+      "priority": 3
+    },
+    {
+      "id": "lens_fe_35_18",
+      "shape": "cylinder",
+      "radius": 0.0328,
+      "height": 0.073,
+      "mass": 0.28,
+      "fragile": true,
+      "keepUpright": true,
+      "priority": 2
+    },
+    {
+      "id": "flash_godox_v1",
+      "shape": "box",
+      "dims": [0.076, 0.062, 0.194],
+      "mass": 0.53,
+      "rigidity": "rigid",
+      "fragile": true,
+      "keepUpright": true,
+      "priority": 1.5
+    },
+    {
+      "id": "tripod_befree_advanced",
+      "shape": "cylinder",
+      "radius": 0.05,
+      "height": 0.4,
+      "mass": 1.49,
+      "priority": 1.5
+    },
+    {
+      "id": "battery_case_np_fz100",
+      "shape": "box",
+      "dims": [0.12, 0.09, 0.05],
+      "mass": 0.42,
+      "rigidity": "rigid",
+      "priority": 3
+    },
+    {
+      "id": "filter_pouch_82mm",
+      "shape": "box",
+      "dims": [0.11, 0.11, 0.05],
+      "mass": 0.3,
+      "rigidity": "rigid",
+      "fragile": true,
+      "priority": 2
+    },
+    {
+      "id": "card_wallet_cfexpress",
+      "shape": "box",
+      "dims": [0.1, 0.07, 0.02],
+      "mass": 0.11,
+      "rigidity": "rigid",
+      "fragile": true,
+      "priority": 5
+    },
+    {
+      "id": "laptop_macbook_air_13",
+      "shape": "box",
+      "dims": [0.3041, 0.215, 0.0113],
+      "mass": 1.24,
+      "rigidity": "rigid",
+      "fragile": true,
+      "priority": 3
+    },
+    {
+      "id": "microfibre_towel_roll",
+      "shape": "box",
+      "dims": [0.28, 0.14, 0.14],
+      "mass": 0.28,
+      "rigidity": "soft",
+      "compressibility": 2.5
+    },
+    {
+      "id": "wool_sweater",
+      "shape": "box",
+      "dims": [0.32, 0.26, 0.08],
+      "mass": 0.45,
+      "rigidity": "soft",
+      "compressibility": 2.0
+    },
+    {
+      "id": "tshirt_folded",
+      "shape": "box",
+      "dims": [0.25, 0.2, 0.03],
+      "mass": 0.15,
+      "rigidity": "soft",
+      "compressibility": 1.8,
+      "count": 3
+    },
+    {
+      "id": "socks_bundle",
+      "shape": "box",
+      "dims": [0.11, 0.09, 0.07],
+      "mass": 0.08,
+      "rigidity": "soft",
+      "compressibility": 2.0,
+      "count": 4
+    }
+  ],
+  "optimizer": {
+    "time_budget_s": 6,
+    "seed": 0
+  },
+  "weights": {
+    "unpacked": 12,
+    "compact": 1,
+    "com": 6,
+    "height": 0.5
+  }
+}

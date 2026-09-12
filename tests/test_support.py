@@ -194,6 +194,162 @@ class TestRotatedFootprints(unittest.TestCase):
         self.assertTrue(r.unstable)
 
 
+class TestScannedPrisms(unittest.TestCase):
+    """LiDAR-hull footprints: the contact polygon is the scanned prism, and the
+    COM projection is the footprint centroid, not the box centre."""
+
+    # Right triangle in the local XZ plane, legs 0.2, area 0.02 (half of the
+    # 0.2 x 0.2 box envelope it is inscribed in). Area centroid = (-1/30, -1/30).
+    TRIANGLE = [(-0.1, -0.1), (0.1, -0.1), (-0.1, 0.1)]
+    CENTROID = (-0.1 / 3.0, -0.1 / 3.0)
+    # Axis-aligned octagon: the 0.2 square with its 4 corners cut 0.05 back.
+    # Area = 0.04 - 4 * (0.05^2 / 2) = 0.035.
+    OCTAGON = [
+        (0.1, 0.05), (0.05, 0.1), (-0.05, 0.1), (-0.1, 0.05),
+        (-0.1, -0.05), (-0.05, -0.1), (0.05, -0.1), (0.1, -0.05),
+    ]
+
+    def test_triangular_prism_on_floor(self):
+        # Flush on the floor (floor y = -0.5, half-height 0.05).
+        tri = Object(
+            id="t", dimensions=(0.2, 0.1, 0.2), position=(0, -0.45, 0), footprint=self.TRIANGLE
+        )
+        (r,) = check_support(scene_of(tri))
+        self.assertEqual(r.supporting_objects, ["container_floor"])
+        self.assertAlmostEqual(r.support_ratio, 1.0, places=12)
+        self.assertEqual(len(r.contact_polygon), 3)  # the triangle, not 4 box corners
+        self.assertAlmostEqual(r.patch_areas_m2["container_floor"], 0.02, places=12)
+        # Margin = distance from the centroid (-1/30, -1/30) to the nearest edge.
+        # The two legs are 1/15 away; the hypotenuse (x + z = 0) is
+        # (2/30)/sqrt(2) = 0.0471405 away and wins.
+        self.assertAlmostEqual(r.stability_margin_m, 0.1 * SQRT2 / 3.0, places=12)
+        self.assertFalse(r.floating)
+        self.assertFalse(r.unstable)
+        # Sanity: the box centre (0, 0) sits exactly ON the hypotenuse, so using
+        # `centers` instead of `com` would have reported margin 0.0 here.
+        self.assertGreater(r.stability_margin_m, 1e-3)
+
+    def test_prism_on_block_under_its_bbox_corner_only_is_floating(self):
+        # The block's top covers x,z in [0.01, 0.11] -- inside the triangle's
+        # 0.2 x 0.2 bounding box but entirely on the far side of its hypotenuse
+        # (x + z >= 0.02 > 0), so it touches the box envelope and nothing else.
+        block = make_object("block", (0.1, 0.2, 0.1), (0.06, -0.4, 0.06))  # top y = -0.3
+        kwargs = dict(id="t", dimensions=(0.2, 0.1, 0.2), position=(0, -0.25, 0))
+        prism = Object(footprint=self.TRIANGLE, **kwargs)
+        results = {r.object_id: r for r in check_support(scene_of(block, prism))}
+        self.assertEqual(results["t"].supporting_objects, [])
+        self.assertEqual(results["t"].support_ratio, 0.0)
+        self.assertTrue(results["t"].floating)
+        self.assertEqual(results["t"].stability_margin_m, FLOATING_MARGIN_SENTINEL_M)
+        # The same object as a plain box: the block clips its bottom rectangle
+        # to x,z in [0.01, 0.1] -> 0.0081 / 0.04 = 0.2025, i.e. "supported".
+        box = Object(**kwargs)
+        results = {r.object_id: r for r in check_support(scene_of(block, box))}
+        self.assertEqual(results["t"].supporting_objects, ["block"])
+        self.assertAlmostEqual(results["t"].support_ratio, 0.2025, places=12)
+        self.assertFalse(results["t"].floating)
+
+    def test_octagonal_bag_clipped_by_supporter_edge(self):
+        # Supporter's top face covers x >= 0.05. The octagon's area right of
+        # x = 0.05 is the integral of 2 * (0.15 - x) dx over [0.05, 0.1]
+        # = 0.0075, so the ratio is 0.0075 / 0.035 = 3/14 exactly.
+        base = make_object("base", (0.2, 0.2, 0.4), (0.15, -0.4, 0))  # top y = -0.3
+        bag = Object(
+            id="bag", dimensions=(0.2, 0.1, 0.2), position=(0, -0.25, 0), footprint=self.OCTAGON
+        )
+        results = {r.object_id: r for r in check_support(scene_of(base, bag))}
+        b = results["bag"]
+        self.assertEqual(b.supporting_objects, ["base"])
+        self.assertAlmostEqual(b.patch_areas_m2["base"], 0.0075, places=12)
+        self.assertAlmostEqual(b.support_ratio, 3.0 / 14.0, places=12)
+        self.assertEqual(len(b.contact_polygon), 4)
+        # Symmetric octagon -> COM at (0, 0), off the clipped patch -> unstable.
+        self.assertTrue(b.unstable)
+        self.assertAlmostEqual(b.stability_margin_m, -0.05, places=12)
+
+    def test_box_stacked_on_triangular_prism_top_ring(self):
+        # The prism's TOP ring is the same triangle at y = -0.4. The box's
+        # bottom rectangle is x in [-0.1, 0.1], z in [-0.1, 0] (area 0.02);
+        # clipped by x + z <= 0 that leaves the quad
+        # (-0.1,-0.1) (0.1,-0.1) (0,0) (-0.1,0), area 0.015 -> ratio 0.75.
+        tri = Object(
+            id="t", dimensions=(0.2, 0.1, 0.2), position=(0, -0.45, 0), footprint=self.TRIANGLE
+        )
+        box = make_object("b", (0.2, 0.1, 0.1), (0, -0.35, -0.05))
+        results = {r.object_id: r for r in check_support(scene_of(tri, box))}
+        self.assertAlmostEqual(results["t"].support_ratio, 1.0, places=12)
+        b = results["b"]
+        self.assertEqual(b.supporting_objects, ["t"])
+        self.assertAlmostEqual(b.patch_areas_m2["t"], 0.015, places=12)
+        self.assertAlmostEqual(b.support_ratio, 0.75, places=12)
+        self.assertEqual(len(b.contact_polygon), 4)
+        # COM (0, -0.05) is inside; nearest edge is the hypotenuse, 0.05/sqrt2.
+        self.assertAlmostEqual(b.stability_margin_m, 0.05 / SQRT2, places=12)
+        self.assertFalse(b.unstable)
+        self.assertFalse(b.supported_by_unstable)
+
+    def test_yawed_prism_on_floor_area_is_rotation_invariant(self):
+        for degrees in (0.0, 37.0, 90.0, 213.0):
+            obj = Object(
+                id="t",
+                dimensions=(0.2, 0.1, 0.2),
+                position=(0, -0.45, 0),
+                rotation=yaw(degrees),
+                footprint=self.TRIANGLE,
+            )
+            (r,) = check_support(scene_of(obj))
+            self.assertEqual(len(r.contact_polygon), 3)
+            self.assertAlmostEqual(r.patch_areas_m2["container_floor"], 0.02, places=12)
+            self.assertAlmostEqual(r.support_ratio, 1.0, places=12)
+            self.assertAlmostEqual(r.stability_margin_m, 0.1 * SQRT2 / 3.0, places=12)
+
+    def test_upside_down_prism_uses_whichever_ring_is_lowest(self):
+        # Pitched 180 deg: the prism's TOP ring is now the lowest, and the
+        # footprint mirrors to (x, -z) -- same area, centroid (-1/30, +1/30),
+        # hypotenuse along z = x, so the margin is unchanged. If the contact set
+        # were hard-coded to the bottom ring this would read as floating.
+        obj = Object(
+            id="t",
+            dimensions=(0.2, 0.1, 0.2),
+            position=(0, -0.45, 0),
+            rotation=pitch(180),
+            footprint=self.TRIANGLE,
+        )
+        (r,) = check_support(scene_of(obj))
+        self.assertEqual(r.supporting_objects, ["container_floor"])
+        self.assertAlmostEqual(r.patch_areas_m2["container_floor"], 0.02, places=12)
+        self.assertEqual(len(r.contact_polygon), 3)
+        self.assertAlmostEqual(r.support_ratio, 1.0, places=12)
+        self.assertAlmostEqual(r.stability_margin_m, 0.1 * SQRT2 / 3.0, places=12)
+        self.assertFalse(r.unstable)
+
+    def test_prism_scene_is_deterministic(self):
+        scene = scene_of(
+            make_object("base", (0.2, 0.2, 0.4), (0.15, -0.4, 0)),
+            Object(
+                id="bag", dimensions=(0.2, 0.1, 0.2), position=(0, -0.25, 0),
+                rotation=yaw(23), footprint=self.OCTAGON,
+            ),
+            Object(
+                id="t", dimensions=(0.2, 0.1, 0.2), position=(-0.2, -0.45, 0.2),
+                footprint=self.TRIANGLE,
+            ),
+        )
+
+        def snapshot(results):
+            return [
+                (
+                    r.object_id, r.support_ratio, r.stability_margin_m,
+                    tuple(r.supporting_objects), r.floating, r.unstable,
+                    r.supported_by_unstable, tuple(map(tuple, r.contact_polygon)),
+                    tuple(sorted(r.patch_areas_m2.items())),
+                )
+                for r in results
+            ]
+
+        self.assertEqual(snapshot(check_support(scene)), snapshot(check_support(scene)))
+
+
 class TestChainAndDiagnostics(unittest.TestCase):
     def test_chain_instability_propagates_upward(self):
         a = make_object("A", (0.4, 0.2, 0.4), (0, -0.4, 0))  # floor, stable

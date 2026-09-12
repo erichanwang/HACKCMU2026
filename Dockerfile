@@ -15,4 +15,4 @@ RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["sh", "-c", "python3 -m unittest discover && cd swift/PackPhysics && swift test"]
+CMD ["sh", "-c", "python3 -m unittest discover; py=$?; (cd swift/PackPhysics && swift test); sw=$?; exit $((py || sw))"]

@@ -1,0 +1,126 @@
+{
+  "container": {
+    "id": "carryon_interior",
+    "shape": "box",
+    "dims": [0.52, 0.365, 0.2],
+    "gravity": true,
+    "max_mass": 10.0,
+    "min_support": 0.6
+  },
+  "items": [
+    {
+      "id": "laptop_macbook_air_13",
+      "shape": "box",
+      "dims": [0.3041, 0.215, 0.0113],
+      "mass": 1.24,
+      "rigidity": "rigid",
+      "fragile": true,
+      "priority": 3
+    },
+    {
+      "id": "trainer_left_us10",
+      "width": 30,
+      "depth": 12,
+      "height": 11.5,
+      "cellSize": 2,
+      "heights": [
+        [4.0, 4.0, 5.5, 5.5, 5.5, 9.0, 9.0, 9.0, 9.0, 9.0, 11.5, 11.5, 11.5, 11.5, 10.0],
+        [6.0, 6.0, 7.0, 7.0, 7.0, 3.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0, 10.0],
+        [6.0, 6.0, 7.0, 7.0, 7.0, 3.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0, 10.0],
+        [6.0, 6.0, 7.0, 7.0, 7.0, 3.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0, 10.0],
+        [6.0, 6.0, 7.0, 7.0, 7.0, 3.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0, 10.0],
+        [4.0, 4.0, 5.5, 5.5, 5.5, 9.0, 9.0, 9.0, 9.0, 9.0, 11.5, 11.5, 11.5, 11.5, 10.0]
+      ],
+      "mass": 0.31,
+      "fragile": false,
+      "keepUpright": true
+    },
+    {
+      "id": "trainer_right_us10",
+      "width": 30,
+      "depth": 12,
+      "height": 11.5,
+      "cellSize": 2,
+      "heights": [
+        [4.0, 4.0, 5.5, 5.5, 5.5, 9.0, 9.0, 9.0, 9.0, 9.0, 11.5, 11.5, 11.5, 11.5, 10.0],
+        [6.0, 6.0, 7.0, 7.0, 7.0, 3.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0, 10.0],
+        [6.0, 6.0, 7.0, 7.0, 7.0, 3.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0, 10.0],
+        [6.0, 6.0, 7.0, 7.0, 7.0, 3.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0, 10.0],
+        [6.0, 6.0, 7.0, 7.0, 7.0, 3.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0, 10.0],
+        [4.0, 4.0, 5.5, 5.5, 5.5, 9.0, 9.0, 9.0, 9.0, 9.0, 11.5, 11.5, 11.5, 11.5, 10.0]
+      ],
+      "mass": 0.31,
+      "fragile": false,
+      "keepUpright": true
+    },
+    {
+      "id": "jeans_folded",
+      "shape": "box",
+      "dims": [0.33, 0.28, 0.05],
+      "mass": 0.62,
+      "rigidity": "soft",
+      "compressibility": 1.6
+    },
+    {
+      "id": "tshirt_folded",
+      "shape": "box",
+      "dims": [0.25, 0.2, 0.03],
+      "mass": 0.15,
+      "rigidity": "soft",
+      "compressibility": 1.8,
+      "count": 3
+    },
+    {
+      "id": "hoodie_rolled",
+      "shape": "box",
+      "dims": [0.29, 0.18, 0.17],
+      "mass": 0.6,
+      "rigidity": "soft",
+      "compressibility": 2.2
+    },
+    {
+      "id": "socks_bundle",
+      "shape": "box",
+      "dims": [0.11, 0.09, 0.07],
+      "mass": 0.08,
+      "rigidity": "soft",
+      "compressibility": 2.0,
+      "count": 2
+    },
+    {
+      "id": "dopp_kit",
+      "shape": "box",
+      "dims": [0.24, 0.125, 0.11],
+      "mass": 1.05,
+      "rigidity": "rigid"
+    },
+    {
+      "id": "book_paperback",
+      "shape": "box",
+      "dims": [0.198, 0.129, 0.025],
+      "mass": 0.24,
+      "rigidity": "rigid",
+      "priority": 0.7
+    },
+    {
+      "id": "charger_pouch",
+      "shape": "box",
+      "dims": [0.16, 0.11, 0.06],
+      "mass": 0.48,
+      "rigidity": "rigid",
+      "priority": 2
+    },
+    {
+      "id": "sunglasses_hard_case",
+      "shape": "box",
+      "dims": [0.165, 0.065, 0.05],
+      "mass": 0.12,
+      "rigidity": "rigid",
+      "fragile": true
+    }
+  ],
+  "optimizer": {
+    "time_budget_s": 4,
+    "seed": 0
+  }
+}

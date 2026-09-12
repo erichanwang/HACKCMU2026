@@ -1,0 +1,331 @@
+{
+  "aggregate": {
+    "errors": 0,
+    "items_given": 170,
+    "items_packed": 139,
+    "mean_com_offset": 0.02971425388177876,
+    "mean_utilization": 0.5813886005519803,
+    "pack_rate": 0.8176470588235294,
+    "physics_valid": 7,
+    "scenarios": 7,
+    "seconds": 153.5755309619708,
+    "violations": 0
+  },
+  "config": {
+    "candidates": [
+      [
+        "naive",
+        null
+      ],
+      [
+        "optimized",
+        0
+      ]
+    ],
+    "iters": 40,
+    "time_budget_s": 0.0
+  },
+  "run": {
+    "commit": "252a528dedca9d6956f2d2d9510e19e08ed4f714",
+    "dirty": false,
+    "flags": {
+      "fixtures": "tools/packbench/fixtures",
+      "iters": 40,
+      "quick": false,
+      "seed": "0",
+      "strategy": "both",
+      "time": null
+    },
+    "started_at": "2026-09-12T10:19:00-04:00",
+    "wall_clock_s": 153.67
+  },
+  "scenarios": [
+    {
+      "best": {
+        "com_lateral_offset": 0.0015394423874859162,
+        "items_given": 5,
+        "items_packed": 5,
+        "physics_valid": true,
+        "seconds": 0.9808146629948169,
+        "seed": 0,
+        "strategy": "optimized",
+        "violations": 0,
+        "volume_utilization": 0.977288683585342
+      },
+      "candidates": [
+        {
+          "com_lateral_offset": 0.0015394423874859162,
+          "items_given": 5,
+          "items_packed": 5,
+          "physics_valid": true,
+          "seconds": 0.9808146629948169,
+          "seed": 0,
+          "strategy": "optimized",
+          "violations": 0,
+          "volume_utilization": 0.977288683585342
+        },
+        {
+          "com_lateral_offset": 0.0015394423874859294,
+          "items_given": 5,
+          "items_packed": 5,
+          "physics_valid": true,
+          "seconds": 0.030554862998542376,
+          "seed": null,
+          "strategy": "naive",
+          "violations": 0,
+          "volume_utilization": 0.977288683585342
+        }
+      ],
+      "file": "adversarial_exact_fit.json",
+      "items_given": 5,
+      "name": "Adversarial: exactly one arrangement",
+      "notes": "Pelican 1510 carry-on hard case, interior 50.2x27.9x19.3 cm. Five kit trays from a field-audio rig whose dimensions tile the interior almost exactly (97.7% of the volume, 1-2 mm slack per axis): the 6 cm mixer tray is the only thing that can be the bottom layer, and the 13.3 cm left above it is filled by the battery block over half the footprint, the receiver rack over a quarter, and the two lav trays stacked in the last quarter (6.5 + 6.5 = 13.0 cm). Any other order strands a tray. UNLIKE the other fixtures these dimensions are idealised to tile rather than measured off a real product - real fitted foam inserts do tile like this, but treat these five numbers as constructed, not looked up. All flat-topped boxes, no heightmap grids. A competent human packs 5/5 at 97.7% utilisation because the case came that way; anything less than 5/5 means the solver cannot find a unique perfect packing, which is the whole point of the fixture. Today's first-fit already gets 5/5 here, so a change that breaks this fixture is a regression, not a hard case."
+    },
+    {
+      "best": {
+        "com_lateral_offset": 0.032753020653248865,
+        "items_given": 21,
+        "items_packed": 19,
+        "physics_valid": true,
+        "seconds": 10.194607385987183,
+        "seed": 0,
+        "strategy": "optimized",
+        "violations": 0,
+        "volume_utilization": 0.42712791341329925
+      },
+      "candidates": [
+        {
+          "com_lateral_offset": 0.032753020653248865,
+          "items_given": 21,
+          "items_packed": 19,
+          "physics_valid": true,
+          "seconds": 10.194607385987183,
+          "seed": 0,
+          "strategy": "optimized",
+          "violations": 0,
+          "volume_utilization": 0.42712791341329925
+        },
+        {
+          "com_lateral_offset": 0.04802391990031698,
+          "items_given": 21,
+          "items_packed": 19,
+          "physics_valid": true,
+          "seconds": 0.08273520899820141,
+          "seed": null,
+          "strategy": "naive",
+          "violations": 0,
+          "volume_utilization": 0.42712791341329925
+        }
+      ],
+      "file": "camera_kit_fragile.json",
+      "items_given": 21,
+      "name": "Camera kit, nothing may rest on the glass",
+      "notes": "Two mirrorless bodies, four lenses, a flash and a tripod flown in the cabin bag (52.0x36.5x20.0 cm interior, 10 kg). Every body, lens, filter pouch and card wallet is fragile=true, which in this solver means nothing may be placed on its top face, and keepUpright=true so lenses stay on their mounts. That kills stacking for ~11 L of gear, so the binding resource is FLOOR AREA, not volume: naive first-fit will spread the fragile items across the base and then have nowhere to put the clothes. The clothes (soft, compressibility 1.8-2.5) are padding and are the only things a solver may stack under or wedge between the gear. All items here are flat-topped boxes or cylinders - no heightmap grids, deliberately, so the fragile constraint is the only thing being measured. A competent human packs 100%: bodies and lenses in one layer nose-down on a folded-sweater base, the 70-200 laid along the long edge, the tripod down the side, socks jammed in every gap. Bar: all 4 lenses + both bodies + laptop packed, zero fragile items with anything on top."
+    },
+    {
+      "best": {
+        "com_lateral_offset": 0.03489870257121449,
+        "items_given": 41,
+        "items_packed": 25,
+        "physics_valid": true,
+        "seconds": 84.22875515899796,
+        "seed": 0,
+        "strategy": "optimized",
+        "violations": 0,
+        "volume_utilization": 0.48585417772296197
+      },
+      "candidates": [
+        {
+          "com_lateral_offset": 0.03489870257121449,
+          "items_given": 41,
+          "items_packed": 25,
+          "physics_valid": true,
+          "seconds": 84.22875515899796,
+          "seed": 0,
+          "strategy": "optimized",
+          "violations": 0,
+          "volume_utilization": 0.48585417772296197
+        },
+        {
+          "com_lateral_offset": 0.028463749519696845,
+          "items_given": 41,
+          "items_packed": 23,
+          "physics_valid": true,
+          "seconds": 1.0165327370050363,
+          "seed": null,
+          "strategy": "naive",
+          "violations": 0,
+          "volume_utilization": 0.4677057679135932
+        }
+      ],
+      "file": "carryon_overfilled.json",
+      "items_given": 41,
+      "name": "Same carry-on, overfilled",
+      "notes": "Identical container to carryon_weekend, but a week of clothes, two pairs of shoes, a tripod, a hair dryer, three books and a gift box: bounding-box volume is ~1.8x the interior, so roughly 40-45% of the volume MUST be left behind. This is the interesting case: the score is not utilisation, it is WHICH items get dropped. priority encodes that - passport_wallet and meds_pouch are 6, the laptop 3, chargers 2, and the droppables are low: gift_box 0.3, book_hardcover 0.4, hair_dryer/umbrella 0.5, dress shoes 0.6. A competent human packs every item of priority >= 2 plus most of the clothes and leaves the gift, the hardcover, the tripod, the hair dryer and the dress shoes at home; a solver that drops the meds pouch or the passport wallet to fit the tripod has failed even at high utilisation. HEIGHTMAP GRIDS: the four shoes and dopp_kit_scanned (bottles bulge one end, the razor end sags to ~5 cm). Rest are flat-topped."
+    },
+    {
+      "best": {
+        "com_lateral_offset": 0.04226096136707617,
+        "items_given": 14,
+        "items_packed": 13,
+        "physics_valid": true,
+        "seconds": 6.11006407700188,
+        "seed": 0,
+        "strategy": "optimized",
+        "violations": 0,
+        "volume_utilization": 0.5274219273876808
+      },
+      "candidates": [
+        {
+          "com_lateral_offset": 0.04226096136707617,
+          "items_given": 14,
+          "items_packed": 13,
+          "physics_valid": true,
+          "seconds": 6.11006407700188,
+          "seed": 0,
+          "strategy": "optimized",
+          "violations": 0,
+          "volume_utilization": 0.5274219273876808
+        },
+        {
+          "com_lateral_offset": 0.0077939825693849815,
+          "items_given": 14,
+          "items_packed": 11,
+          "physics_valid": true,
+          "seconds": 0.20122171498951502,
+          "seed": null,
+          "strategy": "naive",
+          "violations": 0,
+          "volume_utilization": 0.35606552459526775
+        }
+      ],
+      "file": "carryon_weekend.json",
+      "items_given": 14,
+      "name": "Weekend carry-on that fits",
+      "notes": "IATA 55x40x23 cm cabin bag, interior 52.0x36.5x20.0 cm after ~1.5 cm of shell and lining per face; 10 kg cabin allowance. Two nights of clothes, a 13\" laptop, a pair of size-10 trainers and a wash kit. Bounding-box volume of the items is ~64% of the interior, so it is not tight. HEIGHTMAP GRIDS: trainer_left_us10 / trainer_right_us10 (2 cm cells, closed toe box, hollow collar and heel cup ~3-4 cm deep). Everything else is a flat-topped box or cylinder. A competent human packs 100% of this with room to spare: shoes sole-to-sole at the hinge end, socks stuffed inside them, laptop flat against the back panel, clothes filling the rest. Anything that leaves an item out here is broken; the bar is 100% packed and the shoe cavities used."
+    },
+    {
+      "best": {
+        "com_lateral_offset": 0.015961744727185173,
+        "items_given": 21,
+        "items_packed": 18,
+        "physics_valid": true,
+        "seconds": 13.385870357989916,
+        "seed": 0,
+        "strategy": "optimized",
+        "violations": 0,
+        "volume_utilization": 0.5522404012160588
+      },
+      "candidates": [
+        {
+          "com_lateral_offset": 0.015961744727185173,
+          "items_given": 21,
+          "items_packed": 18,
+          "physics_valid": true,
+          "seconds": 13.385870357989916,
+          "seed": 0,
+          "strategy": "optimized",
+          "violations": 0,
+          "volume_utilization": 0.5522404012160588
+        },
+        {
+          "com_lateral_offset": 0.02209105490591256,
+          "items_given": 21,
+          "items_packed": 16,
+          "physics_valid": true,
+          "seconds": 0.17462124000303447,
+          "seed": null,
+          "strategy": "naive",
+          "violations": 0,
+          "volume_utilization": 0.48211921181076134
+        }
+      ],
+      "file": "checked_heavy_light.json",
+      "items_given": 21,
+      "name": "Checked bag, heavy and light extremes",
+      "notes": "29\" checked spinner, interior 72x46x29 cm, 23 kg airline limit. Density spans two orders of magnitude: a 60 m climbing rope at 4.10 kg in 18 L next to a duvet jacket at 0.48 kg in 32 L loose (compressibility 4.0, so it packs at 8 L) and a down sleeping bag at 3.0. Total mass ~16 kg, so the 23 kg cap does not bind - the test is whether heavy dense items end up low and centred (com_target defaults to the container centre) instead of stacked on the duvet. HEIGHTMAP GRIDS: boot_left_dm1460 / boot_right_dm1460 (17 cm shaft walls around an empty leg opening - a big exploitable cavity). Everything else flat-topped. A competent human packs 100% of this list with the rope and boots along the bottom on the wheel side, the laptop flat on top of the compressed soft layer, and socks/tees inside the boot shafts; expect >= 100% packed and the centre of mass within ~5 cm of the bag centre in x/y and in the bottom third in z."
+    },
+    {
+      "best": {
+        "com_lateral_offset": 0.024899275156970248,
+        "items_given": 42,
+        "items_packed": 33,
+        "physics_valid": true,
+        "seconds": 31.570482983006514,
+        "seed": 0,
+        "strategy": "optimized",
+        "violations": 0,
+        "volume_utilization": 0.7334615916807697
+      },
+      "candidates": [
+        {
+          "com_lateral_offset": 0.024899275156970248,
+          "items_given": 42,
+          "items_packed": 33,
+          "physics_valid": true,
+          "seconds": 31.570482983006514,
+          "seed": 0,
+          "strategy": "optimized",
+          "violations": 0,
+          "volume_utilization": 0.7334615916807697
+        },
+        {
+          "com_lateral_offset": 0.016339452019626645,
+          "items_given": 42,
+          "items_packed": 32,
+          "physics_valid": true,
+          "seconds": 0.5071085109957494,
+          "seed": null,
+          "strategy": "naive",
+          "violations": 0,
+          "volume_utilization": 0.7979062223925238
+        }
+      ],
+      "file": "clothes_dominated.json",
+      "items_given": 42,
+      "name": "Clothes only, folding is the whole game",
+      "notes": "Cabin bag (52.0x36.5x20.0 cm interior). 38 garments plus a wash kit; loose volume is ~2.1x the interior but every garment is soft with compressibility 1.5-2.8, so the compressed volume is ~1.05x the interior - it fits only if the solver actually uses the compression. Note how the loader applies it: dims[2] is divided by k, so a 17 cm hoodie roll packs as 7.1 cm. A solver that ignores compressibility_k leaves roughly half the wardrobe out; one that uses it should leave out at most a couple of low-priority pieces. HEIGHTMAP GRID: packing_cube_half_full (sagging middle). Everything else flat-topped. A competent human packs 100% by rolling and filling the cube's dip; bar is >= 90% of items packed and >= 80% volume utilisation."
+    },
+    {
+      "best": {
+        "com_lateral_offset": 0.05568663030927048,
+        "items_given": 26,
+        "items_packed": 26,
+        "physics_valid": true,
+        "seconds": 5.04877970200323,
+        "seed": 0,
+        "strategy": "optimized",
+        "violations": 0,
+        "volume_utilization": 0.3663255088577496
+      },
+      "candidates": [
+        {
+          "com_lateral_offset": 0.05568663030927048,
+          "items_given": 26,
+          "items_packed": 26,
+          "physics_valid": true,
+          "seconds": 5.04877970200323,
+          "seed": 0,
+          "strategy": "optimized",
+          "violations": 0,
+          "volume_utilization": 0.3663255088577496
+        },
+        {
+          "com_lateral_offset": 0.10394930620406301,
+          "items_given": 26,
+          "items_packed": 26,
+          "physics_valid": true,
+          "seconds": 0.04338235899922438,
+          "seed": null,
+          "strategy": "naive",
+          "violations": 0,
+          "volume_utilization": 0.3663255088577496
+        }
+      ],
+      "file": "upright_bottles.json",
+      "items_given": 26,
+      "name": "Bottles and a French press, all keep-upright",
+      "notes": "30\" checked spinner, interior 75x48x31 cm (a size up from checked_heavy_light precisely because a wine bottle does not stand up in a 29 cm bag). Eleven keep-upright items (nine distinct kinds) - a 1 L Nalgene, a 32 oz Hydro Flask, a glass French press, a wine bottle, a 1 L olive-oil tin, a hand grinder, three 250 ml toiletry bottles, a food jar and a boxed moka pot - all with allow_lay_down=false, so the solver may not tip them to save height. The wine bottle at 30.5 cm leaves 5 mm of headroom in the 31 cm bag: it stands, nothing goes on top of it, and there is nowhere else for it to go. French press and wine bottle are also fragile. Soft clothes are there to be wedged between the glass. HEIGHTMAP GRID: packing_cube_half_full (35x25x12 cm, rim held up by the zipper seam, sagging to 7 cm in the middle - a real dip a solver can nest a bottle base into). Everything else flat-topped. A competent human packs 100%, stands the tall glass in the middle of the bag surrounded by sweaters, and keeps the wine bottle away from the walls. Bar: all 11 upright items placed with the upright axis respected, nothing on top of the wine or the press."
+    }
+  ]
+}

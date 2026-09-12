@@ -165,8 +165,8 @@ def build_solver_state(
 
 def persist_result(result: SimulationResult, out_dir: str | Path) -> SimulationResult:
     """Write frame_00.png..frame_NN.png + rollout.gif + backend.txt into
-    `out_dir` (mirrors `MockPanBackend.persist`, but works for any backend's
-    result). `backend.txt` travels with the assets so nobody opening the GIF on
+    `out_dir` -- the one persister, for any backend's result.
+    `backend.txt` travels with the assets so nobody opening the GIF on
     its own mistakes it for a real PAN prediction. Returns a copy of `result`
     with `video_path`/`final_frame_path` filled in."""
     out_dir = Path(out_dir)
@@ -310,6 +310,8 @@ def run_demo(
     for cand in candidates:
         recs = records_by_candidate.get(cand.candidate_id, [])
         rec0 = recs[0] if recs else None
+        if not cand.actions:  # 0 items, all unpacked, or a prefix candidate: nothing to imagine
+            continue
         action0 = cand.actions[0]
         expected_img = observation_from_scene(apply_action(state, action0), viewpoint).image
         if rec0 is not None and rec0.status == "complete" and rec0.result is not None and rec0.result.frames:

@@ -1,164 +1,108 @@
 # FIXES
 
-What still needs fixing, as of 2026-09-12 on branch `integration`. Ordered by how much it
-blocks the demo. Each item names the file, what is wrong, and the fix.
+What still needs fixing, as of 2026-09-12 on branch `loop`. Ordered by how much it blocks the
+demo. Each item names the file, what is wrong, and the fix. Every line below was re-verified
+against the code on `loop` today (grep or read), not carried over from the morning version.
 
-## 1. Blockers: the demo cannot run until these are done
+## 1. Blockers: the demo cannot run until this is done
 
-- **The iOS side has never been compiled.** `Spike/SpikeApp.swift`, `Spike/ScanView.swift`,
-  `Spike/API.swift`, `Spike/Geometry.swift` (Suitcase/Item modes, `suitcaseId`, Pack button,
-  plan sheet) and `project.yml` (PackPhysics package) were written on Linux with `swiftc -parse`
-  only. On a Mac: `xcodegen generate`, build, fix the type errors that appear, run the loop
-  scan suitcase → scan item → Pack → diagram.
-- ~~`Spike/API.swift:21` hard-codes `http://172.26.48.172:8000`.~~ **Fixed**: `API.base` now
-  reads a `serverURL` from `UserDefaults` (typed in the app's settings sheet), falling back to
-  `PACKAR_SERVER` then the old hard-coded address.
-- **Mongo must be reachable when the server starts** (`server/main.py` pings at import). Either
-  set `SUITCASE_MONGODB_URI` to the Atlas cluster or run
-  `docker run --rm -d -p 27017:27017 mongo:7` before `uvicorn`. `README.md` does not say this.
-- **`.env` is not loaded by anything.** Run the server as
-  `cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0`, otherwise Grok is
-  off and every item is labelled "unknown".
+- **The iOS app has never been built in Xcode.** `docs/AR_BUILD.md` is an honest checklist
+  ("nobody on this team has compiled the iOS app... read it as 'should work from the code as it
+  reads today,' not 'we've done this'"). On a Mac: `xcodegen generate`, pick a LiDAR device
+  (Simulator can't run ARKit at all), expect real type errors the Linux `swiftc -parse` gate
+  never caught. `tests/swift/typecheck/run.sh`'s own header says what it does and doesn't prove:
+  internal consistency against hand-written shims, not that the shims match Apple's SDK, and
+  "nothing actually runs — every shim body is `fatalError()`." One specific spot worth a second
+  look on-device: `Spike/ScanView.swift:324-331`'s `nonisolated func session(...)` +
+  `MainActor.assumeIsolated` for `ARSessionDelegate` on the `@MainActor` `Coordinator` — a
+  reasoned pattern (comment explains why), untested against real ARKit delegate dispatch.
 
 ## 2. Bugs
 
-- ~~`server/main.py:60` a Grok failure is a 500 on the upload.~~ **Fixed**: `create_item` now
-  catches `httpx.HTTPError`/`ValueError`/`KeyError`/`IndexError`/`TypeError` around `detect()`,
-  stores the `UNKNOWN` guess with `labelStatus: "pending"`, and a background sweep
-  (`relabel_pending`) retries it.
-- ~~`server/main.py:129` no validation of the item payload.~~ **Fixed**: the `Scan` pydantic
-  model validates the three dimensions > 0, `cellSize` > 0, and a nonempty rectangular `heights`
-  grid at upload, replying 422 on a bad payload.
-- ~~`physics/packer3d_adapter.py:232` vs `:272` double-rotate.~~ **Fixed**: `scene_from_packer3d`
-  now takes an `oriented` flag — `True` (default, identity rotation) is canonical for grading a
-  finished layout (`validate_packer3d`, `server/planner.py`); `oriented=False` is for composing
-  with `placements_from_packer3d`/`apply_placements`. Documented on the function itself.
-- **`packer3d/tests/test_thorough_edge_cases.py:421`** always fails on this machine (65–75 s
-  against a 15 s wall-clock budget, also on untouched code). Either the 1000-item first-fit
-  path regressed or the budget is machine-specific; profile it, then fix or mark it `slow`.
+- **The two packer3d wall-clock perf tests are still marked `slow` and excluded by default**
+  (`packer3d/pyproject.toml:19-20`, `test_edge_cases.py:338`, `test_thorough_edge_cases.py:421`)
+  even though today's decoder fix (7358c16) already fixed the thing they were waiting on: run
+  both un-filtered (`pytest -m ''`) and they pass in 8.2s combined, nowhere near their 3s/15s
+  budgets. `test_edge_cases.py:338`'s own comment ("unmark both when the decoder fix lands") is
+  now stale — the fix landed, the unmark didn't. Drop both `@pytest.mark.slow` lines.
 
 ## 3. Risks that will bite in a real demo
 
-- ~~Scanning the suitcase gives its outer box.~~ **Fixed**: `interiorBox(_:wall:)` in
-  `Spike/PlanAnchor.swift` subtracts a wall-thickness constant (`suitcaseWallMeters`, 1 cm) from
-  the scanned outer box before the interior is used. There are still no zones or wheel wells
-  (`OVERVIEW.md` promises both).
-- **Items pack as bounding boxes.** `packer3d/packer3d/models.py:211` uses the heightmap only
-  to classify box/cylinder/irregular and to measure volume. An open shoe or a bag with a dip
-  gets no nesting. The scan already carries the data; the solver would need a voxel or
-  footprint collision test to use it.
-- **Grok is slow and synchronous.** 5–6 s per item inside `POST /items`; five items is half a
-  minute of "labelling…". Return the item immediately with `label: null` and label in a
-  background task, or accept it for the demo.
-- **`POST /plan` is CPU-bound for ~3 s** (`server/planner.py:32`, four solver runs). Under one
-  uvicorn worker the phone's next upload waits. Fine for one user; run `--workers 2` for a
-  booth, or cut `CANDIDATES` to two.
-- **`server/main.py` re-`POST /plan` while one runs:** both compute, last write wins. The app's
-  Pack button is now disabled while packing (`SpikeApp.swift`, `.disabled(... || packing)`), but
-  the server itself still doesn't stop two concurrent requests for the same suitcase.
-- **Only the best solver result is stored.** `server/planner.py` keeps summaries of the other
-  three candidates (`alternatives`) but not their placements, so PAN and the UI cannot show
-  "here is the runner-up". Store the top two results if that comparison is wanted.
-- **`pan/evaluate.py:54` colour-segmentation proxy.** Two palette colours closer than 60 RGB
-  units (teal vs shaded blue is one documented pair) merge, so `execution_risk` from the mock
-  can be wrong. Segment by hue, or give each object an id-coloured mask channel.
+- **`docs/DEMO_SCRIPT.md:15` claims `make server` matches the documented manual launch, but it
+  doesn't.** The manual command in that same doc adds `--workers 2` (measured: one worker made a
+  `GET /items` fired during `POST /plan` take 7.5x its solo latency; two workers brought it to
+  0.6x — see `55c295c`'s commit message). `Makefile:26-31`'s `server:` target has no `--workers`
+  flag. A teammate running `make server` today gets the stall the doc says is fixed. Add
+  `--workers 2` to the Makefile, or stop claiming parity in the doc.
+- **Demo plans are not reproducible run-to-run.** `server/planner.py:74` calls `pack_optimized`
+  with `time_budget_s=per_run` only (never `max_iterations`), and `packer3d/packer3d/search.py`'s
+  annealing loop exits on `time.perf_counter() - t0 >= budget_t` — so the same seed does a
+  different amount of search, and can return a different plan, depending on machine load.
+  `packer3d/ALGORITHM.md` section 5 already documents the fix (`time_budget_s=0,
+  max_iterations=N` for a byte-identical rerun); nothing in the server/demo path uses it.
+- **`scripts/ar_sim.py:1002`'s comment is now wrong.** It says the reality checks below it
+  "never call `fail()`", but `lid_open_true_interior_check` (line 856, `fail()` at line 871,
+  added in today's `59721c0`) does call it when escape exceeds 1cm. Not dangerous — the gate is
+  stricter than the comment claims, not weaker — but confusing for whoever reads the comment
+  next.
+- **The suitcase wall-inset constants are still placeholders.** `suitcaseWallMeters`,
+  `suitcaseFloorWallMeters`, `suitcaseHandleWallMeters` (`Spike/ScanView.swift:24-30`) are all
+  1cm by default; they need a real bag to calibrate before the interior fit is trustworthy.
 
 ## 4. Missing versus the spec
 
-- ~~AR guidance.~~ **Fixed**: `Spike/PlanAnchor.swift` maps the plan's bag-frame coordinates onto
-  AR world space, and `ScanView.swift`'s `showPlan` renders one translucent `ModelEntity` box per
-  placement into the `ARView`'s scene via an `AnchorEntity`.
-- **PAN in the app.** World-model rollouts exist only in `scripts/demo_e2e.py` and
-  `python3 -m pan demo`, and are a mock or K2-Horizon text reasoning, labelled as such. If the
-  pitch says "imagine before you pack", that claim has no visual backing; say "physics-checked
-  plan with an LLM risk read" instead.
-- **Editing Grok's guesses in the app.** `Spike/SpikeApp.swift:69-81` lets the user fix label
-  and rigidity; compressibility, mass and keepUpright are shown but not editable, although
-  `PATCH /items/{id}` accepts all of them.
-- ~~No delete or reset.~~ **Fixed**: `DELETE /suitcases/{id}` cascades to its items and plan,
-  `DELETE /items/{id}` also drops the now-stale plan; `scripts/demo_e2e.py` calls the former
-  after every run unless `--keep` is passed.
-- **Folding.** Compression is a height squash (`physics/prepack.py`, `Item.compressed`). There
-  is no fold/reshape model; a shirt stack is one box that gets shorter.
+- **Cavity nesting never reaches a real plan.** `packer3d/packer3d/models.py:573`'s `Placement`
+  dataclass has no `nested_in` field and `to_dict()` never emits one, so
+  `server/app_plan.py:57`'s `p.get("nested_in")` is always `None` for a real solver run — every
+  real plan's `nestedIn` is `null`. Today's chain (`packing-core`'s nestedIn-aware overlap check,
+  `ar_sim.py`'s nested decomposition) is real and correct, but only exercised by the hand-built
+  `packing-core/.../nested-plan.json` fixture. The geometry side is already there —
+  `from_scanned_heightmap` (models.py:258-303) carves a real cavity below 90% fill — the decoder
+  just needs to record which item it put in whose cavity.
+- **Folding exists but isn't used.** `physics/prepack.py:71`'s `fold_options` (flat / half-fold /
+  rolled candidate boxes, real logic, tested in `tests/test_folding.py`) is computed for every
+  soft item and attached to its scenario dict via `prepare_items` → `packable` — but nothing in
+  `packer3d/packer3d/*.py` reads the `fold_options` key. The solver still only ever tries the
+  item's single height-squashed box. (This morning's "no fold model exists" note was already
+  out of date; the model exists, it's just not consulted.)
+- **Editing Grok's guesses is still partial.** `Spike/SpikeApp.swift`'s `ItemEditor` has a label
+  `TextField` (`:153`) and a rigidity `Picker` (`:158`); compressibility/mass/keepUpright (`:165`)
+  are still `Text`-only, though `PATCH /items/{id}` (`server/main.py:305-311`) accepts all three.
+- **PAN is still not in the app.** No `pan`/`PAN` reference anywhere in `Spike/*.swift`;
+  rollouts exist only in `scripts/demo_e2e.py` and `python3 -m pan demo`. Say "physics-checked
+  plan with an LLM risk read," not "imagine before you pack."
 
-## 5. Two PAN layers
+## 5. Stale docs
 
-- `pan/world_model.py:636` `RealPanBackend` is an HTTP seam for a service whose route was never
-  confirmed (`PAN_ENDPOINT_PATH`), so it is never available; `physics/pan.py` `RealPanBackend`
-  is the one that actually talks to IFM (K2-Horizon, text). Two `MockPanBackend`s, two
-  `simulate_candidate_actions`, two result types, two docs (`PAN.md`, `docs/PAN_INTEGRATION.md`,
-  `docs/PAN_ACCESS.md`). Delete the dead HTTP seam and point `pan.world_model.get_world_model`
-  at the IFM client, or drop the `pan/` visual layer from the demo path and keep the text one.
-- `pan/world_model.py:540` `MockPanBackend.persist` duplicates `pan/demo.py::persist_result` and
-  has no production caller.
-- IFM calls time out (45 s observed once) and are retried by the caller only by re-running the
-  script. `physics/pan.py` should retry once or lower the timeout.
+- `packer3d/README.md:15,286` and `ALGORITHM.md:404` say "104 tests"; `pytest --collect-only`
+  finds 154 today (cavity/nesting/`verify_invariants` tests landed this morning and outgrew it).
+- `scripts/README.md` documents `demo_e2e.py`'s outputs but omits `scenario.json`
+  (`demo_e2e.py:165,197`), which the script both writes to `out/e2e` and reads back.
+- `docs/INTEGRATION.md:121-136`'s CLI list (`validate`, `example`, `scan-to-object`) still omits
+  `validate-packer3d` (`physics/__main__.py`), documented instead only in
+  `docs/SOLVER_INTEGRATION.md` and `docs/PHYSICS.md`.
 
-## 6. Stale docs, config and tests
+## 6. Branch and worktree hygiene
 
-- **`README.md:70-110`** still says "The iOS app and packing solver aren't built yet" and
-  "Soft-item compression … explicitly out of scope". Both are false now. The server section
-  omits Mongo, `--env-file`, the `/plan` routes and the compressibility fields.
-- **`.env.example`** lists only `PAN_*`; the code reads `XAI_API_KEY`, `GROK_MODEL`,
-  `SUITCASE_MONGODB_URI`, `MONGO_DB`, `IFM_API_KEY`, `PAN_ENDPOINT_PATH` as well
-  (`server/main.py`, `physics/pan.py`, `pan/world_model.py`). Eric's `.env` keeps the IFM key
-  under `PAN_API_KEY`; `physics/pan.py` wants `IFM_API_KEY` (the demo script bridges it).
-- **`.github/workflows/ci.yml`** runs only the root `unittest` suite, the PAN mock demo and the
-  Swift tests. Not run: `packer3d/tests` (pytest), `tests/test_pan.py` (pytest-style, counts as
-  0 tests under `unittest discover`), `server/check.py` (needs Mongo; a `mongo:7` service
-  container would do). `requirements.txt` lacks `pytest`.
-- **`Dockerfile`** only runs the test suites; there is no image that runs the server.
-- ~~`examples/scanned_item.json`~~ **Fixed**: now the metre `dimensions`/`suitcaseId`/`cellSize`/
-  `heights` form, matching `SCAN_OUTPUT.md`; `examples/README.md` updated to match (the CLI's
-  `scan-to-object`/`object_from_scanned_item` is a separate, still-cm adapter that this file no
-  longer feeds — see `tests/test_io.py::TestScannedItem` for its own fixture; note that changing
-  this file's shape breaks `tests/test_io.py::TestCli.test_scan_to_object_prints_json`, which
-  reads it, until that adapter or the test is updated too).
-- ~~`MVP.md` "rigid objects only, no deformable-body simulation" predates compressibility.~~
-  **Fixed**: reworded to mention the height-squash compression model.
-- **`IMPORTANT.md`** (untracked in the main checkout) says "Deployment: Vercel + Supabase"; the
-  stack is FastAPI + Mongo on a laptop.
-- ~~`packer3d/README.md` and `packer3d/ALGORITHM.md` do not mention `Item.compressed`,
-  `compressibility_k`, or the server-document input form the loader now accepts.~~ **Fixed**.
-- **`docs/PAN_INTEGRATION.md`** documents the visual-rollout contract as if a visual backend
-  existed; add the honesty-note requirement it now carries to `README.md`'s PAN mention.
+- `loop` is the integration branch; land on `main` only via a PR from it. Never rewrite or reset
+  `loop`'s head — commit only on top, `git status` before every commit, never `git stash` here.
+- The 09:00 branch audit is out of date: `git worktree list` now shows 92 active worktrees and
+  `git branch` shows 82 local `worktree-agent-*` branches (98 total) — today's parallel-agent
+  fleet, not the four branches the audit named. Don't mass-delete mid-event (some may still be
+  live); this needs a cleanup pass once the demo is done.
 
-Concrete doc-vs-code mismatches (each verified by grep; fix the doc unless noted):
+## Fixed on `loop` today
 
-- `README.md:59` runs `swiftc … Tests/main.swift`; the file is `tests/main.swift` (fails on a
-  case-sensitive filesystem). `README.md:8` likewise calls the directory `Tests/`.
-- `README.md:27-31` endpoint table lacks every `/suitcases` route and the `/plan` routes, and
-  does not say `POST /items` now requires `suitcaseId`. ~~`SCAN_OUTPUT.md:9-44` sample and field
-  table omit `suitcaseId` too.~~ **Fixed** (`SCAN_OUTPUT.md` only; `README.md`'s endpoint table
-  is still missing the routes above).
-- `docs/INTEGRATION.md:121-128` lists the CLI as `validate`, `example`, `scan-to-object`;
-  `physics/__main__.py` also has `validate-packer3d` (`--strategy`, `--items`, `--pretty`).
-  ~~`docs/PHYSICS.md:749-755` ... `docs/PHYSICS.md:5` "ten modules" is now fifteen.~~ **Fixed**
-  (`docs/PHYSICS.md` only; `docs/INTEGRATION.md`'s CLI list is still stale).
-- ~~`OVERVIEW.md` stack table (Rust/C++ solver behind Swift FFI, Metal voxel ops, SQLite/Core
-  Data, CloudKit, Vision/mobile-SAM masks): none of it exists.~~ **Fixed**: labelled "original
-  plan", with an "Actual stack (as built)" table added below it.
-- `docs/PAN_ACCESS.md:24,88-91`: "only PAN.md mentions PAN", "no .env* in the tree", and a
-  four-variable config table are all stale (`pan/`, `physics/pan.py`, `.env.example`,
-  `PAN_ENDPOINT_PATH`).
-- ~~`docs/SWIFT_PORT.md:32-40` says Validator/Incremental have no tests and counts 118 ...
-  `docs/SWIFT_PORTABILITY.md:3` says 163 tests, and its `:34-38` "reported, not fixed"
-  `bench --objects -5` crash is guarded at `Sources/PackPhysicsCLI/main.swift:198`.~~ **Fixed**:
-  both docs now say 178 tests, the Validator/Incremental rows point at their real test files, and
-  the `bench --objects -5` item now says it's guarded, not just "reported".
-- ~~`packer3d/README.md:14,251-265` "42 edge-case tests" (103 now); module map omits
-  `physics_bridge.py` and `geometry.py`; `OptimizerConfig`/`DecoderParams` field lists omit
-  `multi_start` and `chunk`. `packer3d/ALGORITHM.md:380` "112 tests" (103).~~ **Fixed** (current
-  count via `grep -c "def test" packer3d/tests/*.py` is 104, not 103 — `test_visualize.py` adds
-  one more `def test` than the count above assumed).
-- `scripts/README.md:22` omits `scenario.json`, which the script writes and reads back.
-
-## 7. Branch and worktree hygiene
-
-- Landed on `loop` as of 2026-09-12 09:00: `integration`, `render-polish`, `hull-footprints`
-  (prism footprints in the physics gate) and `swift-prisms`; every other local branch is
-  absorbed or superseded per the branch audit and can be deleted with `git branch -d`.
-- `loop` is the integration branch; land on `main` only via a PR from it. Never rewrite or
-  reset `loop`'s head: five sessions share this checkout (one filter-branch and one soft
-  reset this morning each cost an hour). Commit only on top, `git status` before every commit,
-  never `git stash` here, keep agent work in worktrees and cherry-pick it onto the head.
+Scan payload validation (422); Grok failures no longer lose the scan (background
+`relabel_pending`, `labelStatus`, `?async=1`, polling `GET /items/{id}`); `DELETE`
+routes for items/suitcases; the packer3d-adapter and Swift-port double-rotate bug
+(`oriented=False`); the AR plan overlay, wall inset, label polling, Pack-button guard, items
+sheet delete/reset, settings sheet with server-URL override; scan geometry trimming and its
+Linux simulation; hull/convex-prism footprints; cavity-aware packing in packer3d (875137d) with
+its `nestedIn` contract documented in `packing-core/CLAUDE.md` (see section 4 for what's still
+missing); Auth0 open-mode fallback; Mongo fail-fast at startup; `make server` binding
+`0.0.0.0`; the Grok prompt; PAN collapsed to one real backend + retry-once/lower-timeout
+(`physics/pan.py`); hue-based color segmentation in `pan/evaluate.py`; the planner's global lock,
+`unpacked`, and `runnerUp` fields; `scripts/pipeline_check.sh` plus the CI coverage for
+`packer3d/tests` and `server/check.py`; README/MVP/IMPORTANT/OVERVIEW/PAN docs brought in line
+with the actual stack.

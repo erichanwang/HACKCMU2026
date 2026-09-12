@@ -151,7 +151,11 @@ def _gemini_detect(jpeg: bytes, key: str) -> dict:
                 {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(jpeg).decode()}},
                 {"text": PROMPT},
             ]}],
-            "generationConfig": {"responseMimeType": "application/json"},
+            # thinkingBudget 0: this is a classification call, and 2.5-flash otherwise
+            # spends its thinking budget before answering — enough to hit the timeout and
+            # add half a minute of dead latency to every scan in the mixture.
+            "generationConfig": {"responseMimeType": "application/json",
+                                 "thinkingConfig": {"thinkingBudget": 0}},
         },
         timeout=30,
     )

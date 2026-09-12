@@ -72,4 +72,32 @@ final class ScanValidationTests: XCTestCase {
     func testRejectsNaNInHeightMap() {
         XCTAssertFalse(isUsableHeightMap([[0.1, Float.nan]]))
     }
+
+    /// Every labelStatus the server can write must get its own actionable line. The bug this
+    /// pins: "failed" and "unidentified" are both "not pending", so before the branch existed
+    /// they fell through to "labelled unknown" — the app presenting a non-answer as an answer.
+    func testEveryLabelStatusGetsADistinctMessage() {
+        let done = labelStatusMessage(labelStatus: "done", label: "hiking boot", identifyHint: nil)
+        let pending = labelStatusMessage(labelStatus: "pending", label: nil, identifyHint: nil)
+        let failed = labelStatusMessage(labelStatus: "failed", label: "unknown", identifyHint: nil)
+        let unident = labelStatusMessage(labelStatus: "unidentified", label: "unknown",
+                                         identifyHint: "labelling is off — type it in")
+        XCTAssertEqual(done, "labelled hiking boot")
+        XCTAssertEqual(pending, "labelling…")
+        XCTAssertEqual(unident, "labelling is off — type it in")
+        XCTAssertTrue(failed.contains("type it in"))
+        // Distinct, and none of the terminal ones may read as a successful label.
+        XCTAssertEqual(Set([done, pending, failed, unident]).count, 4)
+        for m in [failed, unident] { XCTAssertFalse(m.hasPrefix("labelled "), m) }
+    }
+
+    /// The server's hint is authoritative — it knows whether a model ran at all and whether the
+    /// scan geometry was degenerate. Ours is only the fallback for a malformed response.
+    func testUnidentifiedPrefersTheServerHint() {
+        XCTAssertEqual(labelStatusMessage(labelStatus: "unidentified", label: "unknown",
+                                          identifyHint: "the scan looks too flat or small to show the object clearly — try rescanning it"),
+                       "the scan looks too flat or small to show the object clearly — try rescanning it")
+        XCTAssertEqual(labelStatusMessage(labelStatus: "unidentified", label: "unknown", identifyHint: nil),
+                       "couldn't identify it — type it in")
+    }
 }

@@ -25,3 +25,22 @@ func isUsableHeightMap(_ heights: [[Float]]) -> Bool {
     guard let first = heights.first, !first.isEmpty else { return false }
     return heights.allSatisfy { row in row.count == first.count && row.allSatisfy(\.isFinite) }
 }
+
+/// What the user is told about an item's label, given the server's terminal state.
+/// Pure so `tests/swift/robust` can pin it: every `labelStatus` the server can write must map to
+/// its own actionable line. A value falling through to a generic string is the bug this prevents —
+/// `"failed"` did exactly that before, showing "labelled unknown" as if the guess were real.
+func labelStatusMessage(labelStatus: String?, label: String?, identifyHint: String?) -> String {
+    switch labelStatus {
+    case "pending":
+        return "labelling…"
+    case "unidentified":
+        // The server computes the hint from the scan geometry (flat/tiny -> rescan, otherwise
+        // rotate) and from whether any model was configured at all. Trust it over our own copy.
+        return identifyHint ?? "couldn't identify it — type it in"
+    case "failed":
+        return "couldn't reach the labeller — type it in"
+    default:
+        return "labelled \(label ?? "?")"
+    }
+}

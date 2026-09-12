@@ -449,3 +449,145 @@ def scene_with_soft_item_compression() -> Scene:
         mass_kg=0.5,
     )
     return Scene(container=_container(), objects=[clothes_bag, toiletry_bag])
+
+
+# ---------------------------------------------------------------------------
+# LiDAR scanned footprints (convex polygons in local x/z, see physics/io.py's
+# object_from_box_fit / object_from_scanned_item and physics/schema.py's
+# Object.footprint docstring). All three shapes below were checked with
+# tests/scratch (physics.geometry.convex_hull_2d + polygon_area_2d): every
+# listed point survives as a hull vertex (none is interior -- confirming the
+# shape really is a hexagon/octagon/pentagon, not fewer effective points),
+# every point lies within the object's dims/2 bounding rectangle, and the
+# polygon has positive area. See docs/LIDAR_HULLS.md for the area numbers.
+#
+# shoe: dims=(0.29, 0.11, 0.12) -> half-extents (hx=0.145, hz=0.06). A tapered
+# hexagon: narrow end (toe, z=+-0.02) at local x=-0.145, wide end (heel,
+# z=+-0.05) at local x=+0.145, with the widest point (ball of foot,
+# z=+-0.06, touching the box's z-limit exactly) at x=0. Area = 0.027550 m^2
+# vs the box's 0.145*2 * 0.06*2 = 0.034800 m^2 (79.2% of the box).
+SHOE_FOOTPRINT = [
+    (-0.145, -0.02),
+    (0.0, -0.06),
+    (0.145, -0.05),
+    (0.145, 0.05),
+    (0.0, 0.06),
+    (-0.145, 0.02),
+]
+# toiletry_bag: dims=(0.20, 0.08, 0.135) -> half-extents (hx=0.10, hz=0.0675).
+# A rounded octagon: the four corners of the 0.20x0.135 rectangle are each
+# chamfered by 0.02m in x and 0.02m in z. Area = 0.026200 m^2 vs the box's
+# 0.10*2 * 0.0675*2 = 0.027000 m^2 (97.0% of the box).
+TOILETRY_BAG_FOOTPRINT = [
+    (0.08, -0.0675),
+    (0.10, -0.0475),
+    (0.10, 0.0475),
+    (0.08, 0.0675),
+    (-0.08, 0.0675),
+    (-0.10, 0.0475),
+    (-0.10, -0.0475),
+    (-0.08, -0.0675),
+]
+# camera: dims=(0.13, 0.09, 0.10) -> half-extents (hx=0.065, hz=0.05). The
+# 0.13x0.10 rectangle with its (+x, +z) corner chamfered (the grip) from
+# (0.065, 0.05) down to two points (0.065, 0.02) and (0.035, 0.05). Area =
+# 0.012550 m^2 vs the box's 0.065*2 * 0.05*2 = 0.013000 m^2 (96.5%).
+CAMERA_FOOTPRINT = [
+    (0.065, -0.05),
+    (0.065, 0.02),
+    (0.035, 0.05),
+    (-0.065, 0.05),
+    (-0.065, -0.05),
+]
+
+
+# ---------------------------------------------------------------------------
+# 12. scene_scanned_hulls
+# ---------------------------------------------------------------------------
+def scene_scanned_hulls() -> Scene:
+    """`valid_packed_scene`, but `shoe`, `toiletry_bag` and `camera` carry the
+    scanned footprints above instead of a plain box. Same 7 objects, same
+    poses as `valid_packed_scene` -- a convex prism is always inside its box
+    (`footprint_local` enforces every point within +-dims/2), so nothing that
+    was non-overlapping/contained/supported by the box geometry can newly
+    collide, escape the container, or lose support by shrinking to the
+    footprint; `validate_layout` on this scene is still `valid`.
+    """
+    objects = _base_objects()
+    footprints = {
+        "shoe": SHOE_FOOTPRINT,
+        "toiletry_bag": TOILETRY_BAG_FOOTPRINT,
+        "camera": CAMERA_FOOTPRINT,
+    }
+    objects = [
+        replace(o, footprint=footprints[o.id]) if o.id in footprints else o for o in objects
+    ]
+    return Scene(container=_container(), objects=objects)
+
+
+# ---------------------------------------------------------------------------
+# 13. scene_hull_clears_box_would_not
+# ---------------------------------------------------------------------------
+def scene_hull_clears_box_would_not() -> Scene:
+    """`camera` and `shoe`, both resting on the floor, positioned so their
+    BOXES overlap by ~1cm x 1cm at a corner but their scanned-hull FOOTPRINTS
+    do not touch -- the shoe's toe (narrow end, local x=-0.145) sits in the
+    camera's chamfered grip corner (local +x,+z), and the chamfer/taper carve
+    exactly that corner away from both hulls.
+
+    camera: half-extents (hx=0.065, hz=0.05), center=(-0.14, 0.045, -0.05) ->
+        box x=[-0.205,-0.075], z=[-0.10, 0.0].
+    shoe: half-extents (hx=0.145, hz=0.06), center=(0.06, 0.055, 0.05) ->
+        box x=[-0.085, 0.205], z=[-0.01, 0.11].
+    Box overlap: overlap_x = min(camera_x_max, shoe_x_max) -
+        max(camera_x_min, shoe_x_min) = min(-0.075, 0.205) - max(-0.205,
+        -0.085) = -0.075 - (-0.085) = 0.01m; overlap_z = min(camera_z_max,
+        shoe_z_max) - max(camera_z_min, shoe_z_min) = min(0.0, 0.11) -
+        max(-0.10, -0.01) = 0.0 - (-0.01) = 0.01m -- a 1cm x 1cm corner
+        square, x in [-0.085,-0.075], z in [-0.01, 0.0].
+    In camera-local coords that square is x in [0.055,0.065], z in
+        [0.04,0.05] -- inside the chamfered-away corner (the chamfer edge
+        runs from (0.065,0.02) to (0.035,0.05), i.e. local x+z=0.085; the
+        square's nearest corner (0.055,0.04) has x+z=0.095 > 0.085, so it's
+        outside the hull with margin). In shoe-local coords the same square
+        is x in [-0.145,-0.135], z in [-0.06,-0.05] -- at the toe tip
+        (x=-0.145) the hull only spans z in [-0.02,0.02], well short of
+        z=-0.05, so the hull is nowhere near this corner either.
+    Verified with a throwaway separating-axis check (both AABB overlap and
+    hull disjointness) before writing this docstring; the same check is
+    re-run as a test in tests/test_fixtures.py. Whether `validate_layout`
+    itself reports this pair as clear depends on the collision module's
+    (concurrent) footprint support -- that assertion belongs to the
+    collision tests, not here.
+    """
+    camera = Object(
+        id="camera",
+        dimensions=(0.13, 0.09, 0.10),
+        position=(-0.14, 0.045, -0.05),
+        mass_kg=0.4,
+        footprint=CAMERA_FOOTPRINT,
+    )
+    shoe = Object(
+        id="shoe",
+        dimensions=(0.29, 0.11, 0.12),
+        position=(0.06, 0.055, 0.05),
+        mass_kg=0.3,
+        footprint=SHOE_FOOTPRINT,
+    )
+    return Scene(container=_container(), objects=[camera, shoe])
+
+
+# ---------------------------------------------------------------------------
+# 14. scene_scanned_footprint_out_of_dims
+# ---------------------------------------------------------------------------
+def scene_scanned_footprint_out_of_dims() -> Scene:
+    """`valid_packed_scene`, but `shoe`'s footprint has a point at local
+    x=0.20 -- its half-width is dims[0]/2 = 0.145, so this overshoots by
+    0.055m, far past `footprint_local`'s 1e-6 slack. `precompute` (and so
+    `validate_layout`) must raise/report MALFORMED_GEOMETRY naming "shoe",
+    not raise an uncaught exception.
+    """
+    objects = _base_objects()
+    bad_footprint = [(-0.10, -0.05), (0.20, 0.0), (-0.10, 0.05)]
+    objects = [replace(o, footprint=bad_footprint) if o.id == "shoe" else o for o in objects]
+    return Scene(container=_container(), objects=objects)

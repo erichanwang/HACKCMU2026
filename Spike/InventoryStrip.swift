@@ -55,7 +55,7 @@ struct InventoryStrip<MenuContent: View>: View {
     }
 
     private func card(_ item: ScannedItem) -> some View {
-        let label = item.labelStatus == "pending" ? "Identifying…" : (item.label ?? "Unlabelled")
+        let label = item.displayName
         return Button { select(item) } label: {
             VStack(alignment: .leading, spacing: 5) {
                 Image(systemName: item.symbol)

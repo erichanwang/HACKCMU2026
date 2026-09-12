@@ -280,7 +280,7 @@ struct BagContentsSheet: View {
                                 .font(.title3)
                                 .foregroundStyle(inBag ? Sheet.accent : Sheet.ink.opacity(0.25))
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(item.labelStatus == "pending" ? "Identifying…" : (item.label ?? "Unlabelled"))
+                                Text(item.displayName)
                                     .font(.body)
                                     .foregroundStyle(Sheet.ink)
                                 Text(whereItIs(item))

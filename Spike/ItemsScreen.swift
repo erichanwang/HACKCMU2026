@@ -77,11 +77,16 @@ struct ItemsScreen: View {
         HStack(spacing: 13) {
             StampIcon(symbol: scanned.symbol)
             VStack(alignment: .leading, spacing: 2) {
-                Text(scanned.labelStatus == "pending" ? "Identifying…" : (scanned.label ?? "Unlabelled"))
+                Text(scanned.displayName)
                     .font(.body.weight(.medium))
-                Text("\(scanned.manifestSize) cm · \(shortBagName(for: scanned.suitcaseId))")
+                    .foregroundStyle(scanned.needsName ? Sheet.ink.opacity(0.6) : Sheet.ink)
+                // An unidentified item's most useful line is what to do about it.
+                Text(scanned.needsName && scanned.labelStatus != "pending"
+                     ? (scanned.identifyHint ?? "couldn't identify it — type a name in")
+                     : "\(scanned.manifestSize) cm · \(shortBagName(for: scanned.suitcaseId))")
                     .font(.caption.monospaced())
-                    .foregroundStyle(Sheet.ink.opacity(0.55))
+                    .foregroundStyle(scanned.needsName ? Sheet.warn : Sheet.ink.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 3)
@@ -232,6 +237,19 @@ struct StampIcon: View {
 }
 
 extension ScannedItem {
+    /// True while nothing has managed to name this yet. "unknown" is the server's sentinel
+    /// for a model that declined, not a name, and must never reach a list as one.
+    var needsName: Bool {
+        let name = (label ?? "").trimmingCharacters(in: .whitespaces)
+        return name.isEmpty || name.lowercased() == "unknown"
+    }
+
+    /// What to show wherever this item is listed.
+    var displayName: String {
+        if labelStatus == "pending" { return "Identifying…" }
+        return needsName ? "Unidentified" : (label ?? "")
+    }
+
     /// Whether there is a real surface to orbit. A one-cell grid is a box, not a scan,
     /// and rendering it as a model would overstate what the scanner actually captured.
     var hasGeometry: Bool {

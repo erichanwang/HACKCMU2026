@@ -331,13 +331,48 @@ class ServerContractTests(unittest.TestCase):
                 main.detect(b"jpeg", "both")
                 self.assertEqual((grok.call_count, claude.call_count, gemini.call_count), (2, 2, 2))
 
-    def test_the_majority_label_wins(self):
-        with patch.dict(os.environ, self.ALL_KEYS, clear=False):
+    def test_the_heaviest_label_wins(self):
+        # Grok + Gemini + PAN = 0.34 against Claude's 0.66: the weighting is what decides,
+        # not the head count, and Claude's majority stands alone against all three.
+        with patch.dict(os.environ, self.ALL_KEYS | {"PAN_API_KEY": "p"}, clear=False):
             with patch.object(main, "_grok_detect", return_value={"label": "kettle"}), \
                  patch.object(main, "_claude_detect", return_value={"label": "teapot"}), \
-                 patch.object(main, "_gemini_detect", return_value={"label": "kettle"}):
-                # Two against one beats Claude's standing tie-break.
+                 patch.object(main, "_gemini_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_pan_vote", return_value="kettle"):
+                self.assertEqual(main.detect(b"jpeg", "both")["label"], "teapot")
+
+    def test_the_weights_sum_to_one_voice(self):
+        self.assertAlmostEqual(sum(main.LABEL_WEIGHTS.values()), 1.0, places=6)
+        self.assertEqual(main.LABEL_WEIGHTS["grok"], main.LABEL_WEIGHTS["gemini"])
+
+    def test_the_light_models_decide_when_claude_declines(self):
+        with patch.dict(os.environ, self.ALL_KEYS | {"PAN_API_KEY": "p"}, clear=False):
+            with patch.object(main, "_grok_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_claude_detect", return_value={"label": "unknown"}), \
+                 patch.object(main, "_gemini_detect", return_value={"label": "flask"}), \
+                 patch.object(main, "_pan_vote", return_value="kettle") as pan:
+                # Claude declined, so 0.10 + 0.14 beats 0.10.
                 self.assertEqual(main.detect(b"jpeg", "both")["label"], "kettle")
+                pan.assert_called_once()
+
+    def test_pan_is_not_asked_when_the_vision_models_agree(self):
+        with patch.dict(os.environ, self.ALL_KEYS | {"PAN_API_KEY": "p"}, clear=False):
+            with patch.object(main, "_grok_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_claude_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_gemini_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_pan_vote") as pan:
+                self.assertEqual(main.detect(b"jpeg", "both")["label"], "kettle")
+                pan.assert_not_called()
+
+    def test_a_pan_failure_does_not_sink_the_vote(self):
+        import httpx
+        with patch.dict(os.environ, self.ALL_KEYS | {"PAN_API_KEY": "p"}, clear=False):
+            with patch.object(main, "_grok_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_claude_detect", return_value={"label": "unknown"}), \
+                 patch.object(main, "_gemini_detect", return_value={"label": "flask"}), \
+                 patch.object(main, "_pan_vote", side_effect=httpx.ReadTimeout("slow")):
+                # PAN abstains; the vision models still settle it on their own weights.
+                self.assertIn(main.detect(b"jpeg", "both")["label"], {"kettle", "flask"})
 
     def test_an_even_split_goes_to_claude(self):
         with patch.dict(os.environ, {"XAI_API_KEY": "x", "ANTHROPIC_API_KEY": "c"}, clear=False):
@@ -453,6 +488,39 @@ class ServerContractTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(main.identify_hint([0.2, 0.2, 0.2], self.flat_grid(0.2)),
                              "labelling is off — type it in")
+
+    # --- (13) a label is a name, not a hedge --------------------------------------------------
+
+    def test_labels_are_normalised_to_one_name(self):
+        for raw, want in [
+            ("notebook or folder", "Notebook"),          # the hedge is cut at the hedge
+            ("shoes/sneakers", "Shoes"),
+            ("toiletry bag, possibly a wash kit", "Toiletry bag"),
+            ("a blue hardcover book", "Blue hardcover book"),   # articles dropped
+            ("the umbrella", "Umbrella"),
+            ("  hiking   boots ", "Hiking boots"),        # whitespace collapsed
+            ("camera body", "Camera body"),               # sentence case
+            ("", "unknown"),
+            ("unknown", "unknown"),                       # the sentinel keeps its spelling
+        ]:
+            self.assertEqual(main._clean_label(raw), want, raw)
+
+    def test_a_cleaned_unknown_still_reads_as_a_decline(self):
+        # _is_unknown and the relabel query both key off this exact spelling.
+        self.assertTrue(main._is_unknown({"label": main._clean_label("unknown")}))
+        self.assertTrue(main._is_unknown({"label": main._clean_label("")}))
+
+    def test_an_upload_stores_a_cleaned_label(self):
+        sc = self.make_suitcase()
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "c"}, clear=False):
+            with patch.object(main, "_claude_detect",
+                              return_value=main._parse_guess({"label": "a laptop or tablet",
+                                                              "rigidity": "fragile"}, "test")):
+                r = self.client.post("/items", data={"item": scanned_item_json("i1", sc["id"]),
+                                                     "model": "claude"}, files=IMG)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["label"], "Laptop")
+        self.assertEqual(r.json()["rigidity"], "fragile")
 
 
 if __name__ == "__main__":

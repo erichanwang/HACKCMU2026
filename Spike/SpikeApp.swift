@@ -341,7 +341,7 @@ struct ScanScreen: View {
             List {
                 ForEach(items) { scanned in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(scanned.labelStatus == "pending" ? "Labelling…" : (scanned.label ?? "Unlabelled"))
+                        Text(scanned.displayName)
                             .font(.body.weight(.medium))
                         Text("\(scanned.sizeText) · \(scanned.rigidity ?? "rigidity unknown")")
                             .font(.subheadline.monospacedDigit())
@@ -520,8 +520,8 @@ struct ItemEditor: View {
             TextField("Label", text: $label)
                 .font(.headline)
                 .submitLabel(.done)
-                .onAppear { label = item.label ?? "" }
-                .onChange(of: item.id) { _, _ in label = item.label ?? "" }
+                .onAppear { label = item.needsName ? "" : (item.label ?? "") }
+                .onChange(of: item.id) { _, _ in label = item.needsName ? "" : (item.label ?? "") }
                 .onSubmit { Task { item = try await API.update(id: item.id, label: label, rigidity: nil) } }
             Text(item.sizeText).font(.subheadline.monospacedDigit()).foregroundStyle(Sheet.ink.opacity(0.55))
         }

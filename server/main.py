@@ -23,7 +23,8 @@ logger = logging.getLogger("suitcase")
 RIGIDITIES = ("rigid", "soft", "fragile")
 PROMPT = (
     "Identify the main object in this photo; it is about to be packed in a suitcase. "
-    'Reply with JSON only: {"label": <2-4 word name>, "description": <one sentence: what it is, material, '
+    'Reply with JSON only: {"label": <a 2-4 word name, one name only — never a hedge like '
+    '"notebook or folder", no slashes, no leading "a"/"the">, "description": <one sentence: what it is, material, '
     'anything that matters for packing>, "rigidity": <"rigid"|"soft"|"fragile">, "compressibility": <number>, '
     '"mass": <estimated kg>, "keepUpright": <true|false>}. '
     "fragile = breaks if crushed or dropped; soft = compresses (clothes, bags); rigid = everything else. "
@@ -91,6 +92,37 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+# Ways a model hedges instead of naming one thing. Everything from the first one onwards
+# is dropped, so "notebook or folder" becomes "Notebook".
+_HEDGES = (" or ", "/", " aka ", " a.k.a. ", ", possibly", " possibly", " maybe ")
+
+
+def _clean_label(raw: object) -> str:
+    """One name, in one shape.
+
+    Models hedge ("notebook or folder"), lead with articles ("a blue hardcover book") and
+    disagree about capitals. This string is what the app puts in a list and what the user
+    reads over a suitcase, so it is normalised once here rather than in each of the four
+    places that display it.
+    """
+    label = " ".join(str(raw).split())
+    lowered = label.lower()
+    for sep in _HEDGES:
+        cut = lowered.find(sep)
+        if cut > 0:
+            label, lowered = label[:cut], lowered[:cut]
+    label = label.strip(" ,.;:-–—")
+    for article in ("a ", "an ", "the "):
+        if label.lower().startswith(article):
+            label = label[len(article):]
+    label = label.strip()[:60]
+    if not label:
+        return "unknown"
+    if label.lower() == "unknown":
+        return "unknown"  # the sentinel keeps its exact spelling; _is_unknown depends on it
+    return label[0].upper() + label[1:]
+
+
 def _parse_guess(out: dict, source: str) -> dict:
     if not isinstance(out, dict):  # a JSON array or bare string is garbage like any other bad answer
         raise ValueError(f"expected a JSON object from {source}, got {type(out).__name__}")
@@ -99,7 +131,7 @@ def _parse_guess(out: dict, source: str) -> dict:
         mass = min(50.0, max(0.0, float(out.get("mass", 0))))
     except (TypeError, ValueError):
         mass = 0.0
-    return {"label": str(out.get("label", "unknown"))[:60], "description": str(out.get("description", ""))[:200],
+    return {"label": _clean_label(out.get("label", "unknown")), "description": str(out.get("description", ""))[:200],
             "rigidity": rigidity, "compressibility": compressibility(out.get("compressibility"), rigidity),
             "mass": mass, "keepUpright": out.get("keepUpright") is True}
 
@@ -171,6 +203,16 @@ def _is_unknown(guess: dict) -> bool:
 
 LABEL_MODELS = ("both", "grok", "claude", "gemini")
 
+# What each voice is worth in the mixture. Claude's 0.66 is an outright majority, so the
+# other three can only decide a label when Claude declines or its call fails.
+LABEL_WEIGHTS = {"claude": 0.66, "gemini": 0.10, "grok": 0.10, "pan": 0.14}
+
+# IFM's hosted model, reached with PAN_API_KEY (IFM_API_KEY is the same key by another
+# name — see physics/pan.py). It is a text reasoner with no vision input, so it cannot
+# look at the scan: it votes by judging the candidates the vision models came back with.
+IFM_BASE_URL = "https://api.ifm.ai/v1"
+IFM_MODEL = os.environ.get("PAN_MODEL", "IFM/K2-Horizon-375B-A23B")
+
 # Ask order, which is also the tie-break order when the vote splits evenly: the model
 # most trusted on a disagreement comes first. Each entry is (choice, env key, function
 # name) — the name rather than the function, so it is resolved at call time and a
@@ -180,6 +222,37 @@ _DETECTORS = (
     ("gemini", "GEMINI_API_KEY", "_gemini_detect"),
     ("grok", "XAI_API_KEY", "_grok_detect"),
 )
+
+
+def _pan_vote(candidates: list[tuple[str, dict]], key: str) -> str | None:
+    """Which candidate label PAN backs, or None if it abstains.
+
+    PAN has no vision input (docs/PAN_ACCESS.md; physics/pan.py), so it never sees the
+    photo. It is given the names the vision models proposed and each one's description,
+    and picks the one that best describes a single packable object. That is a real vote on
+    real evidence — it is simply evidence in text rather than pixels.
+    """
+    options = {g["label"].strip(): g.get("description", "") for _, g in candidates}
+    if len(options) < 2:
+        return None
+    listing = "\n".join(f"- {label}: {desc or 'no description'}" for label, desc in options.items())
+    r = httpx.post(
+        f"{IFM_BASE_URL}/chat/completions",
+        headers={"Authorization": f"Bearer {key}", "content-type": "application/json"},
+        json={"model": IFM_MODEL, "max_tokens": 64, "temperature": 0,
+              "messages": [{"role": "user", "content":
+                            "Several vision models looked at one object about to be packed in a "
+                            "suitcase and named it differently:\n" + listing +
+                            "\n\nWhich single name best describes one real packable object? "
+                            "Reply with that name exactly as written above and nothing else."}]},
+        timeout=30,
+    )
+    r.raise_for_status()
+    answer = r.json()["choices"][0]["message"]["content"].strip().strip('"').strip()
+    for label in options:
+        if label.lower() == answer.lower() or label.lower() in answer.lower():
+            return label
+    return None
 
 
 def detect(jpeg: bytes, prefer: str = "both") -> dict:
@@ -217,19 +290,34 @@ def detect(jpeg: bytes, prefer: str = "both") -> dict:
     if len(answered) == 1:
         return answered[0][1]
 
-    counts: dict[str, int] = {}
-    for _, guess in answered:
-        counts[guess["label"].strip().lower()] = counts.get(guess["label"].strip().lower(), 0) + 1
-    best = max(counts.values())
-    winners = {label for label, n in counts.items() if n == best}
-    if len(counts) > 1:
-        logger.info("label vote %s, taking %s",
-                    {n: g["label"] for n, g in answered}, sorted(winners))
+    # PAN joins the vote when the vision models disagree and there is something to judge.
+    ballots = list(answered)
+    pan_key = os.environ.get("PAN_API_KEY") or os.environ.get("IFM_API_KEY")
+    by_label = {g["label"].strip(): g for _, g in answered}
+    # Only worth asking when there is a disagreement to judge; agreement needs no adjudicator.
+    if prefer == "both" and pan_key and len(by_label) > 1:
+        try:
+            backed = by_label.get(_pan_vote(answered, pan_key) or "")
+            if backed is not None:
+                ballots.append(("pan", backed))
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            logger.info("pan abstained: %s", exc)
+
+    weights: dict[str, float] = {}
+    for name, guess in ballots:
+        label = guess["label"].strip().lower()
+        weights[label] = weights.get(label, 0.0) + LABEL_WEIGHTS.get(name, 0.0)
+    best = max(weights.values())
+    winners = {label for label, w in weights.items() if w == best}
+    if len(weights) > 1:
+        logger.info("label vote %s -> %s, taking %s",
+                    {n: g["label"] for n, g in ballots},
+                    {k: round(v, 2) for k, v in weights.items()}, sorted(winners))
     # _DETECTORS order is the tie-break: the first model holding a winning label wins.
-    for name, guess in answered:
+    for name, guess in ballots:
         if guess["label"].strip().lower() in winners:
             return guess
-    return answered[0][1]
+    return ballots[0][1]
 
 
 def identify_hint(dims: list[float], heights: list[list[float]]) -> str:

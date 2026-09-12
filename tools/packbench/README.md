@@ -6,8 +6,8 @@ seven-fixture corpus in `fixtures/` and scores it. Nothing here reimplements the
 solver; if the table is wrong, the solver is wrong.
 
 ```sh
-python3 tools/packbench/packbench.py                                   # full corpus, ~7 min
-python3 tools/packbench/packbench.py --quick                           # 3 fixtures, ~30 s
+python3 tools/packbench/packbench.py                                   # full corpus, ~2.5 min
+python3 tools/packbench/packbench.py --quick                           # 3 fixtures, ~15 s
 python3 tools/packbench/packbench.py --baseline tools/packbench/baseline.json
 python3 tools/packbench/packbench.py --quick --baseline tools/packbench/baseline.json --check
 python3 tools/packbench/packbench.py --json run.json                   # save the full run
@@ -139,28 +139,32 @@ identical runs; the table and the delta are byte-identical for the same
 `--iters`/`--seed` (`--time` is a wall-clock budget and therefore *not*
 reproducible — use it to see production behaviour, never to compare revisions).
 
-## `--quick`: three fixtures, ~30 s
+## `--quick`: three fixtures, ~15 s
 
-The full corpus is ~7 minutes of solver time and `carryon_overfilled` alone is
-over 3, which is too slow to run before a commit. `--quick` runs:
+The full corpus is ~2.5 minutes of solver time (it was ~7 before the weights fix, which
+cut `carryon_overfilled` from ~190 s to ~85 s), and `carryon_overfilled` is over half of
+what is left. `--quick` runs:
 
 | fixture | ~s | what it is the only cheap cover for |
 |---|---|---|
-| `adversarial_exact_fit` | 5 | **Packing pressure.** Five trays tile 97.7% of a Pelican 1510 with 1–2 mm slack; exactly one ordering fits. First-fit already gets 5/5, so anything below that is a real regression rather than a hard case — and it costs 5 seconds to find out. |
-| `upright_bottles` | 10 | **A heightmap cavity**, plus upright constraints. `packing_cube_half_full` sags from a 12 cm rim to 7 cm in the middle, so nesting a bottle base into the dip is worth real volume. Eleven `allow_lay_down: false` items and a 30.5 cm wine bottle in a 31 cm bag mean a rotation bug shows up as dropped items immediately. |
-| `camera_kit_fragile` | 21 | **Fragility as the binding resource.** ~11 L of `fragile` + `keepUpright` gear that nothing may be stacked on, so floor area runs out before volume does. Deliberately has no heightmap grids, which makes the fragile constraint the only thing being measured. It also leaves 2 of 21 items behind at 42.7% utilisation, the corpus's widest gap between what the solver manages and what the fixture notes say a person manages, so it is the fixture most likely to move. |
+| `adversarial_exact_fit` | 1.0 | **Packing pressure.** Five trays tile 97.7% of a Pelican 1510 with 1-2 mm slack; exactly one ordering fits. First-fit already gets 5/5, so anything below that is a real regression rather than a hard case - and it costs one second to find out. |
+| `upright_bottles` | 5.1 | **A heightmap cavity**, plus upright constraints. `packing_cube_half_full` sags from a 12 cm rim to 7 cm in the middle, so nesting a bottle base into the dip is worth real volume, and `item_metadata` squashes exactly that grid by `1/k`. Eleven `allow_lay_down: false` items and a 30.5 cm wine bottle in a 31 cm bag mean a rotation bug shows up as dropped items immediately - and after `e4590e6` those eleven upright constraints are finally being graded. |
+| `camera_kit_fragile` | 10.3 | **Fragility as the binding resource.** ~11 L of `fragile` + `keepUpright` gear that nothing may be stacked on, so floor area runs out before volume does. Deliberately has no heightmap grids, which makes the fragile constraint the only thing being measured. It also leaves 2 of 21 items behind at 42.7% utilisation, the corpus's widest gap between what the solver manages and what the fixture notes say a person manages, so it is the fixture most likely to move. |
 
-That is packing pressure, a heightmap cavity and fragility in well under a
-minute - four consecutive runs on this laptop took 25.4, 31.2, 31.9 and 43.2 s,
-so treat the per-fixture seconds above as a ratio, not a promise. The four skipped fixtures are skipped for cost: `carryon_overfilled`
-(~190 s), `clothes_dominated` (~120 s) and `checked_heavy_light` (~36 s) are the
-expensive ones, and `carryon_weekend` (~20 s) is a gentler version of coverage
-`upright_bottles` already gives. Run the full corpus before merging; `--quick` is
-for the loop between commits.
+Packing pressure, a heightmap cavity and fragility for ~16 s of solver time; three
+consecutive `--quick` runs on this laptop took 12.5, 13.9 and 15.0 s wall. Treat the
+per-fixture seconds as a ratio, not a promise - they are this machine, at `--iters 40`,
+and they moved by 2x when the weights landed.
 
-`--quick` compares cleanly against the committed full-corpus `baseline.json`
-because the gate is per-fixture: the other four print `not run` in the delta and
-a `warn:` line under `--check`.
+The four skipped fixtures are skipped for cost and redundancy: `carryon_overfilled`
+(~85 s) and `clothes_dominated` (~32 s) are the expensive ones, `checked_heavy_light`
+(~14 s) is a second heightmap-cavity fixture, and `carryon_weekend` (~6 s) is a gentler
+version of coverage `upright_bottles` already gives. Run the full corpus before merging;
+`--quick` is for the loop between commits.
+
+`--quick` compares cleanly against the committed full-corpus `baseline.json` because the
+gate is per-fixture: the other four print `not run` in the delta and a `warn:` line under
+`--check`.
 
 ## Determinism
 

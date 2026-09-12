@@ -19,15 +19,20 @@ import os
 import unittest
 from unittest.mock import patch
 
-import mongomock
-import pymongo
+try:  # server deps live in server/.venv, not the root python3 that runs `unittest discover`
+    import mongomock
+    import pymongo
+    from fastapi.testclient import TestClient
+except ImportError as exc:
+    raise unittest.SkipTest(f"server test deps missing ({exc}); run via the command in the docstring")
 
 os.environ.setdefault("MONGO_DB", "suitcase_contract_test")
-from fastapi.testclient import TestClient
-with patch.object(pymongo, "MongoClient", mongomock.MongoClient):
-    import main
-
-import auth
+try:
+    with patch.object(pymongo, "MongoClient", mongomock.MongoClient):
+        import main
+    import auth
+except ImportError as exc:
+    raise unittest.SkipTest(f"run from server/ (see docstring): {exc}")
 
 # The six permutation strings AxisRotation.swift decodes (packing-core CLAUDE.md).
 ROTATIONS = {"XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"}

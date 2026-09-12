@@ -14,11 +14,12 @@ from typing import Optional
 import numpy as np
 
 from .geometry import EPS, rnd3
-from .models import Container, Item, Placement
+from .models import Container, Item, Placement, oriented_solid_boxes
 
 REASON_TOO_BIG = "larger than the container in every allowed orientation"
 REASON_MASS = "would exceed the container mass limit"
 REASON_NO_SPACE = "no feasible position (space, support or fragile constraints)"
+OBSTACLE = -1   # solid owner id shared by every container obstacle
 
 
 @dataclass
@@ -57,6 +58,7 @@ class PackState:
         self.smin = np.zeros((0, 3))
         self.smax = np.zeros((0, 3))
         self.sfrag = np.zeros(0, dtype=bool)
+        self.sowner = np.zeros(0, dtype=int)   # index into self.placements, OBSTACLE for obstacles
         self.n_obstacles = 0
 
         self.placements: list[Placement] = []
@@ -65,9 +67,11 @@ class PackState:
         self.total_mass = 0.0
         self.mass_moment = np.zeros(3)
         self.total_bbox_vol = 0.0
+        self.total_occupied_vol = 0.0  # sum of solid_boxes() volumes -- <= total_bbox_vol when items have cavities
         self.vol_moment = np.zeros(3)
         self.total_true_vol = 0.0
 
+        self._hosts: list[int] = []   # placements whose solids do not fill their bbox: can host a nest
         self._eps: dict[tuple, None] = {}
         self._ep_cache: Optional[np.ndarray] = None
         self._fail_cache: dict[tuple, int] = {}
@@ -113,9 +117,19 @@ class PackState:
         return True
 
     def _point_in_solid(self, p) -> bool:
+        """True if an item placed with min corner ``p`` must overlap a solid.
+
+        The test is ``smin <= p < smax`` (not "strictly interior"): an item at ``p`` occupies
+        ``[p, p+d]`` with every ``d > 0``, so it always contains the corner wedge just past
+        ``p``, and a solid covering that wedge always overlaps it.  Corner-of-a-box points are
+        therefore dead on arrival, which keeps the extreme-point set proportional to the open
+        surface rather than to the number of items placed.
+        ponytail: assumes every item dim > EPS, same assumption the ``ov > EPS`` overlap test
+        already makes; a sub-micron item would be treated as non-overlapping either way.
+        """
         if len(self.smin) == 0:
             return False
-        return bool(np.any(np.all((p > self.smin + EPS) & (p < self.smax - EPS), axis=1)))
+        return bool(np.any(np.all((p >= self.smin - EPS) & (p < self.smax - EPS), axis=1)))
 
     def _wall(self, a: int, p) -> float:
         """Coordinate of the container wall when projecting point p along -axis a."""
@@ -137,16 +151,17 @@ class PackState:
             return max(base, float(self.smax[m, a].max()))
         return base
 
-    def _add_solid(self, lo, hi, fragile: bool) -> None:
+    def _add_solid(self, lo, hi, fragile: bool, owner: int = OBSTACLE) -> None:
         lo = np.round(np.asarray(lo, dtype=float), 9)
         hi = np.round(np.asarray(hi, dtype=float), 9)
         self.smin = np.vstack([self.smin, lo[None, :]])
         self.smax = np.vstack([self.smax, hi[None, :]])
         self.sfrag = np.append(self.sfrag, bool(fragile))
-        # extreme points strictly inside the new solid are dead
+        self.sowner = np.append(self.sowner, int(owner))
+        # extreme points the new solid swallows are dead (same test as _point_in_solid)
         if self._eps:
             arr = self._ep_array()
-            inside = np.all((arr > lo + EPS) & (arr < hi - EPS), axis=1)
+            inside = np.all((arr >= lo - EPS) & (arr < hi - EPS), axis=1)
             if inside.any():
                 keys = list(self._eps.keys())
                 for i in np.nonzero(inside)[0]:
@@ -218,62 +233,88 @@ class PackState:
         return np.round(cands, 9)
 
     # ------------------------------------------------------------------ feasibility + score
-    def _feasible_and_score(self, lo, d, m, bbox_vol, pos, fragile=False):
+    def _feasible_and_score(self, lo, d, m, bbox_vol, pos, fragile=False, round_xy=False):
         """Vectorised feasibility and placement score for candidate min-corners ``lo`` (C,3)."""
         C = len(lo)
         hi = lo + d
         L, W, H = self.dims
         ok = np.all(lo >= -EPS, axis=1) & np.all(hi <= self.dims + EPS, axis=1)
         if self.is_cyl:
-            R, lim = self.R, (self.R + EPS) ** 2
-            for cx in (lo[:, 0], hi[:, 0]):
-                for cy in (lo[:, 1], hi[:, 1]):
-                    ok &= (cx - R) ** 2 + (cy - R) ** 2 <= lim
+            R = self.R
+            if round_xy:
+                # An upright cylinder sweeps a circle, not its bounding square: it clears the
+                # bore whenever its own axis is within R - r of the container's.  Testing its
+                # bbox corners instead would reject anything wider than R * sqrt(2).
+                r = d[0] / 2.0
+                ok &= np.hypot(lo[:, 0] + r - R, lo[:, 1] + r - R) <= R - r + EPS
+            else:
+                lim = (R + EPS) ** 2
+                for cx in (lo[:, 0], hi[:, 0]):
+                    for cy in (lo[:, 1], hi[:, 1]):
+                        ok &= (cx - R) ** 2 + (cy - R) ** 2 <= lim
         surf = 2.0 * (d[0] * d[1] + d[1] * d[2] + d[0] * d[2])
         base_area = d[0] * d[1]
+        # The contact term enters the score as ``-w_contact * (touch / surf)``; when w_contact is
+        # exactly 0 (NAIVE_PARAMS) that product is exactly 0.0 for any finite touch, so the whole
+        # touch tally -- the widest part of the (C,S) work -- can be skipped bit-for-bit safely.
+        want_touch = self.p.w_contact != 0.0
         touch = np.zeros(C)
-        touch += ((lo[:, 2] < EPS) | (np.abs(hi[:, 2] - H) < EPS)) * base_area
-        if not self.is_cyl:
-            touch += ((lo[:, 0] < EPS) | (np.abs(hi[:, 0] - L) < EPS)) * (d[1] * d[2])
-            touch += ((lo[:, 1] < EPS) | (np.abs(hi[:, 1] - W) < EPS)) * (d[0] * d[2])
+        if want_touch:
+            touch += ((lo[:, 2] < EPS) | (np.abs(hi[:, 2] - H) < EPS)) * base_area
+            if not self.is_cyl:
+                touch += ((lo[:, 0] < EPS) | (np.abs(hi[:, 0] - L) < EPS)) * (d[1] * d[2])
+                touch += ((lo[:, 1] < EPS) | (np.abs(hi[:, 1] - W) < EPS)) * (d[0] * d[2])
         support = np.zeros(C)
         if len(self.smin):
-            smin = self.smin[None, :, :]
-            smax = self.smax[None, :, :]
+            # Only solids whose AABB meets this batch's envelope can matter.  A solid outside it
+            # is separated along some axis by more than EPS from every candidate, so its clipped
+            # overlap on that axis is exactly zero *and* neither of its faces on that axis can be
+            # flush with the item -- it contributes nothing to overlap, support, fragile or touch.
+            # Dropping it is exact, not an approximation, and keeps the (C,S,3) temporaries
+            # proportional to the working surface instead of to everything packed so far.
+            near = np.all((self.smax >= lo.min(axis=0) - EPS)
+                          & (self.smin <= hi.max(axis=0) + EPS), axis=1)
+            smin = self.smin[near][None, :, :]
+            smax = self.smax[near][None, :, :]
+            sfrag = self.sfrag[near]
             l3 = lo[:, None, :]
             h3 = hi[:, None, :]
             ov = np.clip(np.minimum(h3, smax) - np.maximum(l3, smin), 0.0, None)  # (C,S,3)
             ok &= ~np.any(np.all(ov > EPS, axis=2), axis=1)                        # no overlap
             axy = ov[:, :, 0] * ov[:, :, 1]
-            ayz = ov[:, :, 1] * ov[:, :, 2]
-            axz = ov[:, :, 0] * ov[:, :, 2]
             below = np.abs(smax[:, :, 2] - l3[:, :, 2]) < EPS       # solid top flush with base
             contact_below = axy * below
-            ok &= ~np.any((contact_below > EPS) & self.sfrag[None, :], axis=1)     # fragile below
+            ok &= ~np.any((contact_below > EPS) & sfrag[None, :], axis=1)          # fragile below
             sb = contact_below.sum(axis=1)
             support = sb / base_area
-            touch += sb
-            contact_above = axy * (np.abs(smin[:, :, 2] - h3[:, :, 2]) < EPS)  # solid base flush with top
-            if fragile:  # nothing may already rest on a fragile item's top face
-                ok &= ~np.any(contact_above > EPS, axis=1)
-            touch += contact_above.sum(axis=1)
-            touch += (ayz * ((np.abs(smax[:, :, 0] - l3[:, :, 0]) < EPS)
-                             | (np.abs(smin[:, :, 0] - h3[:, :, 0]) < EPS))).sum(axis=1)
-            touch += (axz * ((np.abs(smax[:, :, 1] - l3[:, :, 1]) < EPS)
-                             | (np.abs(smin[:, :, 1] - h3[:, :, 1]) < EPS))).sum(axis=1)
+            if fragile or want_touch:
+                contact_above = axy * (np.abs(smin[:, :, 2] - h3[:, :, 2]) < EPS)  # solid base flush with top
+                if fragile:  # nothing may already rest on a fragile item's top face
+                    ok &= ~np.any(contact_above > EPS, axis=1)
+            if want_touch:
+                ayz = ov[:, :, 1] * ov[:, :, 2]
+                axz = ov[:, :, 0] * ov[:, :, 2]
+                touch += sb
+                touch += contact_above.sum(axis=1)
+                touch += (ayz * ((np.abs(smax[:, :, 0] - l3[:, :, 0]) < EPS)
+                                 | (np.abs(smin[:, :, 0] - h3[:, :, 0]) < EPS))).sum(axis=1)
+                touch += (axz * ((np.abs(smax[:, :, 1] - l3[:, :, 1]) < EPS)
+                                 | (np.abs(smin[:, :, 1] - h3[:, :, 1]) < EPS))).sum(axis=1)
         if self.gravity:
             ok &= (lo[:, 2] < EPS) | (support >= self.min_support - EPS)
-        center = lo + d / 2.0
-        if self.total_mass + m > EPS:
-            com_after = (self.mass_moment + m * center) / (self.total_mass + m)
-        else:
-            com_after = (self.vol_moment + bbox_vol * center) / (self.total_bbox_vol + bbox_vol)
-        dv = (com_after - self.target) / self.dims
-        dev = np.sqrt(np.sum(self.axis_w * dv * dv, axis=1))
-        score = pos - self.p.w_contact * (touch / surf) + self.p.w_com * dev
+        score = pos - self.p.w_contact * (touch / surf) if want_touch else pos
+        if self.p.w_com != 0.0:   # likewise: a zero CoM weight contributes exactly 0.0
+            center = lo + d / 2.0
+            if self.total_mass + m > EPS:
+                com_after = (self.mass_moment + m * center) / (self.total_mass + m)
+            else:
+                com_after = (self.vol_moment + bbox_vol * center) / (self.total_bbox_vol + bbox_vol)
+            dv = (com_after - self.target) / self.dims
+            dev = np.sqrt(np.sum(self.axis_w * dv * dv, axis=1))
+            score = score + self.p.w_com * dev
         return ok, score
 
-    def _best_candidate(self, cands, d, m, bbox_vol, best=math.inf, fragile=False):
+    def _best_candidate(self, cands, d, m, bbox_vol, best=math.inf, fragile=False, round_xy=False):
         """Best feasible candidate with score < ``best`` (branch-and-bound over sorted chunks)."""
         if len(cands) == 0:
             return best, None
@@ -294,7 +335,7 @@ class PackState:
             idx = order[start:start + chunk]
             if lb[idx[0]] >= best:
                 break
-            ok, score = self._feasible_and_score(cands[idx], d, m, bbox_vol, pos[idx], fragile)
+            ok, score = self._feasible_and_score(cands[idx], d, m, bbox_vol, pos[idx], fragile, round_xy)
             if ok.any():
                 sc = np.where(ok, score, np.inf)
                 j = int(np.argmin(sc))
@@ -315,7 +356,7 @@ class PackState:
             self.unpacked.append({"id": item.id, "reason": REASON_MASS})
             return False
         bbox_vol = item.bbox_volume
-        if self.c.usable_volume - self.total_bbox_vol < bbox_vol - EPS:
+        if self.c.usable_volume - self.total_occupied_vol < item.occupied_volume - EPS:
             self.unpacked.append({"id": item.id, "reason": REASON_NO_SPACE})
             return False
         if orient_idx is None:
@@ -331,7 +372,8 @@ class PackState:
             for k in order:
                 d = np.asarray(oris[k].dims, dtype=float)
                 cands = self._ep_array() if stage == "ep" else self._grid(d)
-                sc, pos = self._best_candidate(cands, d, item.mass, bbox_vol, best_score, item.fragile)
+                sc, pos = self._best_candidate(cands, d, item.mass, bbox_vol, best_score, item.fragile,
+                                               oris[k].axis == "z")
                 if pos is not None:
                     best_score, best_pos, best_k = sc, pos, k
                     if orient_idx is not None:   # genome mode: first orientation that works
@@ -346,15 +388,59 @@ class PackState:
         self._commit(item, oris[best_k], best_k, best_pos)
         return True
 
+    def _nested_in(self, lo, hi) -> Optional[dict]:
+        """``nested_in`` for a placement about to be committed at ``lo``..``hi``, or None.
+
+        Called only from ``_commit``, i.e. only for a candidate ``_feasible_and_score`` already
+        proved clear of every *solid* sub-box in the state.  So if its bounding box lands inside
+        an already-placed item's bounding box, that item has a scanned cavity and this really is
+        a nest -- which is why the fact is recorded here, by the code that did it, and never
+        re-derived downstream from "these two boxes intersect" (that would relabel a genuine
+        collision as a nest).  The cavity reported is the host's free space under this item:
+        its own footprint clipped to the host, from the top of the host's solids there up to
+        the host's lid -- a region no host solid can intersect, by construction, and not the
+        host's bounding box (a host with several cavity cells answers "may these two overlap"
+        differently in each).
+        """
+        host_i, host, best_vol = None, None, 0.0
+        for i in self._hosts:
+            q = self.placements[i]
+            qlo = np.asarray(q.position, dtype=float)
+            ov = np.minimum(hi, qlo + np.asarray(q.dims, dtype=float)) - np.maximum(lo, qlo)
+            if np.all(ov > EPS) and float(np.prod(ov)) > best_vol:
+                host_i, host, best_vol = i, q, float(np.prod(ov))
+        if host is None:
+            return None
+        hlo = np.asarray(host.position, dtype=float)
+        hhi = hlo + np.asarray(host.dims, dtype=float)
+        c0 = np.maximum(lo, hlo)
+        c1 = np.minimum(hi, hhi)
+        mine = self.sowner == host_i
+        if mine.any():   # floor of the cavity: the tallest host solid under this footprint
+            under = (mine & (self.smin[:, 0] < c1[0] - EPS) & (self.smax[:, 0] > c0[0] + EPS)
+                          & (self.smin[:, 1] < c1[1] - EPS) & (self.smax[:, 1] > c0[1] + EPS))
+            if under.any():
+                c0[2] = max(c0[2], float(self.smax[under, 2].max()))
+        c0[2] = min(c0[2], hhi[2])
+        ext = (c1[0] - c0[0], c1[1] - c0[1], hhi[2] - c0[2])   # up to the host's lid in z
+        return {"item_id": host.item_id,
+                "cavity": [round(float(v), 9) for v in (*c0, *ext)]}
+
     def _commit(self, item: Item, o, k: int, lo) -> None:
         d = np.asarray(o.dims, dtype=float)
         lo = np.round(np.asarray(lo, dtype=float), 9)
         hi = np.round(lo + d, 9)
         center = (lo + hi) / 2.0
-        self._add_solid(lo, hi, item.fragile)
+        nested_in = self._nested_in(lo, hi)
+        owner = len(self.placements)
+        for blo, bhi in oriented_solid_boxes(item, lo, d, o.name):
+            self._add_solid(blo, bhi, item.fragile, owner)
+        if item.occupied_volume < item.bbox_volume - EPS:
+            self._hosts.append(owner)
         self.total_mass += item.mass
         self.mass_moment += item.mass * center
         self.total_bbox_vol += item.bbox_volume
+        self.total_occupied_vol += item.occupied_volume
         self.vol_moment += item.bbox_volume * center
         self.total_true_vol += item.volume
         self.chosen_orient[item.id] = k
@@ -363,7 +449,7 @@ class PackState:
             center=tuple(center.tolist()), orientation=o.name, axis=o.axis,
             radius=item.radius, height=item.height, mass=item.mass, fragile=item.fragile,
             volume=item.volume, priority=item.priority, scan_shape=item.scan_shape,
-            scan_yaw_deg=item.scan_yaw_deg))
+            scan_yaw_deg=item.scan_yaw_deg, nested_in=nested_in))
 
     # ------------------------------------------------------------------ summaries
     def max_extent(self) -> np.ndarray:

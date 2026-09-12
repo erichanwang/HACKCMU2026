@@ -14,3 +14,7 @@ dev = ["pytest", "matplotlib"]
 
 [tool.setuptools]
 packages = ["packer3d"]
+
+[tool.pytest.ini_options]
+markers = ["slow: takes 60s+, excluded from the default run (see FIXES.md #2)"]
+addopts = "-m 'not slow'"  # `pytest -m slow tests` or `-m ''` opts them back in

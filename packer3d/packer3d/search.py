@@ -9,9 +9,13 @@ from dataclasses import dataclass, replace
 from typing import Optional
 
 from .balance import balance_masses
-from .decoder import NAIVE_PARAMS, DecoderParams, decode
+from .decoder import NAIVE_PARAMS, REASON_TOO_BIG, DecoderParams, decode
 from .models import Container, PackResult, validate_items
 from .objective import ObjectiveWeights, build_result, evaluate_state, priority_volume_total
+
+GREEDY_BUDGET_FRACTION = 0.45   # share of time_budget_s the multi-start phase may spend
+REPAIR_BUDGET_FRACTION = 0.75   # ... and the cumulative share left after the repair sweep
+MAX_ELITES = 6                  # starts kept as restart points for the annealer
 
 
 @dataclass
@@ -62,6 +66,7 @@ class _Cand:
     seq: list
     orient: list
     state: object
+    params: DecoderParams
 
 
 def _mutate(seq, orient, unpacked_idx, n_orients, rng: random.Random):
@@ -127,55 +132,109 @@ def pack_optimized(container: Container, items, config: Optional[OptimizerConfig
     def evaluate(st):
         return evaluate_state(st, items_by_id, total_pv, weights)
 
-    # ---- layer 2a: multi-start greedy ------------------------------------------------
-    starts = ([(name, w) for name in _sort_keys() for w in config.com_weight_grid]
-              if config.multi_start else [("volume", base.w_com)])
-    best: Optional[_Cand] = None
-    best_params = base
-    for name, w in starts:
-        params = replace(base, w_com=w)
-        seq = sorted_sequence(items, name)
-        st = decode(container, items, seq, None, params)
-        val = evaluate(st)
-        if best is None or val < best.val - 1e-12:
-            orient = [st.chosen_orient.get(items[i].id, 0) for i in range(n)]
-            best = _Cand(val, seq, orient, st)
-            best_params = params
+    # ---- layer 2a: multi-start greedy, time-capped, keeps the best few as restart points --
+    starts = []
+    if config.multi_start:
+        # one shuffled sweep of every sort key per CoM weight, not a flat shuffle: a truncated
+        # budget still sees all six orderings.  The shuffle is seeded, so which starts fit in the
+        # budget and how ties between equally good starts break differ per seed.
+        grid = list(config.com_weight_grid)
+        rng.shuffle(grid)
+        for sweep, w in enumerate(grid):
+            keys = list(_sort_keys())
+            rng.shuffle(keys)
+            if sweep == 0:  # largest-first is the strongest single sorted ordering by a wide
+                keys.remove("volume")  # margin; never let a short budget shuffle it out of reach
+                keys.insert(0, "volume")
+            starts += [(sorted_sequence(items, k), None, replace(base, w_com=w)) for k in keys]
+    else:
+        starts.append((sorted_sequence(items, "volume"), None, base))
+    # ``pack_naive``'s exact genome last: on inputs where the input order plus first-fit placement
+    # beats every sorted order (a bag of mostly-soft garments) the search would otherwise never
+    # see that arrangement at all.  Last rather than first because its decode is as expensive as
+    # any other, and under a short wall-clock budget it would displace a sorted start that packs
+    # more -- there the caller still has ``pack_naive`` itself, which the server runs anyway.
+    starts.append((list(range(n)), [0] * n, NAIVE_PARAMS))
+    greedy_deadline = t0 + GREEDY_BUDGET_FRACTION * config.time_budget_s
+    pool: list[_Cand] = []
+    for seq, seed_orient, params in starts:
+        st = decode(container, items, seq, seed_orient, params)
+        orient = [st.chosen_orient.get(items[i].id, 0) for i in range(n)]
+        pool.append(_Cand(evaluate(st), seq, orient, st, params))
+        if config.time_budget_s > 0 and time.perf_counter() >= greedy_deadline:
+            break
+    pool.sort(key=lambda c: c.val)  # stable, so equal-objective starts keep the shuffled order
+    best = pool[0]
+    multistart_runs = len(pool)
     multistart_time = time.perf_counter() - t0
     greedy_val = best.val
 
-    # ---- layer 2b: simulated annealing over the genome -------------------------------
+    # ---- layer 2a2: repair sweep -- retry the best start with each item it dropped moved to
+    # the front of the sequence.  A greedy order starves the last items of floor space, and one
+    # targeted decode per dropped item recovers them far more reliably than a random SA move
+    # (whole-sequence decodes cost tens of milliseconds, so a short budget buys very few moves).
+    repairs = 0
+    for iid in [u["id"] for u in best.state.unpacked if u["reason"] != REASON_TOO_BIG]:
+        if config.time_budget_s > 0 and time.perf_counter() - t0 >= REPAIR_BUDGET_FRACTION * config.time_budget_s:
+            break
+        i = id_to_idx[iid]
+        seq = [i] + [j for j in best.seq if j != i]
+        st = decode(container, items, seq, None, best.params)
+        orient = [st.chosen_orient.get(items[k].id, 0) for k in range(n)]
+        pool.append(_Cand(evaluate(st), seq, orient, st, best.params))
+        repairs += 1
+    pool.sort(key=lambda c: c.val)
+    elites = pool[:MAX_ELITES]
+    best = elites[0]
+
+    # ---- layer 2b: simulated annealing with restarts from the elite starts ---------------
     cur = best
-    iters = accepted = improvements = 0
+    iters = accepted = improvements = restarts = 0
+    since = 0  # iterations since the last improvement, drives both cooling and restarts
     budget_t, budget_i = config.time_budget_s, config.max_iterations
+    stall = max(20, 4 * n)
     can_move = n >= 2 or any(k > 1 for k in n_orients)
     while can_move and (budget_t > 0 or budget_i is not None):
-        prog_t = (time.perf_counter() - t0) / budget_t if budget_t > 0 else 0.0
-        prog_i = (iters / budget_i) if budget_i else (1.0 if budget_i is not None else 0.0)
-        prog = max(prog_t, prog_i)
-        if prog >= 1.0:
+        if budget_t > 0 and time.perf_counter() - t0 >= budget_t:
             break
-        T = config.t_start * (config.t_end / config.t_start) ** prog
-        unpacked_idx = [id_to_idx[u["id"]] for u in cur.state.unpacked]
+        if budget_i is not None and iters >= budget_i:
+            break
+        if since >= stall:  # local optimum: reheat from the next elite, perturbed
+            restarts += 1
+            e = elites[restarts % len(elites)]
+            seq, orient = list(e.seq), list(e.orient)
+            for _ in range(1 + restarts % 3):
+                seq, orient, _m = _mutate(seq, orient, [], n_orients, rng)
+            st = decode(container, items, seq, orient, e.params)
+            cur = _Cand(evaluate(st), seq, orient, st, e.params)
+            iters += 1
+            since = 0
+            continue
+        T = config.t_start * (config.t_end / config.t_start) ** (since / stall)
+        # items that are too big for the container can never be repaired into the sequence
+        unpacked_idx = [id_to_idx[u["id"]] for u in cur.state.unpacked if u["reason"] != REASON_TOO_BIG]
         seq, orient, move = _mutate(cur.seq, cur.orient, unpacked_idx, n_orients, rng)
-        st = decode(container, items, seq, orient, best_params)
+        st = decode(container, items, seq, orient, cur.params)
         val = evaluate(st)
         delta = val - cur.val
         iters += 1
+        since += 1
         if delta <= 0 or rng.random() < math.exp(-delta / max(T, 1e-12)):
-            cur = _Cand(val, seq, orient, st)
+            cur = _Cand(val, seq, orient, st, cur.params)
             accepted += 1
             if val < best.val - 1e-12:
                 best = cur
                 improvements += 1
+                since = 0
 
     # ---- layer 3: mass-swap balancing ------------------------------------------------
     placements = list(best.state.placements)
     swaps = balance_masses(container, placements) if config.balance else 0
     stats = {
-        "multistart_runs": len(starts), "multistart_time_s": multistart_time,
-        "greedy_objective": greedy_val, "sa_iterations": iters, "sa_accepted": accepted,
-        "sa_improvements": improvements, "search_objective": best.val, "balance_swaps": swaps,
+        "multistart_runs": multistart_runs, "multistart_time_s": multistart_time,
+        "greedy_objective": greedy_val, "repair_decodes": repairs, "sa_iterations": iters, "sa_accepted": accepted,
+        "sa_improvements": improvements, "sa_restarts": restarts,
+        "search_objective": best.val, "balance_swaps": swaps,
         "time_s": time.perf_counter() - t0, "seed": config.seed,
     }
     return build_result("optimized", container, placements, best.state.unpacked, items, weights, stats)

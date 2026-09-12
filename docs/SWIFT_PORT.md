@@ -29,15 +29,14 @@ agree with the prototype" is a test result, not a code review question.
 | `physics/constraints.py` | `Constraints.swift` | `ConstraintsTests.swift`, 17 |
 | `physics/metrics.py` | `Metrics.swift` | `MetricsTests.swift`, 12 |
 | `physics/io.py` | `IO.swift` | `IOTests.swift`, 20 |
-| `physics/validator.py` | `Validator.swift` | no dedicated test file yet; composes the already-tested modules above |
-| `physics/incremental.py` | `Incremental.swift` | no dedicated test file yet |
+| `physics/validator.py` | `Validator.swift` | `ValidatorTests.swift`, 17 |
+| `physics/incremental.py` | `Incremental.swift` | `IncrementalTests.swift`, 17 |
 | — (Swift-only: shared JSON value + `ValidationResult` shape) | `JSONValue.swift` | exercised by every module's tests |
 
 `ContractTests.swift` (4 tests) checks cross-module glue: the parity dataset
 loads, the quaternion convention matches Python's, `precompute` numbers
 match a hand-checked fixture, and malformed scenes name the right object.
-118 tests total, all passing (`swift test`, this checkout) — none of them
-exercise `validateLayout`/`validate`/`PlacementValidator` directly yet.
+178 tests total, all passing (`swift test`, this checkout).
 
 `Validator.swift`/`Incremental.swift` landed while this doc was being
 written; signatures as built: `validateLayout(_ scene: Scene,
@@ -77,6 +76,23 @@ Reported results per module, from what the tests actually assert:
 - **Containment** — matched to 1e-9 (depth, per-wall depth, violated walls) against 2 named fixtures (`scene_with_wall_penetration`, `scene_oversized_object`), not the full 51-scene set.
 - **Collision** — SAT depth matched to 1e-12 against 100 seeded-random OBB pairs, replayed from the same LCG in Python (`CollisionTests.test100RandomPairsMatchPythonAndAreSymmetric`) — a separate dataset from `parity_v2.json`.
 - **Support** — checked against 3 named fixtures with hand-verified/Python-derived numbers to 1e-9 ("to the bit" per the test's own comment), not a dataset-wide loop over all 51 scenes.
+
+## Prism footprints (ported in ff9673c)
+
+The port is no longer box-only. `SceneObject` decodes an optional `footprint` (a 2D convex
+polygon in local XZ, the same field `physics/schema.py` reads). When it is present,
+`Geometry.swift` builds the prism's world-space vertices (convex hull, polygon area and
+centroid, Sutherland-Hodgman clipping, mirroring `physics/geometry.py`), `Collision.swift`
+runs the exact yaw-only prism-prism SAT with an OBB-envelope fallback for tilted prisms, and
+`Support.swift`, `Containment.swift` and `Metrics.swift` use prism-aware contact patches,
+containment and exact hull area, volume and wall clearance. Box-only scenes are guarded onto
+the previous code path, so box behaviour is byte-for-byte what it was.
+
+Coverage: the package's own XCTest suite stays at 180 tests; `tests/test_validator_differential.py`
+(Python vs Swift on the same scenes) has a 60-scene fuzz where about 30% of objects get a random
+convex-hull footprint, and `test_swift_agrees_on_hull_scene`, which used to pin the box-only
+divergence and now asserts agreement. Run it with the system `python3 -m unittest
+tests.test_validator_differential` (a venv with a numpy dev build gave a spurious result once).
 
 ## Known differences
 

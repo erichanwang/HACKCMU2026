@@ -9,8 +9,10 @@ object look adequately supported and balanced under gravity alone?"
 Model (geometrically exact for boxes, unlike the bounding-rectangle
 approximation this replaced):
 - Rigid bodies, uniform density per object, so an object's center of mass is
-  its OBB center (`SceneGeometry.centers[i]`); its COM projection is that
-  center's (X, Z).
+  `SceneGeometry.com[i]` -- the OBB center for a box, the footprint's area
+  centroid at mid-height for a scanned prism; its COM projection is that
+  point's (X, Z). The distinction matters: a triangular prism's box center can
+  sit outside the triangle while the true centroid is always inside it.
 - Gravity acts along -Y (Y is up, per physics.schema).
 - Contact footprints are exact convex polygons in the XZ plane. An object's
   bottom contact set is the subset of its 8 world-space corners with
@@ -23,6 +25,18 @@ approximation this replaced):
   lowest corners (so a yaw-rotated or mildly tilted container still works; a
   heavily tilted container, where "the floor" is no longer one horizontal
   plane, is out of scope).
+- SCANNED PRISMS (`SceneGeometry.is_prism[i]`, i.e. the object supplied a
+  LiDAR-hull `footprint`) use their own 2m prism vertices instead of the 8 box
+  corners: the bottom contact set is the ring vertices with
+  `y <= aabb_min.y + epsilon`, the top set those with
+  `y >= aabb_max.y - epsilon`, and the footprint is the XZ hull of that set --
+  exactly the same rule as for a box, just over the real vertices. For a
+  yaw-only prism the low set is its whole bottom ring, so the contact polygon
+  IS the scanned hull and the result is exact. For a tilted prism the lowest
+  ring vertices are an approximation of the real (edge or vertex) contact in
+  precisely the way the lowest box corners already were -- no better, no worse.
+  Everything downstream (clipping, ratios, margins, chains) is polygon math and
+  needs no change.
 - A support patch is the convex polygon intersection (Sutherland-Hodgman) of
   the object's bottom footprint with each supporter's top footprint, for every
   supporter reported by `scene_geometry.resting_pairs` plus the container floor
@@ -53,6 +67,16 @@ approximation this replaced):
 - No support at all (empty support polygon) reports
   `stability_margin_m = FLOATING_MARGIN_SENTINEL_M` rather than a real
   distance.
+- BRIDGING: the support polygon is a hull, so it spans the void between two
+  separated supporters -- correct rigid-body statics (a plank on two bricks
+  with its COM between them does not topple) but it hides a real-world risk,
+  because the void's "supporters" out here are shoes and soft bags that sag.
+  `com_over_patch` is the extra bit: True when the COM projection lies inside
+  (or within `TOUCH_TOL_M` of) at least ONE individual contact patch, False
+  when it is only inside the hull of several. So a laptop bridging two shoes
+  reads `unstable=False, com_over_patch=False` -- statically fine, resting on
+  nothing. `unstable and not com_over_patch` is just an overhang; the
+  interesting case is `not unstable and not com_over_patch`.
 - CHAIN INSTABILITY: `supported_by_unstable` is True when any object this one
   rests on is itself `floating`, `unstable`, or `supported_by_unstable`.
   Computed bottom-up in ascending `aabb_min.y` order (a supporter always has a
@@ -121,6 +145,9 @@ class SupportResult:
     contact_polygon: list[list[float]] = field(default_factory=list)
     # supporter id ("container_floor" included) -> contact patch area m^2.
     patch_areas_m2: dict[str, float] = field(default_factory=dict)
+    # True when the COM projects into one actual contact patch, not merely into
+    # the hull of several. False + unstable=False == bridging a void.
+    com_over_patch: bool = False
 
 
 def _cross(o: Pt, a: Pt, b: Pt) -> float:
@@ -406,8 +433,20 @@ def check_support(
                 _hull([xz[k] for k in _BIT_INDICES[hi_bits]]) if top is None else top
             )
 
+    # Scanned prisms: redo those rows off their own ring vertices. Boxes never
+    # enter this loop, so their code path above is untouched.
+    for row in np.nonzero(geom.is_prism)[0]:
+        i = int(row)
+        ring = geom.prism_vertices[i]
+        bottom_pts[i] = [
+            (float(p[0]), float(p[2])) for p in ring[ring[:, 1] <= geom.aabb_min[i, 1] + epsilon]
+        ]
+        bottom_hulls[i] = _hull(bottom_pts[i])
+        if i in supporting:
+            top_hulls[i] = _xz_hull(ring[ring[:, 1] >= geom.aabb_max[i, 1] - epsilon])
+
     floored = on_floor(geom, epsilon).tolist()
-    centers_xz = [tuple(c) for c in geom.centers[:, ::2].tolist()]
+    com_xz = [tuple(c) for c in geom.com[:, ::2].tolist()]
     # Objects whose whole XZ footprint is inside a rectangular floor: their
     # bottom footprint survives the floor clip untouched (see `_axis_rect`).
     floor_rect = _axis_rect(floor_hull)
@@ -432,15 +471,19 @@ def check_support(
         )
         candidates += [(geom.ids[j], top_hulls[j], False) for j in sorted(supporters[i])]
 
+        com = com_xz[i]
         names: list[str] = []
         patch_areas: dict[str, float] = {}
         patch_vertices: list[Pt] = []
         covered = 0.0
+        com_over_patch = False
         point_supported = [False] * len(bottom_pts[i]) if degenerate else []
         for name, top_hull, uncut in candidates:
             patch = bottom_hull if uncut else _clip(bottom_hull, top_hull)
             if not patch:
                 continue
+            if not com_over_patch and _signed_dist(com, patch) >= -TOUCH_TOL_M:
+                com_over_patch = True
             names.append(name)
             # An uncut patch IS the bottom footprint, area included.
             area = bottom_area if patch is bottom_hull else _poly_area(patch)
@@ -467,7 +510,6 @@ def check_support(
         else:
             support_polygon = _hull(patch_vertices)
         if support_polygon:
-            com = centers_xz[i]
             margin = _signed_dist(com, support_polygon)
             if -TOUCH_TOL_M < margin < 0.0:
                 margin = 0.0  # COM on the boundary counts as supported
@@ -484,6 +526,7 @@ def check_support(
                 unstable=margin < 0,
                 contact_polygon=[list(p) for p in support_polygon],
                 patch_areas_m2=patch_areas,
+                com_over_patch=com_over_patch,
             )
         )
 

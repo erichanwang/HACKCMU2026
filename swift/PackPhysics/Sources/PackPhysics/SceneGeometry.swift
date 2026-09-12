@@ -13,10 +13,24 @@ public struct SceneGeometry {
     public let containerVertices: [Vec3]  // 8
     public let containerFloorY: Double  // min world-Y of the container OBB
     public let obbs: [OBB]
-    public let vertices: [[Vec3]]  // n x 8, SIGNS order
-    public let aabbMin: [Vec3]
+    public let vertices: [[Vec3]]  // n x 8, SIGNS order (the box envelope)
+    public let aabbMin: [Vec3]  // from the prism vertices (== OBB corners for boxes)
     public let aabbMax: [Vec3]
     public let masses: [Double]
+    // Scanned-footprint support. Boxes are 4-point prisms, so every consumer can
+    // treat all objects uniformly: footprints[i] is the CCW local (x, z) polygon;
+    // prismVerts[i] is the (2m) world points, bottom ring then top ring; isPrism[i]
+    // is true only when the object supplied a footprint; yawOnly[i] is true when
+    // the object's local y axis is world +-Y (the prism's side faces are then
+    // vertical and its footprint is exact in XZ).
+    public let footprints: [[FootprintPoint]]
+    public let prismVerts: [[Vec3]]
+    public let isPrism: [Bool]
+    public let yawOnly: [Bool]
+    // World center of mass under uniform density: the OBB center for boxes, the
+    // footprint's area centroid (at mid-height) mapped to world for prisms. Use
+    // this -- not `obbs[i].center` -- for COM projections and mass-weighted metrics.
+    public let com: [Vec3]
 
     public var n: Int { objects.count }
 }
@@ -67,11 +81,50 @@ public func precompute(_ scene: Scene) throws -> SceneGeometry {
     let ids = scene.objects.map(\.id)
     var index: [String: Int] = [:]
     for (i, id) in ids.enumerated() { index[id] = i }
+
+    // Footprints / prisms. Boxes get their 4 rectangle corners, so the AABB of
+    // the prism vertices equals the AABB of the OBB corners for them; scanned
+    // prisms get a tighter AABB than their box envelope.
+    var footprints: [[FootprintPoint]] = []
+    var prisms: [[Vec3]] = []
+    var isPrism: [Bool] = []
+    footprints.reserveCapacity(scene.objects.count)
+    prisms.reserveCapacity(scene.objects.count)
+    isPrism.reserveCapacity(scene.objects.count)
+    for (i, o) in scene.objects.enumerated() {
+        let fp = try footprintLocal(id: o.id, dimensions: o.dimensions, footprint: o.footprint)
+        footprints.append(fp)
+        prisms.append(prismVertices(obbs[i], fp))
+        isPrism.append(o.footprint != nil)
+    }
+    // Boxes keep the bit-identical AABB of their 8 OBB corners (the snapshot
+    // regression guard depends on it); only scanned prisms use their ring.
+    var yawOnly: [Bool] = []
+    var com: [Vec3] = []
+    yawOnly.reserveCapacity(scene.objects.count)
+    com.reserveCapacity(scene.objects.count)
+    for i in 0..<scene.objects.count {
+        if isPrism[i] {
+            var lo = prisms[i][0], hi = prisms[i][0]
+            for p in prisms[i].dropFirst() { lo = pointwiseMin(lo, p); hi = pointwiseMax(hi, p) }
+            mins[i] = lo
+            maxs[i] = hi
+        }
+        yawOnly.append(abs(obbs[i].axes.c1.y) > 1.0 - 1e-9)
+        if isPrism[i] {
+            let c2 = polygonCentroid2D(footprints[i])
+            com.append(obbs[i].center + obbs[i].axes * Vec3(c2.x, 0.0, c2.z))
+        } else {
+            com.append(obbs[i].center)
+        }
+    }
+
     return SceneGeometry(
         scene: scene, objects: scene.objects, ids: ids, index: index,
         containerOBB: cobb, containerVertices: cverts, containerFloorY: floorY,
         obbs: obbs, vertices: verts, aabbMin: mins, aabbMax: maxs,
-        masses: scene.objects.map(\.massKg)
+        masses: scene.objects.map(\.massKg),
+        footprints: footprints, prismVerts: prisms, isPrism: isPrism, yawOnly: yawOnly, com: com
     )
 }
 

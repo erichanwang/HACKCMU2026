@@ -13,13 +13,21 @@ from .models import Container, PackResult
 
 @dataclass
 class ObjectiveWeights:
-    """What "better" means.  All terms are ~[0, 1]; lower objective is better.
+    """What "better" means.  Lower objective is better.
 
-    objective = unpacked * (priority-weighted volume left behind / total)
+    objective = left_behind * (number of items left behind)          <- dominates everything
+              + unpacked * (priority-weighted volume left behind / total)
               + compact  * (bounding-box-from-origin volume / container volume)
               + com      * (axis-weighted CoM deviation, normalised by container dims)
               + height   * (stack height / H)                       (gravity only)
+
+    Every term after the first is ~[0, 1] scaled by its weight, so their sum stays well
+    under one ``left_behind`` unit: an arrangement that packs one more item always beats a
+    tidier, better balanced one that leaves it on the hotel room floor.  Among arrangements
+    that pack the same number of items, ``unpacked`` prefers dropping the small / low
+    priority one and compact / com / height are the tie-breaks.
     """
+    left_behind: float = 100.0
     unpacked: float = 10.0
     compact: float = 1.0
     com: float = 6.0
@@ -37,7 +45,8 @@ def evaluate_state(state, items_by_id: dict, total_pv: float, weights: Objective
     unp_frac = unp / total_pv if total_pv > 0 else 0.0
     ext = state.max_extent()
     compact = float(np.prod(ext) / np.prod(state.dims))
-    val = weights.unpacked * unp_frac + weights.compact * compact + weights.com * state.com_deviation()
+    val = (weights.left_behind * len(state.unpacked) + weights.unpacked * unp_frac
+           + weights.compact * compact + weights.com * state.com_deviation())
     if c.gravity:
         val += weights.height * float(ext[2] / state.dims[2])
     return float(val)
@@ -77,7 +86,8 @@ def compute_metrics(container: Container, placements, unpacked, items, weights: 
     unp_frac = unp_pv / total_pv if total_pv > 0 else 0.0
     compact = float(np.prod(extent) / np.prod(dims))
     height_frac = float(extent[2] / dims[2])
-    objective = weights.unpacked * unp_frac + weights.compact * compact + weights.com * com_dev
+    objective = (weights.left_behind * len(unpacked) + weights.unpacked * unp_frac
+                 + weights.compact * compact + weights.com * com_dev)
     if container.gravity:
         objective += weights.height * height_frac
     return {

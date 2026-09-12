@@ -97,7 +97,7 @@ The center-of-mass term is the non-obvious one: when the bag is upright and roll
 - **Step mode:** current item solid with a placement arrow, placed items at 15% opacity, future items hidden. Thirty overlapping ghost boxes are unreadable.
 - **Ship the 2D layer view too, and expect it to be what people use.** AR means holding a phone while both hands are packing. A layer-by-layer exploded diagram is more practical. AR is what makes people download it; the layer cards are what makes it useful.
 
-## Stack
+## Stack (original plan)
 
 | Layer | Choice |
 |---|---|
@@ -108,6 +108,15 @@ The center-of-mass term is the non-obvious one: when the bag is upright and roll
 | Local data | SQLite or Core Data for the item library |
 | Sync | CloudKit |
 | Server | Bag-model catalog, airline size and weight rules |
+
+## Actual stack (as built)
+
+| Layer | Choice |
+|---|---|
+| Solver | Python `packer3d` (extreme points + simulated annealing) and `physics` (collision/support/validation) |
+| Server | FastAPI + MongoDB, on a laptop |
+| Item labelling | Grok (x.ai vision), from the scan photo |
+| On-device validation | Swift port of `physics` (`swift/PackPhysics`) |
 
 ## Build order
 

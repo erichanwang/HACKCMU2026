@@ -5,7 +5,9 @@ real collision/containment/support logic those fixtures exist to feed.
 import math
 import unittest
 
+from physics.io import scene_from_dict, scene_to_dict
 from physics.schema import Scene
+from physics.scene_geometry import precompute
 from tests import fixtures
 
 FIXTURE_FUNCS = [
@@ -20,6 +22,9 @@ FIXTURE_FUNCS = [
     fixtures.scene_stacked_objects,
     fixtures.scene_oversized_object,
     fixtures.scene_with_soft_item_compression,
+    fixtures.scene_scanned_hulls,
+    fixtures.scene_hull_clears_box_would_not,
+    fixtures.scene_scanned_footprint_out_of_dims,
 ]
 
 
@@ -86,6 +91,71 @@ class TestFixtureSanity(unittest.TestCase):
         self.assertEqual(result["violations"], [])
         self.assertEqual(len(result["warnings"]), 1)
         self.assertEqual(result["warnings"][0]["type"], "SOFT_COMPRESSION")
+
+
+class TestScannedFootprintFixtures(unittest.TestCase):
+    def test_scene_scanned_hulls_round_trips_footprints(self):
+        scene = fixtures.scene_scanned_hulls()
+        rebuilt = scene_from_dict(scene_to_dict(scene))
+        self.assertEqual(rebuilt, scene)
+        for oid in ("shoe", "toiletry_bag", "camera"):
+            obj = next(o for o in rebuilt.objects if o.id == oid)
+            self.assertIsNotNone(obj.footprint)
+
+    def test_scene_scanned_hulls_is_valid(self):
+        from physics.validator import validate_layout
+
+        result = validate_layout(fixtures.scene_scanned_hulls())
+        self.assertTrue(result["valid"], result["violations"])
+
+    def test_scene_hull_clears_box_would_not_boxes_overlap_hulls_disjoint(self):
+        """precompute must succeed (footprints are well-formed); the boxes
+        (AABBs) overlap by ~1cm^2 at a corner while the footprint polygons
+        themselves are disjoint (checked here with a small separating-axis
+        test) -- see the fixture's docstring for the arithmetic. Whether
+        `validate_layout` treats this pair as clear is for the collision
+        tests to assert, not this one.
+        """
+        scene = fixtures.scene_hull_clears_box_would_not()
+        geom = precompute(scene)  # must not raise
+        lo, hi = geom.aabb_min, geom.aabb_max
+        box_overlap = all(min(hi[0][k], hi[1][k]) > max(lo[0][k], lo[1][k]) for k in (0, 2))
+        self.assertTrue(box_overlap, "fixture's boxes should overlap in both x and z")
+
+        camera, shoe = scene.objects
+        cam_world = [(x + camera.position[0], z + camera.position[2]) for x, z in fixtures.CAMERA_FOOTPRINT]
+        shoe_world = [(x + shoe.position[0], z + shoe.position[2]) for x, z in fixtures.SHOE_FOOTPRINT]
+        self.assertTrue(_polygons_disjoint(cam_world, shoe_world), "fixture's hulls should be disjoint")
+
+    def test_scanned_footprint_out_of_dims_reports_malformed(self):
+        from physics.scene_geometry import MalformedSceneError
+
+        with self.assertRaises(MalformedSceneError) as ctx:
+            precompute(fixtures.scene_scanned_footprint_out_of_dims())
+        self.assertEqual(ctx.exception.object_id, "shoe")
+
+
+def _polygons_disjoint(poly1, poly2) -> bool:
+    """Separating-axis test for two convex 2D polygons (list of (x, z))."""
+    def edges(poly):
+        n = len(poly)
+        return [(poly[(i + 1) % n][0] - poly[i][0], poly[(i + 1) % n][1] - poly[i][1]) for i in range(n)]
+
+    def project(poly, axis):
+        vals = [px * axis[0] + pz * axis[1] for px, pz in poly]
+        return min(vals), max(vals)
+
+    for poly in (poly1, poly2):
+        for ex, ez in edges(poly):
+            length = math.hypot(ex, ez)
+            if length < 1e-12:
+                continue
+            axis = (-ez / length, ex / length)
+            min1, max1 = project(poly1, axis)
+            min2, max2 = project(poly2, axis)
+            if max1 < min2 or max2 < min1:
+                return True
+    return False
 
 
 if __name__ == "__main__":

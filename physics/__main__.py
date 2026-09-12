@@ -16,6 +16,7 @@ import json
 import sys
 
 from physics.io import (
+    object_from_box_fit,
     object_from_scanned_item,
     object_to_dict,
     result_to_json,
@@ -71,16 +72,28 @@ def _cmd_validate_packer3d(args: argparse.Namespace) -> int:
 
 def _cmd_example(_args: argparse.Namespace) -> int:
     from physics.io import scene_to_dict
-    from tests.fixtures import valid_packed_scene
+    from tests.fixtures import scene_scanned_hulls
 
-    print(result_to_json(scene_to_dict(valid_packed_scene())))
+    print(result_to_json(scene_to_dict(scene_scanned_hulls())))
     return 0
 
 
 def _cmd_scan_to_object(args: argparse.Namespace) -> int:
     try:
         item = _load_json(args.item)
-        obj = object_from_scanned_item(item)
+        if args.footprint_from_hull:
+            hull = _load_json(args.footprint_from_hull)
+            obj = object_from_box_fit(
+                item.get("id", hull.get("id")),
+                hull["width"],
+                hull["depth"],
+                hull["height"],
+                hull["center"],
+                hull["axis"],
+                hull_xz_world=hull["hull"],
+            )
+        else:
+            obj = object_from_scanned_item(item)
     except _INPUT_ERRORS as e:
         print(f"error reading input: {e}", file=sys.stderr)
         return 2
@@ -111,6 +124,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_scan = sub.add_parser("scan-to-object", help="convert a ScannedItem JSON (cm) into an Object dict (m)")
     p_scan.add_argument("item", help="path to a ScannedItem JSON file (width/depth/height in cm)")
+    p_scan.add_argument(
+        "--footprint-from-hull",
+        help="path to a world-space hull JSON (a BoxFit dump: width/depth/height in m, "
+        "center, axis, and a hull [[x,z],...] in m) -- derives a posed Object with a "
+        "footprint instead of converting the pose-less ScannedItem",
+    )
     p_scan.set_defaults(func=_cmd_scan_to_object)
 
     return parser

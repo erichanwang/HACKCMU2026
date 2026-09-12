@@ -9,7 +9,7 @@ from pan.demo import run_demo
 from pan.world_model import RealPanBackend, get_world_model
 
 # Our own convention (docs/PAN_ACCESS.md (d)) -- never IFM's. Names only, never values.
-_PAN_ENV_VARS = ("PAN_API_KEY", "PAN_BASE_URL", "PAN_MODEL", "PAN_TIMEOUT_S", "PAN_ENDPOINT_PATH")
+_PAN_ENV_VARS = ("IFM_API_KEY", "PAN_API_KEY")  # the IFM client reads either (physics/pan.py)
 
 
 def _status() -> int:

@@ -232,6 +232,10 @@ struct PlanSheet: View {
     /// Set when the plan on screen is not the one the server produced.
     var notice: String?
     var scans: [String: ScannedItem] = [:]
+    /// Raised while the AR overlay is up, so whoever presented this sheet can
+    /// stand its own camera down. iOS runs one ARSession at a time: a second
+    /// `run()` takes the camera from the first, which then never recovers.
+    var arActive: Binding<Bool>?
 
     /// The two ways of drawing the same diagram. AR is deliberately not a third
     /// case here — it is a different mode, not another rendering, and it gets its
@@ -250,10 +254,16 @@ struct PlanSheet: View {
     /// you were rather than resetting.
     @State private var selectedLayer: Int
 
-    init(plan: PackingPlan, notice: String? = nil, scans: [String: ScannedItem] = [:]) {
+    init(
+        plan: PackingPlan,
+        notice: String? = nil,
+        scans: [String: ScannedItem] = [:],
+        arActive: Binding<Bool>? = nil
+    ) {
         self.plan = plan
         self.notice = notice
         self.scans = scans
+        self.arActive = arActive
         // Start on the top layer: in 3D and AR that means the whole bag is
         // visible, which is the useful overview. Starting at 0 would open them
         // with everything above the floor layer hidden, which reads as broken.
@@ -278,6 +288,8 @@ struct PlanSheet: View {
         .fullScreenCover(isPresented: $showingAR) {
             PlanARPlanView(plan: plan, scans: scans, topLayer: $selectedLayer)
         }
+        .onChange(of: showingAR) { _, active in arActive?.wrappedValue = active }
+        .onDisappear { arActive?.wrappedValue = false }
     }
 
     private var controls: some View {

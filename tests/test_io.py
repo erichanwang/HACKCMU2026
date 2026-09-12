@@ -8,11 +8,12 @@ from pathlib import Path
 
 import numpy as np
 
-from physics.geometry import obb_from, obb_vertices
+from physics.geometry import footprint_local, obb_from, obb_vertices, prism_vertices
 from physics.io import (
     apply_placements,
     object_from_box_fit,
     object_from_scanned_item,
+    object_to_dict,
     result_to_json,
     scene_from_dict,
     scene_to_dict,
@@ -23,6 +24,19 @@ from physics.validator import validate_layout
 from tests import fixtures as fx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _assert_point_sets_close(test: unittest.TestCase, a, b, tol=1e-9):
+    """Assert 2D point lists `a` and `b` contain the same points, order-insensitive."""
+    remaining = list(b)
+    for pa in a:
+        match = next(
+            (i for i, pb in enumerate(remaining) if math.hypot(pa[0] - pb[0], pa[1] - pb[1]) < tol),
+            None,
+        )
+        test.assertIsNotNone(match, f"{pa!r} has no close match left in {remaining!r}")
+        remaining.pop(match)
+    test.assertEqual(remaining, [], f"unmatched points left over: {remaining!r}")
 
 
 def _fixture_funcs():
@@ -71,6 +85,22 @@ class TestSceneRoundTrip(unittest.TestCase):
         self.assertEqual(scene.objects[0].rotation, (0.0, 0.0, 0.0, 1.0))
 
 
+class TestFootprintJsonRoundTrip(unittest.TestCase):
+    def test_object_with_footprint_round_trips(self):
+        obj = Object(id="shoe", dimensions=(0.29, 0.11, 0.12), position=(0.0, 0.055, 0.0), footprint=fx.SHOE_FOOTPRINT)
+        d = object_to_dict(obj)
+        self.assertEqual(d["footprint"], [list(p) for p in fx.SHOE_FOOTPRINT])
+        self.assertEqual(scene_from_dict({"container": {"id": "c", "dimensions": [1, 1, 1]}, "objects": [d]}).objects[0], obj)
+
+    def test_object_without_footprint_emits_null_and_round_trips(self):
+        obj = Object(id="box", dimensions=(0.1, 0.1, 0.1), position=(0.0, 0.05, 0.0))
+        d = object_to_dict(obj)
+        self.assertIsNone(d["footprint"])
+        rebuilt = scene_from_dict({"container": {"id": "c", "dimensions": [1, 1, 1]}, "objects": [d]}).objects[0]
+        self.assertIsNone(rebuilt.footprint)
+        self.assertEqual(rebuilt, obj)
+
+
 class TestScannedItem(unittest.TestCase):
     def test_cm_to_m_mapping(self):
         item = {"id": "shoe-1", "width": 29.0, "depth": 12.0, "height": 11.0}
@@ -81,6 +111,7 @@ class TestScannedItem(unittest.TestCase):
         self.assertEqual(obj.id, "shoe-1")
         self.assertEqual(obj.position, (0.0, 0.0, 0.0))
         self.assertEqual(obj.rotation, (0.0, 0.0, 0.0, 1.0))
+        self.assertIsNone(obj.footprint)
 
     def test_id_and_pose_overrides(self):
         item = {"id": "ignored", "width": 10.0, "depth": 10.0, "height": 10.0}
@@ -90,6 +121,49 @@ class TestScannedItem(unittest.TestCase):
         self.assertEqual(obj.id, "custom")
         self.assertEqual(obj.position, (1.0, 2.0, 3.0))
         self.assertEqual(obj.mass_kg, 5.0)
+
+    def test_local_cm_footprint_converted_to_meters(self):
+        item = {
+            "id": "shoe-1",
+            "width": 29.0,
+            "depth": 12.0,
+            "height": 11.0,
+            "footprint": [[x * 100.0, z * 100.0] for x, z in fx.SHOE_FOOTPRINT],
+        }
+        obj = object_from_scanned_item(item)
+        _assert_point_sets_close(self, obj.footprint, fx.SHOE_FOOTPRINT)
+
+    def test_phone_document_form_dimensions_in_meters(self):
+        # The current phone/server document (see SCAN_OUTPUT.md): metres
+        # `dimensions`, plus `cellSize`/`heights` and label/rigidity fields
+        # this adapter doesn't use -- must not KeyError on any of them.
+        item = {
+            "id": "6F3A",
+            "dimensions": [0.213, 0.084, 0.121],
+            "cellSize": 0.01,
+            "heights": [[0.084, 0.084, 0.0], [0.084, 0.082, 0.0]],
+            "label": "running shoe",
+            "labelSource": "auto",
+            "mass": 0.3,
+            "keepUpright": False,
+            "rigidity": "soft",
+            "compressibility": 2.0,
+        }
+        obj = object_from_scanned_item(item)
+        self.assertEqual(obj.id, "6F3A")
+        self.assertAlmostEqual(obj.dimensions[0], 0.213, places=9)
+        self.assertAlmostEqual(obj.dimensions[1], 0.084, places=9)
+        self.assertAlmostEqual(obj.dimensions[2], 0.121, places=9)
+        self.assertIsNone(obj.footprint)
+
+    def test_phone_document_form_footprint_already_in_meters(self):
+        item = {
+            "id": "shoe-1",
+            "dimensions": [0.29, 0.11, 0.12],
+            "footprint": [[x, z] for x, z in fx.SHOE_FOOTPRINT],
+        }
+        obj = object_from_scanned_item(item)
+        _assert_point_sets_close(self, obj.footprint, fx.SHOE_FOOTPRINT)
 
 
 class TestBoxFitOrientation(unittest.TestCase):
@@ -127,6 +201,70 @@ class TestBoxFitOrientation(unittest.TestCase):
 
     def test_neg_120_deg(self):
         self._check(-120.0)
+
+
+class TestBoxFitHull(unittest.TestCase):
+    """`object_from_box_fit(hull_xz_world=...)`: mapping a world-space hull
+    into the object's local frame and back out (via `prism_vertices`) must
+    reproduce the original world points, regardless of the box's yaw.
+    """
+
+    LOCAL_HULL = [(-0.1, -0.04), (0.1, -0.04), (0.12, 0.0), (0.1, 0.04), (-0.1, 0.04)]
+
+    def _world_hull(self, theta_deg: float, center):
+        theta = math.radians(theta_deg)
+        c, s = math.cos(theta), math.sin(theta)
+        cx, cz = center[0], center[2]
+        out = []
+        for lx, lz in self.LOCAL_HULL:
+            dx = lx * c + lz * s
+            dz = -lx * s + lz * c
+            out.append((cx + dx, cz + dz))
+        return out
+
+    def _check(self, deg: float):
+        center = (0.4, 0.3, -0.2)
+        theta = math.radians(deg)
+        axis = (math.cos(theta), 0.0, -math.sin(theta))
+        world_hull = self._world_hull(deg, center)
+        width_m, depth_m, height_m = 0.29, 0.12, 0.11
+        obj = object_from_box_fit("shoe", width_m, depth_m, height_m, center, axis, hull_xz_world=world_hull)
+
+        fp = footprint_local(obj)
+        verts = prism_vertices(obb_from(obj), fp)
+        bottom_xz = [(float(v[0]), float(v[2])) for v in verts[: len(fp)]]
+        _assert_point_sets_close(self, bottom_xz, world_hull)
+
+    def test_0_deg(self):
+        self._check(0.0)
+
+    def test_35_deg(self):
+        self._check(35.0)
+
+    def test_neg_120_deg(self):
+        self._check(-120.0)
+
+
+class TestBoxFitHullOvershoot(unittest.TestCase):
+    """Points just outside the box half-dimensions clamp; further out raise."""
+
+    def _obj_with(self, hull):
+        return object_from_box_fit(
+            "shoe", 0.2, 0.1, 0.1, (0.0, 0.05, 0.0), (1.0, 0.0, 0.0), hull_xz_world=hull
+        )
+
+    def test_half_mm_overshoot_clamps(self):
+        # half-dims are (0.1, 0.05); this point overshoots x by 0.0005m (< 1e-3).
+        hull = [(-0.1005, -0.05), (0.1, -0.05), (0.1, 0.05), (-0.1, 0.05)]
+        obj = self._obj_with(hull)
+        xs = [x for x, _z in obj.footprint]
+        self.assertAlmostEqual(min(xs), -0.1, places=9)
+
+    def test_five_mm_overshoot_raises(self):
+        hull = [(-0.105, -0.05), (0.1, -0.05), (0.1, 0.05), (-0.1, 0.05)]
+        with self.assertRaises(ValueError) as ctx:
+            self._obj_with(hull)
+        self.assertIn("shoe", str(ctx.exception))
 
 
 class TestApplyPlacements(unittest.TestCase):
@@ -168,6 +306,15 @@ class TestApplyPlacements(unittest.TestCase):
         apply_placements(scene, [{"id": "shoe", "position": [9.0, 9.0, 9.0]}])
         self.assertEqual([o.position for o in scene.objects], original_positions)
 
+    def test_preserves_footprint(self):
+        scene = fx.scene_scanned_hulls()
+        new_scene = apply_placements(scene, [{"id": "shoe", "position": [1.0, 2.0, 3.0]}])
+        shoe = next(o for o in new_scene.objects if o.id == "shoe")
+        self.assertEqual(shoe.footprint, fx.SHOE_FOOTPRINT)
+        camera = next(o for o in new_scene.objects if o.id == "camera")
+        original_camera = next(o for o in scene.objects if o.id == "camera")
+        self.assertEqual(camera, original_camera)  # untouched, footprint included
+
 
 class TestValidate(unittest.TestCase):
     def test_reproduces_collision_fixture(self):
@@ -192,6 +339,14 @@ class TestValidate(unittest.TestCase):
         self.assertEqual(v["type"], "MALFORMED_GEOMETRY")
         self.assertEqual(v["object"], "nonexistent")
         self.assertEqual(result["warnings"], [])
+
+    def test_scanned_footprint_out_of_dims_is_malformed_not_raised(self):
+        result = validate_layout(fx.scene_scanned_footprint_out_of_dims())
+        self.assertFalse(result["valid"])
+        self.assertEqual(len(result["violations"]), 1)
+        v = result["violations"][0]
+        self.assertEqual(v["type"], "MALFORMED_GEOMETRY")
+        self.assertEqual(v["object"], "shoe")
 
 
 class TestResultToJson(unittest.TestCase):
@@ -248,6 +403,13 @@ class TestCli(unittest.TestCase):
         self.assertAlmostEqual(parsed["dimensions"][0], 0.29, places=9)
         self.assertAlmostEqual(parsed["dimensions"][1], 0.11, places=9)
         self.assertAlmostEqual(parsed["dimensions"][2], 0.12, places=9)
+
+    def test_scan_to_object_with_hull_prints_footprint(self):
+        proc = self._run("scan-to-object", "examples/scanned_item_with_hull.json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        parsed = json.loads(proc.stdout)
+        self.assertIsNotNone(parsed["footprint"])
+        self.assertEqual(len(parsed["footprint"]), 6)
 
 
 if __name__ == "__main__":

@@ -138,6 +138,7 @@ class SimulationResult:
 _BACKEND_NOTES = {
     "mock": "synthetic frames drawn by the mock, not a world-model prediction",
     "pan": "PAN HTTP seam; its request/response contract is unverified (docs/PAN_ACCESS.md)",
+    "ifm-k2-horizon": "IFM K2-Horizon text reasoning about the plan, not a visual PAN rollout (docs/PAN_ACCESS.md)",
 }
 
 

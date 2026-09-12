@@ -1,6 +1,6 @@
 # PackPhysics — Linux portability / correctness audit
 
-Swift 6.3.3 (swiftly), Ubuntu 26.04, Swift 5 language mode. Tests **163 passed / 0 failed** before and after
+Swift 6.3.3 (swiftly), Ubuntu 26.04, Swift 5 language mode. Tests **178 passed / 0 failed** before and after
 the fixes. `swift build -c release`, clean tree: **0 warnings** (library + `packphysics`).
 
 ## Fixed
@@ -29,13 +29,19 @@ the fixes. `swift build -c release`, clean tree: **0 warnings** (library + `pack
    (`JSONValue.swift`). Additive conformances, no signature changed; the `@MainActor` pattern and a
    `swiftLanguageMode(.v6)` library build both compile and run.
 
-## Reported, not fixed (owned elsewhere)
+## Fixed since this audit (owned elsewhere)
 
-4. **BUG — `packphysics bench --objects -5` crashes.** `PackPhysicsCLI/main.swift:165`,
-   `Int(ceil(sqrt(Double(n))))`: `n` comes straight from `Int(args[i])`, so a negative count makes `sqrt` NaN
-   and the `Int(_:)` conversion **traps** — `Fatal error: Double value cannot be converted to Int because it
+4. **BUG — `packphysics bench --objects -5` crashed.** `PackPhysicsCLI/main.swift:165`,
+   `Int(ceil(sqrt(Double(n))))`: `n` came straight from `Int(args[i])`, so a negative count made `sqrt` NaN
+   and the `Int(_:)` conversion **trapped** — `Fatal error: Double value cannot be converted to Int because it
    is either infinite or NaN`, exit 132, backtrace instead of the `die(…, code: 2)` path every other bad
-   argument takes. Guard `n >= 1` in the parser. Only `Int(Double)` in the package; library code has none.
+   argument takes. Now fixed: the `--objects` parser guards `n >= 1` at `PackPhysicsCLI/main.swift:198`
+   (`die("--objects requires a positive integer", code: 2)`). Only `Int(Double)` in the package; library code
+   has none.
+
+5. **Box-only port.** `swift/PackPhysics` now has convex-prism footprint parity with the Python
+   validator (ff9673c; see `docs/SWIFT_PORT.md`, "Prism footprints"); the differential test that
+   documented the divergence now asserts agreement.
 
 ## Verified clean
 

@@ -19,7 +19,10 @@ Checks:
      of the object (below). -> FRAGILE_OBJECT_OVERLOADED.
   4. fragile (warning, not a violation): nonzero transitive load rests on
      top of the object, OR the object's XZ footprint overlaps a `heavy`
-     object's footprint at roughly the same height. -> FRAGILE_LOAD.
+     object's footprint at roughly the same height -- "same height" being
+     Y ranges that overlap within `contact_eps_m`, so a heavy item two
+     shelves up is not "adjacent" to a fragile one on the floor.
+     -> FRAGILE_LOAD.
   5. heavy resting on top of anything (informational, always emitted when it
      happens, independent of the object underneath's constraints).
      -> HEAVY_ON_TOP.
@@ -77,6 +80,9 @@ from physics.schema import Scene
 WORLD_UP = np.array([0.0, 1.0, 0.0])
 DEFAULT_ANGLE_TOL_DEG = 15.0
 DEFAULT_CONTACT_EPS_M = 0.02
+# "X rests on Y" is a contact question, not an adjacency one, so it gets its own
+# tolerance -- the same 1e-3 support.py uses, so both read one resting graph.
+RESTING_CONTACT_EPS_M = 1e-3
 
 
 @dataclass
@@ -91,6 +97,18 @@ class ConstraintWarning:
     type: str
     object_id: str
     details: dict = field(default_factory=dict)
+
+
+def _adjacent_at_same_height(geom: SceneGeometry, i: int, j: int, tol: float) -> bool:
+    """Are i and j side by side -- footprints overlapping AND Y ranges
+    overlapping within `tol`? The XZ overlap alone is a shadow test: without
+    the height gate a heavy case on the top layer counts as "adjacent" to a
+    fragile one on the floor directly below it, which is exactly the pair the
+    warning is not about. Mirrored in `physics.incremental._adjacent_heavy`."""
+    if xz_overlap_area(geom, i, j) <= 0.0:
+        return False
+    lo, hi = geom.aabb_min[:, 1], geom.aabb_max[:, 1]
+    return lo[i] - tol <= hi[j] and lo[j] - tol <= hi[i]
 
 
 def _up_axis_tilt_deg(local_up: np.ndarray) -> float:
@@ -130,7 +148,11 @@ def check_constraints(
 
     ids = geom.ids
     masses = geom.masses.tolist()  # plain floats: same IEEE arithmetic, no numpy scalars
-    pairs = resting_pairs(geom, contact_eps_m)  # [(top_idx, bottom_idx, area), ...]
+    # RESTING_CONTACT_EPS_M, not contact_eps_m: the latter is an *adjacency* tolerance
+    # (2 cm, for "is this heavy thing beside that fragile one"), and at suitcase scale
+    # 2 cm of clear air is not something resting on something. support.py asks the same
+    # question at 1e-3; this keeps the two agreeing on the resting graph.
+    pairs = resting_pairs(geom, RESTING_CONTACT_EPS_M)  # [(top_idx, bottom_idx, area), ...]
 
     direct_weight = [0.0] * n  # sum of mass of objects DIRECTLY on top of x (old definition)
     resting_on_direct: list[list[int]] = [[] for _ in range(n)]  # top -> [direct supporter idx, ...]
@@ -236,7 +258,9 @@ def check_constraints(
 
         if c.fragile:
             adjacent_heavy = any(
-                xz_overlap_area(geom, i, j) > 0.0 for j in heavy_idx if j != i
+                _adjacent_at_same_height(geom, i, j, contact_eps_m)
+                for j in heavy_idx
+                if j != i
             )
             if supported_weight[i] > 0 or adjacent_heavy:
                 warnings.append(

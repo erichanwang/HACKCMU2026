@@ -1,9 +1,8 @@
 """Offline unittest coverage for pan.world_model (Mock, Real, Caching, factory)."""
 from __future__ import annotations
 
-import base64
 import contextlib
-import io
+import json
 import os
 import tempfile
 import unittest
@@ -14,9 +13,10 @@ from unittest import mock
 import numpy as np
 from PIL import Image
 
+from pan.demo import persist_result
 from pan.evaluate import DEFAULT_THRESHOLDS, evaluate_rollout, segment_by_color
 from pan.observation import observation_from_scene, project_points, render_scene
-from pan.types import Observation, PackingAction, SimulationRequest, SimulationResult
+from pan.types import Observation, PackingAction, SimulationRequest, SimulationResult, honesty_note
 from pan.world_model import (
     CachingWorldModel,
     MockPanBackend,
@@ -26,15 +26,17 @@ from pan.world_model import (
 from physics.schema import Scene
 from tests.fixtures import scene_with_precarious_balance, valid_packed_scene
 
-_PAN_ENV_KEYS = ["PAN_API_KEY", "PAN_BASE_URL", "PAN_MODEL", "PAN_TIMEOUT_S", "PAN_ENDPOINT_PATH"]
+# The IFM key the one real backend reads, plus the alias Eric's .env uses.
+_PAN_ENV_KEYS = ["IFM_API_KEY", "PAN_API_KEY"]
 
 
 @contextlib.contextmanager
 def _clean_pan_env():
-    """Ensure none of the PAN_* env vars leak in from the real environment."""
+    """No key from the real environment (nor from a repo-root `.env`) leaks in."""
     saved = {k: os.environ.pop(k, None) for k in _PAN_ENV_KEYS}
     try:
-        yield
+        with mock.patch("physics.pan._load_ifm_api_key", return_value=None):
+            yield
     finally:
         for k, v in saved.items():
             if v is not None:
@@ -187,7 +189,7 @@ class MockDeterminismTests(unittest.TestCase):
         req = SimulationRequest(observation=_make_observation(), action=_make_action(), options={"num_frames": 6})
         result = backend.simulate(req)
         with tempfile.TemporaryDirectory() as tmp:
-            persisted = backend.persist(result, tmp)
+            persisted = persist_result(result, tmp)  # pan.demo is the one persister
             png_files = sorted(p for p in os.listdir(tmp) if p.endswith(".png"))
             self.assertEqual(len(png_files), 6)
             self.assertTrue(os.path.exists(persisted.video_path))
@@ -365,8 +367,37 @@ class MockRenderedRolloutTests(unittest.TestCase):
         self.assertLess(result.latency_ms, 2000.0)
 
 
+class _FakeIfmResponse:
+    """Stands in for the urlopen() context manager physics.pan uses."""
+
+    def __init__(self, risk: dict):
+        self._body = json.dumps({"choices": [{"message": {"content": json.dumps(risk)}}]}).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return self._body
+
+
+_FAKE_RISK = {
+    "accessibility_risk": 0.2,
+    "visible_shift": False,
+    "possible_topple": False,
+    "occlusion_risk": 0.1,
+    "confidence": 0.9,
+    "rationale": "low risk",
+}
+
+
 class RealBackendTests(unittest.TestCase):
-    def test_unavailable_without_env(self):
+    """The one real backend: `physics.pan.RealPanBackend` (IFM K2-Horizon,
+    text) behind the `pan.types.WorldModel` interface."""
+
+    def test_unavailable_without_a_key(self):
         with _clean_pan_env():
             backend = RealPanBackend()
             self.assertFalse(backend.available())
@@ -375,58 +406,34 @@ class RealBackendTests(unittest.TestCase):
         self.assertEqual(result.frames, [])
         self.assertIsNotNone(result.error)
 
-    def test_success_with_fake_env_and_patched_post(self):
-        fake_frame = np.zeros((4, 4, 3), dtype=np.uint8)
-        buf = io.BytesIO()
-        Image.fromarray(fake_frame).save(buf, format="PNG")
-        frame_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    def test_pan_api_key_is_accepted_as_an_ifm_key_alias(self):
+        # clear=True so IFM_API_KEY cannot be the thing that made it available
+        with mock.patch.dict(os.environ, {"PAN_API_KEY": "fake-key"}, clear=True):
+            self.assertTrue(RealPanBackend().available())
+            self.assertEqual(get_world_model(prefer="auto").name, "ifm-k2-horizon")
 
-        fake_response = mock.Mock(status_code=200, json=mock.Mock(return_value={"frames": [frame_b64]}))
-
-        env = {"PAN_API_KEY": "fake-secret-token", "PAN_BASE_URL": "https://fake.example.com", "PAN_ENDPOINT_PATH": "/v1/simulate"}
-        with _clean_pan_env(), mock.patch.dict(os.environ, env):
-            backend = RealPanBackend()
-            self.assertTrue(backend.available())
-            with mock.patch.object(type(backend.session), "post", return_value=fake_response) as post:
-                result = backend.simulate(SimulationRequest(observation=_make_observation(), action=_make_action()))
-
-        self.assertEqual(post.call_count, 1)
-        self.assertEqual(result.status, "complete")
-        self.assertEqual(len(result.frames), 1)
-        self.assertTrue(np.array_equal(result.frames[0], fake_frame))
-
-    def test_retry_after_500_then_success(self):
-        fake_frame = np.ones((4, 4, 3), dtype=np.uint8)
-        buf = io.BytesIO()
-        Image.fromarray(fake_frame).save(buf, format="PNG")
-        frame_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-
-        resp_500 = mock.Mock(status_code=500)
-        resp_200 = mock.Mock(status_code=200, json=mock.Mock(return_value={"frames": [frame_b64]}))
-
-        env = {"PAN_API_KEY": "fake-secret-token", "PAN_BASE_URL": "https://fake.example.com", "PAN_ENDPOINT_PATH": "/v1/simulate"}
-        with _clean_pan_env(), mock.patch.dict(os.environ, env):
-            backend = RealPanBackend()
-            with mock.patch.object(type(backend.session), "post", side_effect=[resp_500, resp_200]), \
-                    mock.patch("time.sleep", return_value=None):
-                result = backend.simulate(SimulationRequest(observation=_make_observation(), action=_make_action()))
+    def test_complete_result_carries_risk_and_no_frames(self):
+        backend = RealPanBackend()
+        backend.client.api_key = "fake-key"
+        with mock.patch("physics.pan.urllib.request.urlopen", return_value=_FakeIfmResponse(_FAKE_RISK)):
+            result = backend.simulate(SimulationRequest(observation=_make_observation(), action=_make_action()))
 
         self.assertEqual(result.status, "complete")
-        self.assertEqual(result.metadata["attempts"], 2)
+        self.assertEqual(result.backend, "ifm-k2-horizon")
+        self.assertEqual(result.frames, [])  # text reasoning: there is no visual rollout
+        self.assertEqual(result.metadata["risk"]["accessibility_risk"], 0.2)
+        # ...and nothing downstream may show it as one
+        self.assertIn("not a visual PAN rollout", honesty_note(result.backend, result.metadata))
+        self.assertIsNone(evaluate_rollout(result, _make_observation(), _make_action()))
 
-    def test_401_fails_without_retry_and_redacts_key(self):
-        secret = "super-secret-fake-key-value"
-        resp_401 = mock.Mock(status_code=401)
-
-        env = {"PAN_API_KEY": secret, "PAN_BASE_URL": "https://fake.example.com", "PAN_ENDPOINT_PATH": "/v1/simulate"}
-        with _clean_pan_env(), mock.patch.dict(os.environ, env):
-            backend = RealPanBackend()
-            with mock.patch.object(type(backend.session), "post", return_value=resp_401) as post:
-                result = backend.simulate(SimulationRequest(observation=_make_observation(), action=_make_action()))
-
-        self.assertEqual(post.call_count, 1)  # no retry on 4xx
+    def test_failure_is_reported_not_raised(self):
+        backend = RealPanBackend()
+        backend.client.api_key = "fake-key"
+        with mock.patch("physics.pan.urllib.request.urlopen", side_effect=TimeoutError("timed out")), \
+                mock.patch("physics.pan._LOG"):  # the retry warning is expected here, not a live call
+            result = backend.simulate(SimulationRequest(observation=_make_observation(), action=_make_action()))
         self.assertEqual(result.status, "failed")
-        self.assertNotIn(secret, result.error or "")
+        self.assertEqual(result.frames, [])
 
 
 class _CountingFakeBackend:

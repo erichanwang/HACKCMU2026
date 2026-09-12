@@ -89,6 +89,21 @@ class TestSegmentation(unittest.TestCase):
         dark_px = frame[15, 25]
         self.assertTrue((dark_px != np.array(RED)).any())  # it really was shaded
 
+    def test_teal_vs_shaded_blue_documented_pair(self):
+        """(12) FIXES.md #3 / pan/observation.py's documented collision:
+        toiletry_bag's teal and headphones_case's side-shaded (0.82x) blue are
+        <60 raw-RGB units apart, yet must still segment as two objects."""
+        TEAL = (0, 128, 128)
+        BLUE = (0, 130, 200)
+        SHADED_BLUE = tuple(round(c * 0.82) for c in BLUE)
+        # guard the premise: shaded blue really is closer to teal than to its
+        # own true color under plain RGB distance -- that's the bug.
+        self.assertLess(sum((a - b) ** 2 for a, b in zip(TEAL, SHADED_BLUE)) ** 0.5, 60.0)
+        frame = draw([((10, 10, 20, 20), TEAL), ((60, 60, 20, 20), SHADED_BLUE)])
+        masks = segment_by_color(frame, {"teal_obj": TEAL, "blue_obj": BLUE})
+        self.assertEqual(int(masks["teal_obj"].sum()), 400)
+        self.assertEqual(int(masks["blue_obj"].sum()), 400)
+
     def test_sample_frames(self):
         frames = translating_red(6)
         s = sample_frames(frames, k=5)

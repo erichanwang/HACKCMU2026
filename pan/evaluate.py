@@ -51,7 +51,7 @@ from pan.types import Observation, PackingAction, RiskSignals, SimulationResult
 # Every tunable lives here; `evaluate_rollout(thresholds=...)` overrides per call.
 DEFAULT_THRESHOLDS: dict[str, float] = {
     # --- segmentable regime ---
-    "color_tol": 60.0,          # RGB Euclidean radius around a palette color (absorbs shading + mock noise)
+    "color_tol": 60.0,          # radius (0-255 scale) in hue/sat/value space around a palette color (absorbs shading + mock noise)
     "min_area": 25.0,           # px; a mask smaller than this is "not confidently segmented"
     "shift_frac_diag": 0.02,    # centroid move > 2% of the image diagonal = visible shift
     "aspect_change": 0.40,      # >40% relative change of bbox w/h
@@ -90,6 +90,30 @@ def sample_frames(frames: list[np.ndarray], k: int = 5) -> list[np.ndarray]:
 
 
 # ------------------------------------------------------------------ segmentation
+def _hsv_cyl(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """RGB (..., 3), any 0-255 range -> (S*cos H, S*sin H, V), each on a 0-255
+    scale. Shading multiplies R,G,B by one scalar (`pan/observation.py`'s face
+    shading), which leaves hue and saturation exactly unchanged and only moves
+    V -- so two shades of the same color stay close in this space, while two
+    different hues that happen to be close in raw RGB (teal vs a shaded blue)
+    do not. Grey/desaturated pixels get S ~= 0, so their (x, y) collapse near
+    the origin regardless of their (numerically noisy) hue.
+    """
+    a = np.asarray(rgb, dtype=np.float32)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    maxc = np.maximum(np.maximum(r, g), b)
+    minc = np.minimum(np.minimum(r, g), b)
+    delta = maxc - minc
+    safe_delta = np.where(delta > 0, delta, 1.0)
+    rc = (maxc - r) / safe_delta
+    gc = (maxc - g) / safe_delta
+    bc = (maxc - b) / safe_delta
+    hue = np.select([maxc == r, maxc == g], [bc - gc, 2.0 + rc - bc], default=4.0 + gc - rc)
+    hue = np.where(delta > 0, (hue / 6.0) % 1.0, 0.0) * (2.0 * np.pi)
+    sat = np.where(maxc > 0, delta / np.where(maxc > 0, maxc, 1.0), 0.0)
+    return sat * np.cos(hue) * 255.0, sat * np.sin(hue) * 255.0, maxc
+
+
 def segment_by_color(
     frame: np.ndarray,
     object_colors: dict[str, tuple[int, int, int]],
@@ -97,19 +121,26 @@ def segment_by_color(
 ) -> dict[str, np.ndarray]:
     """Nearest-palette-color segmentation of one RGB frame.
 
-    Each pixel is assigned to the closest color in `object_colors` (RGB Euclidean)
-    when the distance is within `tol`, else to the background (no mask). `tol`
-    exists because `pan/observation.py` shades faces and the world model adds
-    noise, so an object's pixels are its base color *modulated*, never equal to it.
+    Each pixel is assigned to the closest color in `object_colors` (hue/
+    saturation/value distance, see `_hsv_cyl`) when the distance is within
+    `tol`, else to the background (no mask). `tol` exists because
+    `pan/observation.py` shades faces and the world model adds noise, so an
+    object's pixels are its base color *modulated*, never equal to it.
     Returns {object_id: bool mask (H, W)} for every id in the palette.
     """
     tol = DEFAULT_THRESHOLDS["color_tol"] if tol is None else float(tol)
     ids = sorted(object_colors)
     if not ids:
         return {}
-    f = np.asarray(frame, dtype=np.int32)
+    fx, fy, fz = _hsv_cyl(frame)
     # (H, W, k) squared distances, one palette entry at a time (keeps peak memory at H*W*3).
-    d2 = np.stack([((f - np.asarray(object_colors[i], dtype=np.int32)) ** 2).sum(-1) for i in ids], axis=-1)
+    d2 = np.stack(
+        [
+            (fx - cx) ** 2 + (fy - cy) ** 2 + (fz - cz) ** 2
+            for cx, cy, cz in (_hsv_cyl(np.asarray(object_colors[i], dtype=np.float32)) for i in ids)
+        ],
+        axis=-1,
+    )
     nearest = d2.argmin(-1)
     within = d2.min(-1) <= tol * tol
     return {oid: (nearest == k) & within for k, oid in enumerate(ids)}

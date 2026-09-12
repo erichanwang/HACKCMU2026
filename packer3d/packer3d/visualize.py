@@ -20,7 +20,7 @@ def _box(lo, d):
     return [c[i] for i in ([0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [1, 2, 6, 5], [0, 4, 7, 3])]
 
 
-def _cylinder(center, axis, r, h, n=24):
+def _cylinder(center, axis, r, h, n=40):
     """n side quads (outward-wound) followed by the +axis cap and the -axis cap."""
     a = np.eye(3)["xyz".index(axis)]
     t = np.linspace(0, 2 * np.pi, n, endpoint=False)
@@ -134,7 +134,7 @@ def render(result: dict, out_path: str, title: str = "") -> None:
             if len(cand):
                 x, y, z = cen[cand[np.argmax(area[cand])]]
                 ax.text(x, y, z, labels[k], fontsize=7, ha="center", va="center", color=(0.1, 0.1, 0.1),
-                        zorder=1000, path_effects=halo)
+                        zorder=1001, path_effects=halo)  # above CoM/target markers so they can't cover a label
 
     off = 0.04 * max(L, W, H)
     dim_style = dict(fontsize=7.5, color=(0.35, 0.35, 0.35), ha="center", va="center", zorder=1000)

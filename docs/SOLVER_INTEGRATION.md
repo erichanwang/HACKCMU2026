@@ -55,7 +55,7 @@ rollout after applying the common prefix. CLI (exit: 0 valid, 1 violations, 2 ba
 python3 -m physics validate-packer3d packer3d/examples/suitcase_result.json \
     --strategy optimized --items packer3d/examples/suitcase.json --pretty
 PYTHONPATH=. python3 -m pan demo --from-packer3d packer3d/examples/suitcase_result.json \
-    --scenario packer3d/examples/suitcase.json --backend mock --frames 6 --steps 2
+    --scenario packer3d/examples/suitcase.json --backend mock --frames 6 --steps 2 --out out/pan_demo
 ```
 
 ## Agreement report

@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(simd)
 import simd
+#endif
 
 func approx(_ a: Float, _ b: Float, _ tol: Float = 1e-3) -> Bool { abs(a - b) < tol }
 
@@ -41,9 +43,10 @@ let empty = flat.filter { $0 == 0 }.count
 assert(empty > flat.count / 5 && empty < flat.count / 3, "L-shape hole \(empty)/\(flat.count)")
 assert(flat.filter { $0 > 0 }.allSatisfy { approx($0, 0.05, 0.005) }, "L-shape heights")
 
-// Densify adds interior samples at the requested spacing.
+// Densify adds interior samples at the requested spacing. It subdivides by the *longest* edge —
+// here the 14.1 cm hypotenuse, not the 10 cm legs — so n = 15 and the count is (n+1)(n+2)/2.
 let tri = densify(SIMD3(0, 0, 0), SIMD3(0.1, 0, 0), SIMD3(0, 0, 0.1), spacing: 0.01)
-assert(tri.count == 66, "densify \(tri.count)")
+assert(tri.count == 136, "densify \(tri.count)")
 
 print(ScannedItem(lFit, heights: lhm, cell: 0.01).asciiMap)
 let encoded = String(data: try! JSONEncoder().encode(ScannedItem(fit, heights: hm, cell: 0.01)), encoding: .utf8)!

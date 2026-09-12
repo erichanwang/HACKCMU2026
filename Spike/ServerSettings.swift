@@ -5,33 +5,40 @@ import Foundation
 /// The address lives in `UserDefaults` rather than in the source: it is a LAN IP
 /// that changes whenever the server machine gets a new DHCP lease, and chasing
 /// that with a rebuild-and-reinstall costs more than the change is worth.
+///
+/// Two screens edit it — the root list here and `SettingsSheet` — so both go
+/// through this type and through `resolveServerURL` in `API.swift`. Sharing one
+/// key and one resolver is the point: a settings sheet writing `serverURL` while
+/// something else read `serverBaseURL` would look like the address simply not
+/// taking effect.
 enum ServerSettings {
-    /// The `@AppStorage` / `UserDefaults` key. Shared with the settings field so
-    /// edits there take effect immediately.
-    static let baseURLKey = "serverBaseURL"
+    /// The `UserDefaults` key, matching what `API.base` and `SettingsSheet` use.
+    static let baseURLKey = "serverURL"
 
-    static let defaultBaseURL = URL(string: "http://172.26.120.200:8000")!
+    /// The address to fall back on when nothing has been typed and no
+    /// `PACKAR_SERVER` is set in the scheme.
+    ///
+    /// `API.swift`'s own last-resort literal is deliberately left alone — it is
+    /// pinned by `tests/swift/api/main.swift`, which compiles that file on Linux.
+    static let shippedDefault = "http://172.26.120.200:8000"
 
-    /// The address in use. Falls back to the default when nothing is stored, or
-    /// when what is stored cannot address a host — a half-typed URL should not
-    /// leave the app with no server at all.
-    static var baseURL: URL {
-        get { url(from: UserDefaults.standard.string(forKey: baseURLKey)) ?? defaultBaseURL }
-        set { UserDefaults.standard.set(newValue.absoluteString, forKey: baseURLKey) }
+    static var defaultBaseURL: URL {
+        URL(string: API.defaultBase) ?? URL(string: shippedDefault)!
     }
 
-    /// Parses a typed address, or `nil` if it could not reach anything.
+    /// The address in use, resolved exactly the way `API` resolves it.
+    static var baseURL: URL { API.base }
+
+    /// Whether typed text can address a host — the check behind the root screen's
+    /// warning. Kept in step with `resolveServerURL` by calling it: text is usable
+    /// when resolving it does *not* land on the fallback.
     ///
-    /// `URL(string:)` alone is too permissive — it happily accepts "172.26.1.1",
-    /// which has no scheme and no host and silently resolves to a relative path.
+    /// A bare `host:port` counts as usable; `resolveServerURL` supplies the
+    /// scheme. That is a deliberate change from this side's earlier behaviour,
+    /// which rejected it — main's is friendlier and is the tested one.
     static func url(from text: String?) -> URL? {
-        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !trimmed.isEmpty,
-              let url = URL(string: trimmed),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              let host = url.host(), !host.isEmpty
-        else { return nil }
-        return url
+        let sentinel = "http://__unresolved__"
+        let resolved = resolveServerURL(typed: text ?? "", fallback: sentinel)
+        return resolved.absoluteString == sentinel ? nil : resolved
     }
 }

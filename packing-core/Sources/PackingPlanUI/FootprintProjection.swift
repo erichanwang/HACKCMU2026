@@ -1,4 +1,10 @@
+// Linux has no CoreGraphics module, but its Foundation already provides
+// CGFloat/CGPoint/CGSize/CGRect with the same API, so it's a drop-in fallback.
+#if canImport(CoreGraphics)
 import CoreGraphics
+#else
+import Foundation
+#endif
 import PackingPlan
 
 /// Maps the bag's footprint onto a view rect for the top-down diagram.

@@ -8,6 +8,11 @@ Dimensions: (length, width, height) full extents along local x, y, z. For a
 `rigidity="soft"` or `"semi"` object these are its LOOSE (uncompressed)
 dimensions — the OBB the geometry layer measured before packing, matching
 `compressibility_k` (see below).
+Footprint: optional convex polygon in the object's LOCAL (x, z) plane, meters,
+taken straight from the LiDAR scan's 2D convex hull. The object is then a
+convex PRISM (footprint extruded over `dimensions[1]` along local y) instead of
+a box; `dimensions` stays the footprint's bounding box so every box-only
+consumer remains correct (a prism is always inside its box). None = box.
 IDs: stable strings, unique within a Scene.
 """
 from __future__ import annotations
@@ -43,6 +48,10 @@ class Object:
     # V/k (OVERVIEW.md's compressibility model). Ignored when rigidity="rigid".
     # Default 1.0 (no compression) so existing rigid-object scenes are unaffected.
     compressibility_k: float = 1.0
+    # Convex footprint polygon in LOCAL (x, z), meters, any vertex order (hulled
+    # on precompute), every point within +-dimensions[0]/2 x +-dimensions[2]/2.
+    # None = rectangular footprint (plain box). See module docstring.
+    footprint: Optional[list[tuple[float, float]]] = None
 
 
 @dataclass

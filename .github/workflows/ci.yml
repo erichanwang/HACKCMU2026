@@ -7,6 +7,11 @@ name: CI
 jobs:
   python:
     runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +27,20 @@ jobs:
 
       - name: Run PAN mock demo
         run: PYTHONPATH=. python3 -m pan demo --backend mock --frames 3 --steps 1 --out out/pan_demo
+
+      - name: Run packer3d tests
+        working-directory: packer3d
+        # keep the "not slow" filter: the 1000-item case already misses its budget on a
+        # dedicated laptop (FIXES.md #2), a shared CI runner won't do better.
+        run: |
+          pip install pytest
+          PYTHONPATH=. python -m pytest -q -m "not slow" tests/
+
+      - name: Server check
+        working-directory: server
+        run: |
+          pip install fastapi uvicorn pymongo httpx python-multipart numpy mongomock "python-jose[cryptography]"
+          python check.py
 
       - name: Upload PAN demo output
         if: always()
@@ -66,3 +85,16 @@ jobs:
           else
             echo "packphysics executable not present yet; skipping bench"
           fi
+
+      - name: Run tests/swift/*/run.sh (if any)
+        run: |
+          for f in tests/swift/*/run.sh; do
+            [ -e "$f" ] || continue
+            echo "running $f"
+            bash "$f"
+          done
+
+      - name: Plan contract (server plan through the real Swift decoder)
+        run: |
+          pip install -r requirements.txt
+          bash tests/plan_contract/run.sh

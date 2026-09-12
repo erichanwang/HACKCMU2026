@@ -24,3 +24,11 @@ graphify-out/cache/
 .swiftpm/
 # Python
 .venv/
+*.egg-info/
+.pytest_cache/
+packer3d/uv.lock
+packer3d/.venv/
+tests/swift/typecheck/.modcache/
+
+# Per-developer signing (team ID, bundle identifier)
+Local.xcconfig

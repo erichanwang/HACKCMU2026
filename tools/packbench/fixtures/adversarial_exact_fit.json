@@ -1,0 +1,55 @@
+{
+  "container": {
+    "id": "pelican_1510_interior",
+    "shape": "box",
+    "dims": [0.502, 0.279, 0.193],
+    "gravity": true,
+    "max_mass": 15.0,
+    "min_support": 0.7
+  },
+  "items": [
+    {
+      "id": "mixer_recorder_foam_tray",
+      "shape": "box",
+      "dims": [0.5, 0.277, 0.06],
+      "mass": 2.1,
+      "rigidity": "rigid",
+      "priority": 4
+    },
+    {
+      "id": "battery_charger_block",
+      "shape": "box",
+      "dims": [0.249, 0.277, 0.132],
+      "mass": 3.4,
+      "rigidity": "rigid",
+      "priority": 3
+    },
+    {
+      "id": "wireless_rx_rack",
+      "shape": "box",
+      "dims": [0.249, 0.138, 0.132],
+      "mass": 1.8,
+      "rigidity": "rigid",
+      "priority": 3
+    },
+    {
+      "id": "lav_kit_tray",
+      "shape": "box",
+      "dims": [0.249, 0.138, 0.065],
+      "mass": 0.9,
+      "rigidity": "rigid",
+      "count": 2,
+      "priority": 2
+    }
+  ],
+  "optimizer": {
+    "time_budget_s": 8,
+    "seed": 0
+  },
+  "weights": {
+    "unpacked": 30,
+    "compact": 1,
+    "com": 2,
+    "height": 0.5
+  }
+}

@@ -111,8 +111,7 @@ Validate:
 - grossly unstable placements
 
 MVP assumption:
-- rigid objects only
-- no deformable-body simulation
+- soft items compress by a simple height squash (`compressibility_k`, `Item.compressed`); no full deformable-body simulation
 
 ### 5. 3D packing simulation
 

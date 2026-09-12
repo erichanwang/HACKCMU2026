@@ -105,13 +105,24 @@ public func checkSceneContainment(_ scene: Scene, epsilon: Double = 1e-6, geom: 
     let container = g.containerOBB
     var results: [ContainmentResult] = []
     for i in 0..<g.n {
-        let (wallDepth, vertexPenetrating) = containmentArrays(
-            verts: g.vertices[i], containerCenter: container.center, containerAxes: container.axes,
+        var verts = g.vertices[i]
+        var (wallDepth, vertexPenetrating) = containmentArrays(
+            verts: verts, containerCenter: container.center, containerAxes: container.axes,
             containerHalfExtents: container.halfExtents, epsilon: epsilon
         )
-        if vertexPenetrating.contains(true) {
-            results.append(buildResult(objectId: g.ids[i], verts: g.vertices[i], wallDepth: wallDepth, vertexPenetrating: vertexPenetrating))
+        guard vertexPenetrating.contains(true) else { continue }
+        // A scanned prism lies inside its box envelope, so it can only be MORE
+        // contained: only rows the envelope pass flagged get the exact test,
+        // redone on the prism's own 2m ring vertices.
+        if g.isPrism[i] {
+            verts = g.prismVerts[i]
+            (wallDepth, vertexPenetrating) = containmentArrays(
+                verts: verts, containerCenter: container.center, containerAxes: container.axes,
+                containerHalfExtents: container.halfExtents, epsilon: epsilon
+            )
+            guard vertexPenetrating.contains(true) else { continue }
         }
+        results.append(buildResult(objectId: g.ids[i], verts: verts, wallDepth: wallDepth, vertexPenetrating: vertexPenetrating))
     }
     return results
 }

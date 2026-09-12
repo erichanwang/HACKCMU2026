@@ -35,11 +35,31 @@ bag X <- packer x, bag Y <- packer z, bag Z <- packer y, with the item letters r
 x -> X, y -> Z, z -> Y. That gives the table below.
 """
 
-_ROTATION = {"xyz": "XYZ", "xzy": "XZY", "yxz": "ZYX", "yzx": "ZXY", "zxy": "YZX", "zyx": "YXZ"}
+_ROTATION = {"xyz": "XYZ", "xzy": "XZY", "yxz": "ZYX", "yzx": "ZXY", "zxy": "YZX", "zyx": "YXZ",
+             # cylinders: packer3d's `height` runs along its own z (app Y) when upright, so
+             # cyl_axis_z is identity; on its side the height axis goes to bag X or bag Z.
+             "cyl_axis_z": "XYZ", "cyl_axis_x": "YXZ", "cyl_axis_y": "XZY"}
 
 
 def _v(x, y, z) -> dict:
     return {"x": float(x), "y": float(y), "z": float(z)}
+
+
+def _nesting(p: dict) -> dict:
+    """`nestedIn` for one placement, copied from the solver's own `nested_in` (the decoder knows
+    when it placed an item into another item's scanned cavity; nothing is inferred here, since
+    inferring it from overlapping boxes would relabel a missed collision as nesting).
+
+    Contract (agreed with packing-core): `{"itemId": <host>, "cavity": {"position", "size"}}` with the
+    host's cavity sub-box in bag frame (min corner + extent, like a placement), or null. The cavity
+    is required, so a consumer allows overlap only inside that cell and stays strict elsewhere;
+    a solver nesting record without its cavity box is emitted as null, not as a bare host id."""
+    n = p.get("nested_in")
+    if not isinstance(n, dict) or not n.get("item_id") or n.get("position") is None or n.get("dims") is None:
+        return {"nestedIn": None}
+    x, y, z = n["position"]
+    dx, dy, dz = n["dims"]
+    return {"nestedIn": {"itemId": n["item_id"], "cavity": {"position": _v(x, z, y), "size": _v(dx, dz, dy)}}}
 
 
 def to_app_plan(result: dict, suitcase: dict, items_by_id: dict) -> dict:
@@ -63,6 +83,7 @@ def to_app_plan(result: dict, suitcase: dict, items_by_id: dict) -> dict:
             "size": _v(dx, dz, dy),
             "rotation": _ROTATION.get(p.get("orientation"), "XYZ"),
             "note": item.get("description") or "",
+            **_nesting(p),
         })
     return {
         "version": 1,

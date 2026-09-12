@@ -17,156 +17,6 @@
     "ast_hash": "3169e8071951402f47718e872d226377",
     "semantic_hash": "3169e8071951402f47718e872d226377"
   },
-  "Tests/__init__.py": {
-    "mtime": 1789188730.0897372,
-    "seen": 1789191058.5282738,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
-  },
-  "Tests/benchmark_incremental.py": {
-    "mtime": 1789188730.0898209,
-    "seen": 1789191058.528275,
-    "ast_hash": "831ec5fdc31de1c01d8a4d58f903fd7e",
-    "semantic_hash": "831ec5fdc31de1c01d8a4d58f903fd7e"
-  },
-  "Tests/benchmark_validator.py": {
-    "mtime": 1789188730.0898874,
-    "seen": 1789191058.528275,
-    "ast_hash": "0f87ef48a2e437aac67c201496af71ce",
-    "semantic_hash": "0f87ef48a2e437aac67c201496af71ce"
-  },
-  "Tests/fixtures.py": {
-    "mtime": 1789188730.0899887,
-    "seen": 1789191058.528275,
-    "ast_hash": "2ab6c3d6df8c8bf3bf22a7db9689836f",
-    "semantic_hash": "2ab6c3d6df8c8bf3bf22a7db9689836f"
-  },
-  "Tests/main.swift": {
-    "mtime": 1789189021.24192,
-    "seen": 1789191058.528276,
-    "ast_hash": "7d1828636f154883fe47225787df849e",
-    "semantic_hash": "7d1828636f154883fe47225787df849e"
-  },
-  "Tests/snapshots/validator_v2.json": {
-    "mtime": 1789188730.090362,
-    "seen": 1789191058.528276,
-    "ast_hash": "bebc048df948a1b288304506c34f45a8",
-    "semantic_hash": "bebc048df948a1b288304506c34f45a8"
-  },
-  "Tests/test_collision.py": {
-    "mtime": 1789188730.0904608,
-    "seen": 1789191058.528276,
-    "ast_hash": "f05c47a4ebcbdc9cd853874b58b88a10",
-    "semantic_hash": "f05c47a4ebcbdc9cd853874b58b88a10"
-  },
-  "Tests/test_compressibility.py": {
-    "mtime": 1789188730.0905237,
-    "seen": 1789191058.528276,
-    "ast_hash": "d6bc5147b60ac83f95ae3bef292ae601",
-    "semantic_hash": "d6bc5147b60ac83f95ae3bef292ae601"
-  },
-  "Tests/test_constraints.py": {
-    "mtime": 1789188730.0905974,
-    "seen": 1789191058.528277,
-    "ast_hash": "1720666c018f4ad02ec57a360b304d6e",
-    "semantic_hash": "1720666c018f4ad02ec57a360b304d6e"
-  },
-  "Tests/test_containment.py": {
-    "mtime": 1789188730.0906816,
-    "seen": 1789191058.528277,
-    "ast_hash": "68a1ca9cbe617835f810d3a74a61674d",
-    "semantic_hash": "68a1ca9cbe617835f810d3a74a61674d"
-  },
-  "Tests/test_fixtures.py": {
-    "mtime": 1789188730.0907483,
-    "seen": 1789191058.528277,
-    "ast_hash": "8dd8d1fef88d014cc66d15088bbc89d1",
-    "semantic_hash": "8dd8d1fef88d014cc66d15088bbc89d1"
-  },
-  "Tests/test_incremental.py": {
-    "mtime": 1789188730.090823,
-    "seen": 1789191058.528278,
-    "ast_hash": "55e27e9d808f13203ce3ce0dd7e7b47b",
-    "semantic_hash": "55e27e9d808f13203ce3ce0dd7e7b47b"
-  },
-  "Tests/test_io.py": {
-    "mtime": 1789188730.090893,
-    "seen": 1789191058.528278,
-    "ast_hash": "7a224ba4677f892823118f05c94b6d0c",
-    "semantic_hash": "7a224ba4677f892823118f05c94b6d0c"
-  },
-  "Tests/test_metrics.py": {
-    "mtime": 1789188730.090962,
-    "seen": 1789191058.528278,
-    "ast_hash": "24c122910fedcd2f7152557c0e9efa4f",
-    "semantic_hash": "24c122910fedcd2f7152557c0e9efa4f"
-  },
-  "Tests/test_pan_actions.py": {
-    "mtime": 1789188730.0910456,
-    "seen": 1789191058.528279,
-    "ast_hash": "4990eeeb445e4a8b7a8a578faa0ed2ba",
-    "semantic_hash": "4990eeeb445e4a8b7a8a578faa0ed2ba"
-  },
-  "Tests/test_pan_demo.py": {
-    "mtime": 1789188730.0911164,
-    "seen": 1789191058.528279,
-    "ast_hash": "e2e5cd64917a4ade3f788386d3105a93",
-    "semantic_hash": "e2e5cd64917a4ade3f788386d3105a93"
-  },
-  "Tests/test_pan_evaluate.py": {
-    "mtime": 1789188730.0912032,
-    "seen": 1789191058.528279,
-    "ast_hash": "1562bd7876ebe42a07582825dd287123",
-    "semantic_hash": "1562bd7876ebe42a07582825dd287123"
-  },
-  "Tests/test_pan_observation.py": {
-    "mtime": 1789188730.0912926,
-    "seen": 1789191058.528279,
-    "ast_hash": "2b1108cb0ed87614ea157f481405cab7",
-    "semantic_hash": "2b1108cb0ed87614ea157f481405cab7"
-  },
-  "Tests/test_pan_rollouts.py": {
-    "mtime": 1789188730.091375,
-    "seen": 1789191058.52828,
-    "ast_hash": "9d8e2c01ad4619efef74799c0817efeb",
-    "semantic_hash": "9d8e2c01ad4619efef74799c0817efeb"
-  },
-  "Tests/test_pan_world_model.py": {
-    "mtime": 1789188730.091466,
-    "seen": 1789191058.52828,
-    "ast_hash": "3be0cb1aa6a6abad7709c33ab7756650",
-    "semantic_hash": "3be0cb1aa6a6abad7709c33ab7756650"
-  },
-  "Tests/test_scene_geometry.py": {
-    "mtime": 1789188730.0915384,
-    "seen": 1789191058.52828,
-    "ast_hash": "88d6e8de61bc59f1764f0551b87a3316",
-    "semantic_hash": "88d6e8de61bc59f1764f0551b87a3316"
-  },
-  "Tests/test_snapshot_regression.py": {
-    "mtime": 1789188730.091611,
-    "seen": 1789191058.528281,
-    "ast_hash": "a9b9c7c11097c95114c8f9446e01e67b",
-    "semantic_hash": "a9b9c7c11097c95114c8f9446e01e67b"
-  },
-  "Tests/test_stress.py": {
-    "mtime": 1789188730.0916905,
-    "seen": 1789191058.528281,
-    "ast_hash": "145c4a6c98baa8d9f37f03cff98786f8",
-    "semantic_hash": "145c4a6c98baa8d9f37f03cff98786f8"
-  },
-  "Tests/test_support.py": {
-    "mtime": 1789188730.0917761,
-    "seen": 1789191058.528281,
-    "ast_hash": "e0084ffe7a20f6d3bccc35e9a4c3a4de",
-    "semantic_hash": "e0084ffe7a20f6d3bccc35e9a4c3a4de"
-  },
-  "Tests/test_validator.py": {
-    "mtime": 1789188730.0918539,
-    "seen": 1789191058.528281,
-    "ast_hash": "c2f4f39e54f90705536e7da00eb2d1aa",
-    "semantic_hash": "c2f4f39e54f90705536e7da00eb2d1aa"
-  },
   "examples/placements_collision.json": {
     "mtime": 1789188730.084929,
     "seen": 1789191058.5282822,
@@ -698,6 +548,1151 @@
   "pan/fixtures/valid_packed_scene_overhead_45.png": {
     "mtime": 1789188730.087965,
     "seen": 1789191058.5283048,
+    "ast_hash": "b36a30edbb5cc1b0bfa9cf5ad4554afa",
+    "semantic_hash": "b36a30edbb5cc1b0bfa9cf5ad4554afa"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/Spike/API.swift": {
+    "mtime": 1789215914.92537,
+    "ast_hash": "bf1477582878c7b9a93dff50b19f613f",
+    "semantic_hash": "bf1477582878c7b9a93dff50b19f613f"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/Spike/Geometry.swift": {
+    "mtime": 1789215914.9265006,
+    "ast_hash": "9ceb8ad172a076ed960364a679ce25f4",
+    "semantic_hash": "9ceb8ad172a076ed960364a679ce25f4"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/Spike/MeshWalk.swift": {
+    "mtime": 1789215914.9265006,
+    "ast_hash": "c68bee762efab7d8ddd3901c3268a0c9",
+    "semantic_hash": "c68bee762efab7d8ddd3901c3268a0c9"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/Spike/PlanAnchor.swift": {
+    "mtime": 1789215914.9275377,
+    "ast_hash": "1fd12005fe42d9b7a36fb97b666ebccb",
+    "semantic_hash": "1fd12005fe42d9b7a36fb97b666ebccb"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/Spike/ScanValidation.swift": {
+    "mtime": 1789215914.9277947,
+    "ast_hash": "9b2bbba0cdc370eb1c6b36a82d3ceea5",
+    "semantic_hash": "9b2bbba0cdc370eb1c6b36a82d3ceea5"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/Spike/ScanView.swift": {
+    "mtime": 1789215914.9283755,
+    "ast_hash": "eab86631e1726ddef8e8afd10647d8fb",
+    "semantic_hash": "eab86631e1726ddef8e8afd10647d8fb"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/Spike/SpikeApp.swift": {
+    "mtime": 1789215914.928831,
+    "ast_hash": "a4e2a8b31895850e5ea89a55c0dc49ce",
+    "semantic_hash": "a4e2a8b31895850e5ea89a55c0dc49ce"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/examples/pan_demo.py": {
+    "mtime": 1789215908.5472171,
+    "ast_hash": "ddee430afc175ac651fcfb812f28b1d6",
+    "semantic_hash": "ddee430afc175ac651fcfb812f28b1d6"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/examples/placements_collision.json": {
+    "mtime": 1789215908.5472171,
+    "ast_hash": "235d1a50e5e95213c9d6edfc28d46dd6",
+    "semantic_hash": "235d1a50e5e95213c9d6edfc28d46dd6"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/examples/scanned_item.json": {
+    "mtime": 1789215908.5472171,
+    "ast_hash": "62b522b2f861f3cfc139a569c2c5db2a",
+    "semantic_hash": "62b522b2f861f3cfc139a569c2c5db2a"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/examples/scene_carry_on.json": {
+    "mtime": 1789215908.548509,
+    "ast_hash": "26def7cda73add444a30d80d93eb6778",
+    "semantic_hash": "26def7cda73add444a30d80d93eb6778"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/examples/dragon_result.json": {
+    "mtime": 1789215908.610974,
+    "ast_hash": "17435093cd60d96e034c48c4c3173cb7",
+    "semantic_hash": "17435093cd60d96e034c48c4c3173cb7"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/examples/dragon_resupply.json": {
+    "mtime": 1789215908.6113796,
+    "ast_hash": "f84ed730dba324f99cf12eae8d878967",
+    "semantic_hash": "f84ed730dba324f99cf12eae8d878967"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/examples/suitcase.json": {
+    "mtime": 1789215908.6113796,
+    "ast_hash": "44026c0e3ee8d9efa19aa6f23a28d003",
+    "semantic_hash": "44026c0e3ee8d9efa19aa6f23a28d003"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/examples/suitcase_result.json": {
+    "mtime": 1789215908.6199486,
+    "ast_hash": "a9e1a9f614171c64ae76ed457ee1cbf6",
+    "semantic_hash": "a9e1a9f614171c64ae76ed457ee1cbf6"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/__init__.py": {
+    "mtime": 1789215908.6202188,
+    "ast_hash": "99b6540624fd138896ce716408a35abc",
+    "semantic_hash": "99b6540624fd138896ce716408a35abc"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/balance.py": {
+    "mtime": 1789215908.6202188,
+    "ast_hash": "930450059b964629f109e4d322c83f53",
+    "semantic_hash": "930450059b964629f109e4d322c83f53"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/bounds.py": {
+    "mtime": 1789215908.6202188,
+    "ast_hash": "a0a421b692b85ef4bdfd2a2873f07193",
+    "semantic_hash": "a0a421b692b85ef4bdfd2a2873f07193"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/cli.py": {
+    "mtime": 1789215908.621219,
+    "ast_hash": "7f6aea7a08c84a54c83b458a3749ae96",
+    "semantic_hash": "7f6aea7a08c84a54c83b458a3749ae96"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/decoder.py": {
+    "mtime": 1789215908.6222188,
+    "ast_hash": "3e2927d0e49afa476d4d6e3d1aabc783",
+    "semantic_hash": "3e2927d0e49afa476d4d6e3d1aabc783"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/geometry.py": {
+    "mtime": 1789215908.546217,
+    "ast_hash": "a7844084a13e4d53aa8791d57c34818e",
+    "semantic_hash": "a7844084a13e4d53aa8791d57c34818e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/models.py": {
+    "mtime": 1789215908.5472171,
+    "ast_hash": "dd77a13ab2d5591a749d0d6669770d70",
+    "semantic_hash": "dd77a13ab2d5591a749d0d6669770d70"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/objective.py": {
+    "mtime": 1789215908.548509,
+    "ast_hash": "909e539e77c700cf03fd46412ffb4ff9",
+    "semantic_hash": "909e539e77c700cf03fd46412ffb4ff9"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/physics_bridge.py": {
+    "mtime": 1789215908.548751,
+    "ast_hash": "038ac1e77146a57f632a7110c32985a2",
+    "semantic_hash": "038ac1e77146a57f632a7110c32985a2"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/scenario.py": {
+    "mtime": 1789215908.548751,
+    "ast_hash": "8b69d84a66c2be274c7355ff9d3d2f9a",
+    "semantic_hash": "8b69d84a66c2be274c7355ff9d3d2f9a"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/search.py": {
+    "mtime": 1789215908.548751,
+    "ast_hash": "3d0d59a406632d6ce3637b877ebf4ab2",
+    "semantic_hash": "3d0d59a406632d6ce3637b877ebf4ab2"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/verify.py": {
+    "mtime": 1789215908.548751,
+    "ast_hash": "af3dc179bffb92ba9a5c45c38d745ec1",
+    "semantic_hash": "af3dc179bffb92ba9a5c45c38d745ec1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/packer3d/visualize.py": {
+    "mtime": 1789215908.5734763,
+    "ast_hash": "540c0fe7962359ccb7493de44243c133",
+    "semantic_hash": "540c0fe7962359ccb7493de44243c133"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/tests/test_compressed.py": {
+    "mtime": 1789215908.5743604,
+    "ast_hash": "acc35d5ef0ce729225dfe39c4adcb39c",
+    "semantic_hash": "acc35d5ef0ce729225dfe39c4adcb39c"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/tests/test_edge_cases.py": {
+    "mtime": 1789215908.5743604,
+    "ast_hash": "18f8a1eedea718eb31a4dbb4c11044e4",
+    "semantic_hash": "18f8a1eedea718eb31a4dbb4c11044e4"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/tests/test_physics_bridge.py": {
+    "mtime": 1789215908.5743604,
+    "ast_hash": "927729186ae433e42f40bf2fb4a3df8e",
+    "semantic_hash": "927729186ae433e42f40bf2fb4a3df8e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/tests/test_thorough_edge_cases.py": {
+    "mtime": 1789215914.93337,
+    "ast_hash": "2178b0963192f19329c66b6a0a0f1c0f",
+    "semantic_hash": "2178b0963192f19329c66b6a0a0f1c0f"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/tests/test_visualize.py": {
+    "mtime": 1789215908.5752177,
+    "ast_hash": "2a10b86dee0dbd8a53f94a873d27abc6",
+    "semantic_hash": "2a10b86dee0dbd8a53f94a873d27abc6"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Package.swift": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "99a53bcbb13bc177475190b02eebd4eb",
+    "semantic_hash": "99a53bcbb13bc177475190b02eebd4eb"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlan/AxisRotation.swift": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "2f2609255543a9726530c4db06a224a0",
+    "semantic_hash": "2f2609255543a9726530c4db06a224a0"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlan/Geometry.swift": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "06806cd92b23fa232bd582cacaca9cf0",
+    "semantic_hash": "06806cd92b23fa232bd582cacaca9cf0"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlan/PackingPlan.swift": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "a0c632a6e056699b109e5d85170a4e8a",
+    "semantic_hash": "a0c632a6e056699b109e5d85170a4e8a"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlan/PlanGeometry.swift": {
+    "mtime": 1789215908.551217,
+    "ast_hash": "bdf729e1a70e3c2445a9c3eb99e41d58",
+    "semantic_hash": "bdf729e1a70e3c2445a9c3eb99e41d58"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlan/PlanLoader.swift": {
+    "mtime": 1789215908.551217,
+    "ast_hash": "23ceb08e5a8f7a75a61472064fa24ebc",
+    "semantic_hash": "23ceb08e5a8f7a75a61472064fa24ebc"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlan/Resources/plan.json": {
+    "mtime": 1789215908.551217,
+    "ast_hash": "402706a3bee349c70d8448e64bf3f8ad",
+    "semantic_hash": "402706a3bee349c70d8448e64bf3f8ad"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlanUI/FootprintProjection.swift": {
+    "mtime": 1789215908.551217,
+    "ast_hash": "84406850b0c3ed6f529faced00842c44",
+    "semantic_hash": "84406850b0c3ed6f529faced00842c44"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlanUI/PlanDiagramView.swift": {
+    "mtime": 1789215908.5762177,
+    "ast_hash": "8e06d34f76637928f9775bd34f36d3e0",
+    "semantic_hash": "8e06d34f76637928f9775bd34f36d3e0"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlanUI/PlanLayer.swift": {
+    "mtime": 1789215908.5762177,
+    "ast_hash": "203fe0cb5efd39f9dd4c41651ee07214",
+    "semantic_hash": "203fe0cb5efd39f9dd4c41651ee07214"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlanUI/PlanSceneView.swift": {
+    "mtime": 1789215914.93337,
+    "ast_hash": "1f8f19e3ef9392ffd7c69ba21bac06e6",
+    "semantic_hash": "1f8f19e3ef9392ffd7c69ba21bac06e6"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Sources/PackingPlanUI/PlanViewer.swift": {
+    "mtime": 1789215914.93337,
+    "ast_hash": "86e2e22ea7b94a790ddb6fbe16d080a3",
+    "semantic_hash": "86e2e22ea7b94a790ddb6fbe16d080a3"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Tests/PackingPlanTests/PackingPlanGeometryTests.swift": {
+    "mtime": 1789215908.5772178,
+    "ast_hash": "e1b8c3028555ca5c10452e679f3ca1fa",
+    "semantic_hash": "e1b8c3028555ca5c10452e679f3ca1fa"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Tests/PackingPlanTests/PlanLoaderServerDocumentTests.swift": {
+    "mtime": 1789215914.9353285,
+    "ast_hash": "da6f53e1ea83f5063f9fe2b418b805cd",
+    "semantic_hash": "da6f53e1ea83f5063f9fe2b418b805cd"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Tests/PackingPlanUITests/FootprintProjectionTests.swift": {
+    "mtime": 1789215908.5772178,
+    "ast_hash": "8d5e5d1987062e47a489084e294fbdb9",
+    "semantic_hash": "8d5e5d1987062e47a489084e294fbdb9"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/Tests/PackingPlanUITests/PlanLayerTests.swift": {
+    "mtime": 1789215908.5522172,
+    "ast_hash": "40e9a37c4b5276db0865a9e57757b3e4",
+    "semantic_hash": "40e9a37c4b5276db0865a9e57757b3e4"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/__init__.py": {
+    "mtime": 1789215908.5532172,
+    "ast_hash": "7a21313b8e75bfaac06d3e7f1031537b",
+    "semantic_hash": "7a21313b8e75bfaac06d3e7f1031537b"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/__main__.py": {
+    "mtime": 1789215908.5532172,
+    "ast_hash": "f13be45f243f884630bc97ede61564b5",
+    "semantic_hash": "f13be45f243f884630bc97ede61564b5"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/actions.py": {
+    "mtime": 1789215908.5532172,
+    "ast_hash": "511b0e9b94675e692d53470041193674",
+    "semantic_hash": "511b0e9b94675e692d53470041193674"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/demo.py": {
+    "mtime": 1789215908.5542173,
+    "ast_hash": "03aa77c01b68c0e7db121f40dea98ee1",
+    "semantic_hash": "03aa77c01b68c0e7db121f40dea98ee1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/evaluate.py": {
+    "mtime": 1789215908.5542173,
+    "ast_hash": "9a9cd6a36f305ed6dec040cacbb20380",
+    "semantic_hash": "9a9cd6a36f305ed6dec040cacbb20380"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/index.json": {
+    "mtime": 1789215908.5900712,
+    "ast_hash": "b38879e346fe3880ee74120440d4dd5e",
+    "semantic_hash": "b38879e346fe3880ee74120440d4dd5e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/observation.py": {
+    "mtime": 1789215908.5585282,
+    "ast_hash": "4a16633e0556af9b891473ce450d48a4",
+    "semantic_hash": "4a16633e0556af9b891473ce450d48a4"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/render_fixtures.py": {
+    "mtime": 1789215908.5702176,
+    "ast_hash": "6627e77ebd33481802eeb7fb07d0419b",
+    "semantic_hash": "6627e77ebd33481802eeb7fb07d0419b"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/rollouts.py": {
+    "mtime": 1789215908.571633,
+    "ast_hash": "e50f9b69a4585436d88179960a6c4237",
+    "semantic_hash": "e50f9b69a4585436d88179960a6c4237"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/solver_bridge.py": {
+    "mtime": 1789215908.571633,
+    "ast_hash": "e46399589cea82aac550a0247792b4fb",
+    "semantic_hash": "e46399589cea82aac550a0247792b4fb"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/types.py": {
+    "mtime": 1789215908.571633,
+    "ast_hash": "aa11e8b0d5a0cba7d9e9d96ab28078f7",
+    "semantic_hash": "aa11e8b0d5a0cba7d9e9d96ab28078f7"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/world_model.py": {
+    "mtime": 1789215908.5734763,
+    "ast_hash": "99ece1b067a4ab9f1aa15be2635c5d24",
+    "semantic_hash": "99ece1b067a4ab9f1aa15be2635c5d24"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/__init__.py": {
+    "mtime": 1789215908.5734763,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/__main__.py": {
+    "mtime": 1789215908.5734763,
+    "ast_hash": "de14d96e900aaf6cdb7f744dc4f97198",
+    "semantic_hash": "de14d96e900aaf6cdb7f744dc4f97198"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/collision.py": {
+    "mtime": 1789215908.6004937,
+    "ast_hash": "b75434ba7e066d2289eebc2d1c95bcea",
+    "semantic_hash": "b75434ba7e066d2289eebc2d1c95bcea"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/compressibility.py": {
+    "mtime": 1789215908.5585282,
+    "ast_hash": "06475f44145f6935f7082a6bf785f333",
+    "semantic_hash": "06475f44145f6935f7082a6bf785f333"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/constraints.py": {
+    "mtime": 1789215908.5592175,
+    "ast_hash": "94b7dd3559bff4a51975bf4b24fd0043",
+    "semantic_hash": "94b7dd3559bff4a51975bf4b24fd0043"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/containment.py": {
+    "mtime": 1789215908.5592175,
+    "ast_hash": "760385601c48d61dfcf208c35b929599",
+    "semantic_hash": "760385601c48d61dfcf208c35b929599"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/geometry.py": {
+    "mtime": 1789215908.5592175,
+    "ast_hash": "3dc5d9c7be62f45b4a614205e286bdb5",
+    "semantic_hash": "3dc5d9c7be62f45b4a614205e286bdb5"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/incremental.py": {
+    "mtime": 1789215908.5602174,
+    "ast_hash": "00f3e2186de10ddaf289425d6a824fd4",
+    "semantic_hash": "00f3e2186de10ddaf289425d6a824fd4"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/io.py": {
+    "mtime": 1789215908.5602174,
+    "ast_hash": "ccd271ba4bb51b94a53018d9a247cfb9",
+    "semantic_hash": "ccd271ba4bb51b94a53018d9a247cfb9"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/metrics.py": {
+    "mtime": 1789215908.584218,
+    "ast_hash": "38895d9d0c2f2afcd4902596878e918e",
+    "semantic_hash": "38895d9d0c2f2afcd4902596878e918e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/packer3d_adapter.py": {
+    "mtime": 1789215914.9353702,
+    "ast_hash": "32f1aa3e05213c1fe6cc9a3895ae5e4e",
+    "semantic_hash": "32f1aa3e05213c1fe6cc9a3895ae5e4e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/pan.py": {
+    "mtime": 1789215908.585218,
+    "ast_hash": "98e9dbb9c9e42c5cfdf5790d93066561",
+    "semantic_hash": "98e9dbb9c9e42c5cfdf5790d93066561"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/prepack.py": {
+    "mtime": 1789215908.5862179,
+    "ast_hash": "534ffef5add85d4edae1986e5c024cc5",
+    "semantic_hash": "534ffef5add85d4edae1986e5c024cc5"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/scene_geometry.py": {
+    "mtime": 1789215908.5862179,
+    "ast_hash": "6cff329c209f15e6d4a94f09f2c3b0af",
+    "semantic_hash": "6cff329c209f15e6d4a94f09f2c3b0af"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/schema.py": {
+    "mtime": 1789215908.5862179,
+    "ast_hash": "1de0750fbeee55cb66db4860b1c36680",
+    "semantic_hash": "1de0750fbeee55cb66db4860b1c36680"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/support.py": {
+    "mtime": 1789215908.5883408,
+    "ast_hash": "ee19cf82ad3e74bd12bc6d3e723fc5e5",
+    "semantic_hash": "ee19cf82ad3e74bd12bc6d3e723fc5e5"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/physics/validator.py": {
+    "mtime": 1789215908.540217,
+    "ast_hash": "9254fbeefefb88d27caf632b8ff39d4a",
+    "semantic_hash": "9254fbeefefb88d27caf632b8ff39d4a"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/scripts/ar_gate.sh": {
+    "mtime": 1789215914.937,
+    "ast_hash": "052336a7d88b0afeaee41fa2660f35f1",
+    "semantic_hash": "052336a7d88b0afeaee41fa2660f35f1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/scripts/ar_sim.py": {
+    "mtime": 1789215914.9377773,
+    "ast_hash": "31e26b8fd9c57df4af76f0a2e2f45698",
+    "semantic_hash": "31e26b8fd9c57df4af76f0a2e2f45698"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/scripts/demo_e2e.py": {
+    "mtime": 1789215914.9383807,
+    "ast_hash": "ac7d64b5a7684d130b480f1acb637ef1",
+    "semantic_hash": "ac7d64b5a7684d130b480f1acb637ef1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/scripts/pipeline_check.sh": {
+    "mtime": 1789215914.9387147,
+    "ast_hash": "c77b108552bf3634c6147e346ffd5bdb",
+    "semantic_hash": "c77b108552bf3634c6147e346ffd5bdb"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/server/app_plan.py": {
+    "mtime": 1789215908.5442169,
+    "ast_hash": "492692e562b32af1368dae58281beef9",
+    "semantic_hash": "492692e562b32af1368dae58281beef9"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/server/auth.py": {
+    "mtime": 1789215914.9391582,
+    "ast_hash": "d4172b384ddd8570288e0a1febb64626",
+    "semantic_hash": "d4172b384ddd8570288e0a1febb64626"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/server/check.py": {
+    "mtime": 1789215914.939708,
+    "ast_hash": "937cb1c89fe8c99be64e44c49f34e409",
+    "semantic_hash": "937cb1c89fe8c99be64e44c49f34e409"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/server/main.py": {
+    "mtime": 1789215914.9402869,
+    "ast_hash": "faee7f4562fe77d5a33749f6b42f1f6e",
+    "semantic_hash": "faee7f4562fe77d5a33749f6b42f1f6e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/server/planner.py": {
+    "mtime": 1789215908.5442169,
+    "ast_hash": "40ebb4478859afcc2bc92fa1968edaf2",
+    "semantic_hash": "40ebb4478859afcc2bc92fa1968edaf2"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Package.swift": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "338e27eb5e3f01ee73ce74610784f8e8",
+    "semantic_hash": "338e27eb5e3f01ee73ce74610784f8e8"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Collision.swift": {
+    "mtime": 1789215908.540217,
+    "ast_hash": "6543a779fcc98a7ccaf50437c658b386",
+    "semantic_hash": "6543a779fcc98a7ccaf50437c658b386"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Compressibility.swift": {
+    "mtime": 1789215908.543217,
+    "ast_hash": "31b356c839b78d248a354f0ffc517676",
+    "semantic_hash": "31b356c839b78d248a354f0ffc517676"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Constraints.swift": {
+    "mtime": 1789215908.543217,
+    "ast_hash": "ceed14123b0447209b926a174fd16e82",
+    "semantic_hash": "ceed14123b0447209b926a174fd16e82"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Containment.swift": {
+    "mtime": 1789215908.5442169,
+    "ast_hash": "8c24b730c8d3357103c8752de58b6fcf",
+    "semantic_hash": "8c24b730c8d3357103c8752de58b6fcf"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Geometry.swift": {
+    "mtime": 1789215908.5442169,
+    "ast_hash": "c7cf6c26cae49d6f8d2e6a0c1d5d9392",
+    "semantic_hash": "c7cf6c26cae49d6f8d2e6a0c1d5d9392"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/IO.swift": {
+    "mtime": 1789215908.5442169,
+    "ast_hash": "8ce313ce2949577fccd72b86e89dea76",
+    "semantic_hash": "8ce313ce2949577fccd72b86e89dea76"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Incremental.swift": {
+    "mtime": 1789215908.545217,
+    "ast_hash": "a78c35d55e316bb91fd2fce243f807c8",
+    "semantic_hash": "a78c35d55e316bb91fd2fce243f807c8"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/JSONValue.swift": {
+    "mtime": 1789215908.545217,
+    "ast_hash": "3a7e8b1d7b51c3cd82ab9c3c21e17a94",
+    "semantic_hash": "3a7e8b1d7b51c3cd82ab9c3c21e17a94"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Metrics.swift": {
+    "mtime": 1789215908.545217,
+    "ast_hash": "7e40dcb8fc2aa3952bb1c0bbb93d1862",
+    "semantic_hash": "7e40dcb8fc2aa3952bb1c0bbb93d1862"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Packer3D.swift": {
+    "mtime": 1789215908.549217,
+    "ast_hash": "111358350210ae9e6c869088ae542e97",
+    "semantic_hash": "111358350210ae9e6c869088ae542e97"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/SceneGeometry.swift": {
+    "mtime": 1789215908.549217,
+    "ast_hash": "9ee92d0721edce63819fe402777171ad",
+    "semantic_hash": "9ee92d0721edce63819fe402777171ad"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Schema.swift": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "d70711f93849115d75d2caa20522a299",
+    "semantic_hash": "d70711f93849115d75d2caa20522a299"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Support.swift": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "cc9f459a53fe757322ce82c33a7a7182",
+    "semantic_hash": "cc9f459a53fe757322ce82c33a7a7182"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysics/Validator.swift": {
+    "mtime": 1789215908.5612173,
+    "ast_hash": "e26d7c5b54a35047ac8e3cef437049ca",
+    "semantic_hash": "e26d7c5b54a35047ac8e3cef437049ca"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Sources/PackPhysicsCLI/main.swift": {
+    "mtime": 1789215908.5622175,
+    "ast_hash": "5435ae9158cd20a88cdcf0564e84042f",
+    "semantic_hash": "5435ae9158cd20a88cdcf0564e84042f"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/CLITests.swift": {
+    "mtime": 1789215908.5622175,
+    "ast_hash": "e109033b19dd0a38f7373b939be0017c",
+    "semantic_hash": "e109033b19dd0a38f7373b939be0017c"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/CollisionTests.swift": {
+    "mtime": 1789215908.5632174,
+    "ast_hash": "8a453b2254cbcafc0b0a2034e4e6bb9e",
+    "semantic_hash": "8a453b2254cbcafc0b0a2034e4e6bb9e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/CompressibilityTests.swift": {
+    "mtime": 1789215908.5632174,
+    "ast_hash": "aaf86c3f25d10b25e896620e8bd83e2b",
+    "semantic_hash": "aaf86c3f25d10b25e896620e8bd83e2b"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/ConstraintsTests.swift": {
+    "mtime": 1789215908.5632174,
+    "ast_hash": "8eff452b31a31b3c2c625f4933d92a50",
+    "semantic_hash": "8eff452b31a31b3c2c625f4933d92a50"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/ContainmentTests.swift": {
+    "mtime": 1789215908.5923889,
+    "ast_hash": "541a756f4d9a25078ace0d0dbbd54b90",
+    "semantic_hash": "541a756f4d9a25078ace0d0dbbd54b90"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/ContractTests.swift": {
+    "mtime": 1789215908.5923889,
+    "ast_hash": "3ea122929ec7ae8e883e1aa2c694776a",
+    "semantic_hash": "3ea122929ec7ae8e883e1aa2c694776a"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/IOTests.swift": {
+    "mtime": 1789215908.5923889,
+    "ast_hash": "038014b293bdccc3497246b5643c67d1",
+    "semantic_hash": "038014b293bdccc3497246b5643c67d1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/IncrementalTests.swift": {
+    "mtime": 1789215908.5923889,
+    "ast_hash": "248049bebdac49083d8d76f7d722a95c",
+    "semantic_hash": "248049bebdac49083d8d76f7d722a95c"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/MetricsTests.swift": {
+    "mtime": 1789215908.593218,
+    "ast_hash": "31b424ff430dee87d0ebca70cf1d3de0",
+    "semantic_hash": "31b424ff430dee87d0ebca70cf1d3de0"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/Packer3DTests.swift": {
+    "mtime": 1789215908.593218,
+    "ast_hash": "9b75d18a8cd1a1c23cf77e3fa908f07a",
+    "semantic_hash": "9b75d18a8cd1a1c23cf77e3fa908f07a"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/ParityTests.swift": {
+    "mtime": 1789215908.5945275,
+    "ast_hash": "479a76baef2ad0c48708b53560888afc",
+    "semantic_hash": "479a76baef2ad0c48708b53560888afc"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/Resources/packer3d_dragon_result.json": {
+    "mtime": 1789215908.5642176,
+    "ast_hash": "17435093cd60d96e034c48c4c3173cb7",
+    "semantic_hash": "17435093cd60d96e034c48c4c3173cb7"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/Resources/packer3d_suitcase_result.json": {
+    "mtime": 1789215908.5652175,
+    "ast_hash": "a9e1a9f614171c64ae76ed457ee1cbf6",
+    "semantic_hash": "a9e1a9f614171c64ae76ed457ee1cbf6"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/Resources/packer3d_suitcase_scenario.json": {
+    "mtime": 1789215908.5652175,
+    "ast_hash": "44026c0e3ee8d9efa19aa6f23a28d003",
+    "semantic_hash": "44026c0e3ee8d9efa19aa6f23a28d003"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/Resources/pan_candidates_sample.json": {
+    "mtime": 1789215908.5662174,
+    "ast_hash": "faea5068b884d5907e0272231cc8df20",
+    "semantic_hash": "faea5068b884d5907e0272231cc8df20"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/Resources/parity_v2.json": {
+    "mtime": 1789215908.5983455,
+    "ast_hash": "dd204cccb29933512c76fe45caa56bba",
+    "semantic_hash": "dd204cccb29933512c76fe45caa56bba"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/SupportTests.swift": {
+    "mtime": 1789215908.5989864,
+    "ast_hash": "b831cb429ade93002a9d6d38c9eec37d",
+    "semantic_hash": "b831cb429ade93002a9d6d38c9eec37d"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/Tests/PackPhysicsTests/ValidatorTests.swift": {
+    "mtime": 1789215908.5989864,
+    "ast_hash": "5ea88b530e31ce1027f0ef68fb972ba1",
+    "semantic_hash": "5ea88b530e31ce1027f0ef68fb972ba1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/scripts/setup-linux.sh": {
+    "mtime": 1789215908.5989864,
+    "ast_hash": "2b0a9c3f8883c7bff075aab2595666d7",
+    "semantic_hash": "2b0a9c3f8883c7bff075aab2595666d7"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/swiftenv.sh": {
+    "mtime": 1789215908.605011,
+    "ast_hash": "53e0b19ad56b2e1a6b85ac0a1e4e59e2",
+    "semantic_hash": "53e0b19ad56b2e1a6b85ac0a1e4e59e2"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/__init__.py": {
+    "mtime": 1789215908.6052358,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/benchmark_incremental.py": {
+    "mtime": 1789215908.6059399,
+    "ast_hash": "831ec5fdc31de1c01d8a4d58f903fd7e",
+    "semantic_hash": "831ec5fdc31de1c01d8a4d58f903fd7e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/benchmark_validator.py": {
+    "mtime": 1789215908.6059399,
+    "ast_hash": "0f87ef48a2e437aac67c201496af71ce",
+    "semantic_hash": "0f87ef48a2e437aac67c201496af71ce"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/fixtures.py": {
+    "mtime": 1789215908.606797,
+    "ast_hash": "2ab6c3d6df8c8bf3bf22a7db9689836f",
+    "semantic_hash": "2ab6c3d6df8c8bf3bf22a7db9689836f"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/main.swift": {
+    "mtime": 1789215914.9432912,
+    "ast_hash": "2c2eabdecd351ed48d58e595e0beda7c",
+    "semantic_hash": "2c2eabdecd351ed48d58e595e0beda7c"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/SimdShim.swift": {
+    "mtime": 1789215914.944206,
+    "ast_hash": "cab9e0fac22853fb78dee62bca797c39",
+    "semantic_hash": "cab9e0fac22853fb78dee62bca797c39"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/api/main.swift": {
+    "mtime": 1789215914.9445026,
+    "ast_hash": "9f4872901256080b590c23dd52d56525",
+    "semantic_hash": "9f4872901256080b590c23dd52d56525"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/api/run.sh": {
+    "mtime": 1789215914.9448004,
+    "ast_hash": "4a0e04bef59690fe111b94fbad72986e",
+    "semantic_hash": "4a0e04bef59690fe111b94fbad72986e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/bag/main.swift": {
+    "mtime": 1789215914.9448004,
+    "ast_hash": "1c8288267fb9692fa82b841bed533d62",
+    "semantic_hash": "1c8288267fb9692fa82b841bed533d62"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/bag/run.sh": {
+    "mtime": 1789215914.9455369,
+    "ast_hash": "085dff5987859552b88ae1213d91d647",
+    "semantic_hash": "085dff5987859552b88ae1213d91d647"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/drift/main.swift": {
+    "mtime": 1789215914.9458475,
+    "ast_hash": "d8e5a71b2f2fae6a25d8af5d395c92f7",
+    "semantic_hash": "d8e5a71b2f2fae6a25d8af5d395c92f7"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/drift/run.sh": {
+    "mtime": 1789215914.9464142,
+    "ast_hash": "91f5cc64f20ec50473738c08a879fd71",
+    "semantic_hash": "91f5cc64f20ec50473738c08a879fd71"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/mesh/main.swift": {
+    "mtime": 1789215914.9464142,
+    "ast_hash": "3cba2f625a80181a061270b4ac568ff9",
+    "semantic_hash": "3cba2f625a80181a061270b4ac568ff9"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/mesh/run.sh": {
+    "mtime": 1789215914.9471183,
+    "ast_hash": "698bcc3a82a618ff03b6c6f3be37d0f8",
+    "semantic_hash": "698bcc3a82a618ff03b6c6f3be37d0f8"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/plan/main.swift": {
+    "mtime": 1789215914.9471183,
+    "ast_hash": "3f92ed3e3b664c50c2f6e8783e40da8f",
+    "semantic_hash": "3f92ed3e3b664c50c2f6e8783e40da8f"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/plan/run.sh": {
+    "mtime": 1789215914.9478478,
+    "ast_hash": "670a9aac55da4862256850907039f23a",
+    "semantic_hash": "670a9aac55da4862256850907039f23a"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/robust/Package.swift": {
+    "mtime": 1789215914.9483705,
+    "ast_hash": "a4ebc8bcefab74b3b306a4c87db4bf25",
+    "semantic_hash": "a4ebc8bcefab74b3b306a4c87db4bf25"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/robust/Sources/RobustCore/ScanValidation.swift": {
+    "mtime": 1789215914.9277947,
+    "ast_hash": "9b2bbba0cdc370eb1c6b36a82d3ceea5",
+    "semantic_hash": "9b2bbba0cdc370eb1c6b36a82d3ceea5"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/robust/Tests/RobustCoreTests/ScanValidationTests.swift": {
+    "mtime": 1789215914.9496546,
+    "ast_hash": "1c6de33b0bf678037ce2777e251e0f39",
+    "semantic_hash": "1c6de33b0bf678037ce2777e251e0f39"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/robust/run.sh": {
+    "mtime": 1789215914.9496546,
+    "ast_hash": "5e174b97bfc2cfc3480f7e36aec162e8",
+    "semantic_hash": "5e174b97bfc2cfc3480f7e36aec162e8"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/scan/Scene.swift": {
+    "mtime": 1789215914.9496546,
+    "ast_hash": "47d5bf0d0c9d6b056b17c85daa38205c",
+    "semantic_hash": "47d5bf0d0c9d6b056b17c85daa38205c"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/scan/main.swift": {
+    "mtime": 1789215914.950721,
+    "ast_hash": "393727b5c3e8e3952747dfcc01418ab4",
+    "semantic_hash": "393727b5c3e8e3952747dfcc01418ab4"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/swift/scan/run.sh": {
+    "mtime": 1789215914.9512475,
+    "ast_hash": "53c19ba1bc9f0248d2c174234a36b300",
+    "semantic_hash": "53c19ba1bc9f0248d2c174234a36b300"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_collision.py": {
+    "mtime": 1789215908.5632174,
+    "ast_hash": "f05c47a4ebcbdc9cd853874b58b88a10",
+    "semantic_hash": "f05c47a4ebcbdc9cd853874b58b88a10"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_compressibility.py": {
+    "mtime": 1789215908.5652175,
+    "ast_hash": "d6bc5147b60ac83f95ae3bef292ae601",
+    "semantic_hash": "d6bc5147b60ac83f95ae3bef292ae601"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_constraints.py": {
+    "mtime": 1789215908.5652175,
+    "ast_hash": "1720666c018f4ad02ec57a360b304d6e",
+    "semantic_hash": "1720666c018f4ad02ec57a360b304d6e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_containment.py": {
+    "mtime": 1789215908.5662174,
+    "ast_hash": "68a1ca9cbe617835f810d3a74a61674d",
+    "semantic_hash": "68a1ca9cbe617835f810d3a74a61674d"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_fixtures.py": {
+    "mtime": 1789215908.5676758,
+    "ast_hash": "8dd8d1fef88d014cc66d15088bbc89d1",
+    "semantic_hash": "8dd8d1fef88d014cc66d15088bbc89d1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_incremental.py": {
+    "mtime": 1789215908.5684214,
+    "ast_hash": "55e27e9d808f13203ce3ce0dd7e7b47b",
+    "semantic_hash": "55e27e9d808f13203ce3ce0dd7e7b47b"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_io.py": {
+    "mtime": 1789215908.5695612,
+    "ast_hash": "7a224ba4677f892823118f05c94b6d0c",
+    "semantic_hash": "7a224ba4677f892823118f05c94b6d0c"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_metrics.py": {
+    "mtime": 1789215908.571633,
+    "ast_hash": "e75b471d71d07294608e0d0fdbde110b",
+    "semantic_hash": "e75b471d71d07294608e0d0fdbde110b"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_packer3d_adapter.py": {
+    "mtime": 1789215914.9513705,
+    "ast_hash": "c4b4ae8bdb5abf5278736cc85fe5120c",
+    "semantic_hash": "c4b4ae8bdb5abf5278736cc85fe5120c"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_pan.py": {
+    "mtime": 1789215908.5734763,
+    "ast_hash": "3bbddca8b44a3134e2916daa2e53c377",
+    "semantic_hash": "3bbddca8b44a3134e2916daa2e53c377"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_pan_actions.py": {
+    "mtime": 1789215908.5762177,
+    "ast_hash": "4990eeeb445e4a8b7a8a578faa0ed2ba",
+    "semantic_hash": "4990eeeb445e4a8b7a8a578faa0ed2ba"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_pan_demo.py": {
+    "mtime": 1789215908.5442169,
+    "ast_hash": "0c1764d606a5a235cf727004458a4090",
+    "semantic_hash": "0c1764d606a5a235cf727004458a4090"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_pan_evaluate.py": {
+    "mtime": 1789215908.5442169,
+    "ast_hash": "dbb5523293e9bbbec03a1fc618b76384",
+    "semantic_hash": "dbb5523293e9bbbec03a1fc618b76384"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_pan_observation.py": {
+    "mtime": 1789215908.545217,
+    "ast_hash": "3f67ffa7bd2a0d3445beb3bf69e3a720",
+    "semantic_hash": "3f67ffa7bd2a0d3445beb3bf69e3a720"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_pan_rollouts.py": {
+    "mtime": 1789215908.545217,
+    "ast_hash": "9d8e2c01ad4619efef74799c0817efeb",
+    "semantic_hash": "9d8e2c01ad4619efef74799c0817efeb"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_pan_world_model.py": {
+    "mtime": 1789215908.549217,
+    "ast_hash": "3be0cb1aa6a6abad7709c33ab7756650",
+    "semantic_hash": "3be0cb1aa6a6abad7709c33ab7756650"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_planner.py": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "23ba2785aede15fc62437436adf36de6",
+    "semantic_hash": "23ba2785aede15fc62437436adf36de6"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_prepack.py": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "ae113c02deb2c3a124964ce4fb2941ff",
+    "semantic_hash": "ae113c02deb2c3a124964ce4fb2941ff"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_scene_geometry.py": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "88d6e8de61bc59f1764f0551b87a3316",
+    "semantic_hash": "88d6e8de61bc59f1764f0551b87a3316"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_snapshot_regression.py": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "a9b9c7c11097c95114c8f9446e01e67b",
+    "semantic_hash": "a9b9c7c11097c95114c8f9446e01e67b"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_solver_bridge.py": {
+    "mtime": 1789215908.551217,
+    "ast_hash": "7d176f9d97b651e08d4d942df38f2ad1",
+    "semantic_hash": "7d176f9d97b651e08d4d942df38f2ad1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_stress.py": {
+    "mtime": 1789215908.551217,
+    "ast_hash": "145c4a6c98baa8d9f37f03cff98786f8",
+    "semantic_hash": "145c4a6c98baa8d9f37f03cff98786f8"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_support.py": {
+    "mtime": 1789215908.551217,
+    "ast_hash": "e0084ffe7a20f6d3bccc35e9a4c3a4de",
+    "semantic_hash": "e0084ffe7a20f6d3bccc35e9a4c3a4de"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tests/test_validator.py": {
+    "mtime": 1789215908.5542173,
+    "ast_hash": "c2f4f39e54f90705536e7da00eb2d1aa",
+    "semantic_hash": "c2f4f39e54f90705536e7da00eb2d1aa"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tools/plan3d/Package.swift": {
+    "mtime": 1789215914.9531791,
+    "ast_hash": "5d2331306c80e75ac111154d03ec78be",
+    "semantic_hash": "5d2331306c80e75ac111154d03ec78be"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/tools/plan3d/Sources/plan3d/main.swift": {
+    "mtime": 1789215914.9534466,
+    "ast_hash": "62838d65fa68a22495b53efce5e1536d",
+    "semantic_hash": "62838d65fa68a22495b53efce5e1536d"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/.github/workflows/ci.yml": {
+    "mtime": 1789215914.923742,
+    "ast_hash": "5907f2f3e87e77dd46653796b86fdd5e",
+    "semantic_hash": "5907f2f3e87e77dd46653796b86fdd5e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/AGENTS.md": {
+    "mtime": 1789215908.5352168,
+    "ast_hash": "ba5ecaac88549fcab3f84ebee6d1cced",
+    "semantic_hash": "ba5ecaac88549fcab3f84ebee6d1cced"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/CLAUDE.md": {
+    "mtime": 1789215908.5352168,
+    "ast_hash": "ba5ecaac88549fcab3f84ebee6d1cced",
+    "semantic_hash": "ba5ecaac88549fcab3f84ebee6d1cced"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/FIXES.md": {
+    "mtime": 1789215908.5362167,
+    "ast_hash": "00e8b148882d4a8a18b5df822cc99094",
+    "semantic_hash": "00e8b148882d4a8a18b5df822cc99094"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/IMPORTANT.md": {
+    "mtime": 1789215908.5362167,
+    "ast_hash": "4250b621ed341342f7329daec2f6ee15",
+    "semantic_hash": "4250b621ed341342f7329daec2f6ee15"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/MVP.md": {
+    "mtime": 1789215908.5362167,
+    "ast_hash": "1b52e3bbbce5c9d67c2c85d718cf52d0",
+    "semantic_hash": "1b52e3bbbce5c9d67c2c85d718cf52d0"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/OVERVIEW.md": {
+    "mtime": 1789215908.537217,
+    "ast_hash": "0096e94eaa299ab46137028fbfac5091",
+    "semantic_hash": "0096e94eaa299ab46137028fbfac5091"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/PAN.md": {
+    "mtime": 1789215908.5522172,
+    "ast_hash": "dbb354d4cf70cdf64aec6bed5548974e",
+    "semantic_hash": "dbb354d4cf70cdf64aec6bed5548974e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/PRD.md": {
+    "mtime": 1789215908.5532172,
+    "ast_hash": "e9b209a9227519be8835a8d56355435f",
+    "semantic_hash": "e9b209a9227519be8835a8d56355435f"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/README.md": {
+    "mtime": 1789215914.924674,
+    "ast_hash": "412fd2ba66bad29fb6d5f3f60c7184dd",
+    "semantic_hash": "412fd2ba66bad29fb6d5f3f60c7184dd"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/SCAN_OUTPUT.md": {
+    "mtime": 1789215914.9253478,
+    "ast_hash": "99375d41f3226082cdfe8072b4b2a6c6",
+    "semantic_hash": "99375d41f3226082cdfe8072b4b2a6c6"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docker-compose.yml": {
+    "mtime": 1789215914.9291644,
+    "ast_hash": "a97601cf7526658c5139bcb9ddeeb210",
+    "semantic_hash": "a97601cf7526658c5139bcb9ddeeb210"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/AR_BUILD.md": {
+    "mtime": 1789215914.9296243,
+    "ast_hash": "02d37070b732d6b048a740ad1ed78b31",
+    "semantic_hash": "02d37070b732d6b048a740ad1ed78b31"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/INTEGRATION.md": {
+    "mtime": 1789215914.930265,
+    "ast_hash": "3283cef69ba1a1c42f0320f4241bcf6e",
+    "semantic_hash": "3283cef69ba1a1c42f0320f4241bcf6e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/PAN_ACCESS.md": {
+    "mtime": 1789215914.93037,
+    "ast_hash": "e70fa13d7f8c9ff42dc076031a54884b",
+    "semantic_hash": "e70fa13d7f8c9ff42dc076031a54884b"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/PAN_INTEGRATION.md": {
+    "mtime": 1789215908.5684214,
+    "ast_hash": "857dc2290a4e51939fb201506194bfb6",
+    "semantic_hash": "857dc2290a4e51939fb201506194bfb6"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/PHYSICS.md": {
+    "mtime": 1789215908.5695612,
+    "ast_hash": "ac9b3d83a7ad3e12f0e1d1e6eece8703",
+    "semantic_hash": "ac9b3d83a7ad3e12f0e1d1e6eece8703"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/PLAN_3D.md": {
+    "mtime": 1789215914.9314644,
+    "ast_hash": "d8bcec86cdeb12670df45ccea0463266",
+    "semantic_hash": "d8bcec86cdeb12670df45ccea0463266"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/SOLVER_INTEGRATION.md": {
+    "mtime": 1789215908.5954015,
+    "ast_hash": "5cbee340157b995a4cc1646ef25ff225",
+    "semantic_hash": "5cbee340157b995a4cc1646ef25ff225"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/SWIFT_PORT.md": {
+    "mtime": 1789215908.59587,
+    "ast_hash": "515c75a9c1d6f313d3f43fd178655017",
+    "semantic_hash": "515c75a9c1d6f313d3f43fd178655017"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/SWIFT_PORTABILITY.md": {
+    "mtime": 1789215908.5961666,
+    "ast_hash": "f5cd0ab96c41a1be603fc44fe802b5bb",
+    "semantic_hash": "f5cd0ab96c41a1be603fc44fe802b5bb"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/pan_eval_log.md": {
+    "mtime": 1789215908.5392168,
+    "ast_hash": "996b4eaea4d92f1dc3bc4e121c7bd7da",
+    "semantic_hash": "996b4eaea4d92f1dc3bc4e121c7bd7da"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/superpowers/specs/2026-09-12-ar-loop-prompt.md": {
+    "mtime": 1789215914.9322383,
+    "ast_hash": "43d8a142cda0fd97c517ec96857efc92",
+    "semantic_hash": "43d8a142cda0fd97c517ec96857efc92"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/docs/superpowers/specs/2026-09-12-pipeline-loop-design.md": {
+    "mtime": 1789215914.9326289,
+    "ast_hash": "be41eea5fdc19724e75444c2d46c9e93",
+    "semantic_hash": "be41eea5fdc19724e75444c2d46c9e93"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/examples/README.md": {
+    "mtime": 1789215908.543217,
+    "ast_hash": "5e818ffbe99fdfa9dcfd302f5fa59647",
+    "semantic_hash": "5e818ffbe99fdfa9dcfd302f5fa59647"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/ALGORITHM.md": {
+    "mtime": 1789215908.5442169,
+    "ast_hash": "38399157d0df292126ea8952004655a0",
+    "semantic_hash": "38399157d0df292126ea8952004655a0"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/README.md": {
+    "mtime": 1789215908.545217,
+    "ast_hash": "adfc2d5d8770aa5bac255fedef04ef4f",
+    "semantic_hash": "adfc2d5d8770aa5bac255fedef04ef4f"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packing-core/CLAUDE.md": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "7318c03cfd28f95f1d17f7f9c6c09e31",
+    "semantic_hash": "7318c03cfd28f95f1d17f7f9c6c09e31"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/project.yml": {
+    "mtime": 1789215908.543217,
+    "ast_hash": "72a382b1d9db58aae754e6e770c52003",
+    "semantic_hash": "72a382b1d9db58aae754e6e770c52003"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/requirements.txt": {
+    "mtime": 1789215908.543217,
+    "ast_hash": "b92954ccd15657ca737009b3969206d4",
+    "semantic_hash": "b92954ccd15657ca737009b3969206d4"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/scripts/README.md": {
+    "mtime": 1789215914.9367027,
+    "ast_hash": "5d6cc8c752cb257536471ac2b244ccc1",
+    "semantic_hash": "5d6cc8c752cb257536471ac2b244ccc1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/swift/PackPhysics/README.md": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "f480952fe20ec5c73101d887a0d8a0b1",
+    "semantic_hash": "f480952fe20ec5c73101d887a0d8a0b1"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/examples/dragon_naive.png": {
+    "mtime": 1789215908.6017888,
+    "ast_hash": "9213407ca16e8e63da8b2c0714723244",
+    "semantic_hash": "9213407ca16e8e63da8b2c0714723244"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/examples/dragon_optimized.png": {
+    "mtime": 1789215908.610205,
+    "ast_hash": "68a3799c30b5571fd9baec3e8539898b",
+    "semantic_hash": "68a3799c30b5571fd9baec3e8539898b"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/packer3d/examples/suitcase_optimized.png": {
+    "mtime": 1789215908.619535,
+    "ast_hash": "0e1616cd46aee4d84b802eca0ace1b66",
+    "semantic_hash": "0e1616cd46aee4d84b802eca0ace1b66"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_nearly_full_front_high.png": {
+    "mtime": 1789215908.590456,
+    "ast_hash": "fade809d5ee318e64fd9415ebb714b03",
+    "semantic_hash": "fade809d5ee318e64fd9415ebb714b03"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_nearly_full_overhead_45.png": {
+    "mtime": 1789215908.5908096,
+    "ast_hash": "835575b462d65594bf15172303e85faa",
+    "semantic_hash": "835575b462d65594bf15172303e85faa"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_object_touching_wall_front_high.png": {
+    "mtime": 1789215908.590984,
+    "ast_hash": "def54434cfded2f2245addc4b1e91b8e",
+    "semantic_hash": "def54434cfded2f2245addc4b1e91b8e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_object_touching_wall_overhead_45.png": {
+    "mtime": 1789215908.5912042,
+    "ast_hash": "3c4612c59bb0152a0d95cbce154121d5",
+    "semantic_hash": "3c4612c59bb0152a0d95cbce154121d5"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_oversized_object_front_high.png": {
+    "mtime": 1789215908.591427,
+    "ast_hash": "5f6a42eac1a6585ae17029799a47175c",
+    "semantic_hash": "5f6a42eac1a6585ae17029799a47175c"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_oversized_object_overhead_45.png": {
+    "mtime": 1789215908.5442169,
+    "ast_hash": "30cb17fb6411310c531c11514c3ca55c",
+    "semantic_hash": "30cb17fb6411310c531c11514c3ca55c"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_rotated_object_in_corner_front_high.png": {
+    "mtime": 1789215908.545217,
+    "ast_hash": "3facb6e910b01738c46f57e322179cd3",
+    "semantic_hash": "3facb6e910b01738c46f57e322179cd3"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_rotated_object_in_corner_overhead_45.png": {
+    "mtime": 1789215908.545217,
+    "ast_hash": "051dc3c5b233b8f61ec255a649143b55",
+    "semantic_hash": "051dc3c5b233b8f61ec255a649143b55"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_stacked_objects_front_high.png": {
+    "mtime": 1789215908.545217,
+    "ast_hash": "de9546b67832b7c040c26a49543011bc",
+    "semantic_hash": "de9546b67832b7c040c26a49543011bc"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_stacked_objects_overhead_45.png": {
+    "mtime": 1789215908.546217,
+    "ast_hash": "4a175fa7fbb22d788bcfc5f75c3f2f2e",
+    "semantic_hash": "4a175fa7fbb22d788bcfc5f75c3f2f2e"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_collision_front_high.png": {
+    "mtime": 1789215908.546217,
+    "ast_hash": "eac9a222c7e52341c094a1e548b665fb",
+    "semantic_hash": "eac9a222c7e52341c094a1e548b665fb"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_collision_overhead_45.png": {
+    "mtime": 1789215908.546217,
+    "ast_hash": "bb53025b4229bb42325bb231aa7ee6d3",
+    "semantic_hash": "bb53025b4229bb42325bb231aa7ee6d3"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_floating_object_front_high.png": {
+    "mtime": 1789215908.5502172,
+    "ast_hash": "42f094319322065a28813c14835d6581",
+    "semantic_hash": "42f094319322065a28813c14835d6581"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_floating_object_overhead_45.png": {
+    "mtime": 1789215908.5522172,
+    "ast_hash": "0fea861367427ceaf298ef98356a8c90",
+    "semantic_hash": "0fea861367427ceaf298ef98356a8c90"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_precarious_balance_front_high.png": {
+    "mtime": 1789215908.5522172,
+    "ast_hash": "c8b193ff5b04f915f0517424f0009a32",
+    "semantic_hash": "c8b193ff5b04f915f0517424f0009a32"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_precarious_balance_overhead_45.png": {
+    "mtime": 1789215908.5532172,
+    "ast_hash": "5f25e9cc06f0d93c2e65ab97dfd99ed4",
+    "semantic_hash": "5f25e9cc06f0d93c2e65ab97dfd99ed4"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_soft_item_compression_front_high.png": {
+    "mtime": 1789215908.5532172,
+    "ast_hash": "b583702f4ce68602617768edb7a813f5",
+    "semantic_hash": "b583702f4ce68602617768edb7a813f5"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_soft_item_compression_overhead_45.png": {
+    "mtime": 1789215908.5532172,
+    "ast_hash": "b2d0ed5207606c0483e37b7691466393",
+    "semantic_hash": "b2d0ed5207606c0483e37b7691466393"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_wall_penetration_front_high.png": {
+    "mtime": 1789215908.556117,
+    "ast_hash": "e8111b1af720827d7c5a32ba86326034",
+    "semantic_hash": "e8111b1af720827d7c5a32ba86326034"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/scene_with_wall_penetration_overhead_45.png": {
+    "mtime": 1789215908.5562172,
+    "ast_hash": "8d12dddd2ae46e4067b3299d37f572ee",
+    "semantic_hash": "8d12dddd2ae46e4067b3299d37f572ee"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/valid_packed_scene_front_high.png": {
+    "mtime": 1789215908.5562172,
+    "ast_hash": "796f2a7984d971dfd2110cfb0d8c13a4",
+    "semantic_hash": "796f2a7984d971dfd2110cfb0d8c13a4"
+  },
+  "/home/ericwang/Projects/HACKCMU2026/.claude/worktrees/agent-a320bdec18226e1fc/pan/fixtures/valid_packed_scene_overhead_45.png": {
+    "mtime": 1789215908.5572174,
     "ast_hash": "b36a30edbb5cc1b0bfa9cf5ad4554afa",
     "semantic_hash": "b36a30edbb5cc1b0bfa9cf5ad4554afa"
   }

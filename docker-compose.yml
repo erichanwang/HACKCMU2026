@@ -1,0 +1,15 @@
+# Just Mongo. The server runs on the host via `make serve` (the Dockerfile here is the
+# Swift/Python test image, not a server image, and containerising uvicorn would only add
+# a second Dockerfile for no demo benefit).
+services:
+  mongo:
+    image: mongo:7
+    # 27017 is the server's default SUITCASE_MONGODB_URI, so nothing needs configuring.
+    # (An unrelated project's Mongo sits on 27021 — do not touch it.)
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:

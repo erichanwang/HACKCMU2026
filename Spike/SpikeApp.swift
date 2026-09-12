@@ -156,9 +156,9 @@ struct ScanScreen: View {
                             isPresented: $confirmingReset, titleVisibility: .visible) {
             Button("Reset", role: .destructive) { reset() }
         }
-        .confirmationDialog("Delete this item?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+        .confirmationDialog("Remove this item from your inventory?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             titleVisibility: .visible, presenting: deleting) { doomed in
-            Button("Delete \(doomed.label ?? "item")", role: .destructive) { remove(doomed) }
+            Button("Remove \(doomed.displayName)", role: .destructive) { remove(doomed) }
         } message: { _ in
             Text("It leaves your inventory and any suitcase it was in.")
         }
@@ -246,7 +246,7 @@ struct ScanScreen: View {
                             Label(bagName(for: item.suitcaseId), systemImage: "suitcase")
                         }
                         Spacer()
-                        Button(role: .destructive) { deleting = item } label: { Label("Delete", systemImage: "trash") }
+                        Button(role: .destructive) { deleting = item } label: { Label("Remove", systemImage: "trash") }
                     }
                     .font(.subheadline.weight(.medium))
                 } else {
@@ -394,7 +394,7 @@ struct ScanScreen: View {
     @ViewBuilder private func itemMenu(_ target: ScannedItem) -> some View {
         moveMenu(target)
         Divider()
-        Button("Delete", systemImage: "trash", role: .destructive) { deleting = target }
+        Button("Remove from inventory", systemImage: "trash", role: .destructive) { deleting = target }
     }
 
     /// Every bag is created as "scanned suitcase", so the size is what tells them apart.

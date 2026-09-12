@@ -64,10 +64,10 @@ struct ItemsScreen: View {
             }
         }
         .task { await load() }
-        .confirmationDialog("Delete this item?",
+        .confirmationDialog("Remove this item from your inventory?",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             titleVisibility: .visible, presenting: deleting) { doomed in
-            Button("Delete \(doomed.label ?? "item")", role: .destructive) { remove(doomed) }
+            Button("Remove \(doomed.displayName)", role: .destructive) { remove(doomed) }
         } message: { _ in
             Text("It leaves your inventory and any suitcase it was in.")
         }
@@ -80,12 +80,15 @@ struct ItemsScreen: View {
                 Text(scanned.displayName)
                     .font(.body.weight(.medium))
                     .foregroundStyle(scanned.needsName ? Sheet.ink.opacity(0.6) : Sheet.ink)
-                // An unidentified item's most useful line is what to do about it.
-                Text(scanned.needsName && scanned.labelStatus != "pending"
+                // An unidentified item's most useful line is what to do about it — but an
+                // item still being identified is in progress, not a problem, so it keeps
+                // its measurements and its ordinary colour.
+                let showsHint = scanned.needsName && scanned.labelStatus != "pending"
+                Text(showsHint
                      ? (scanned.identifyHint ?? "couldn't identify it — type a name in")
                      : "\(scanned.manifestSize) cm · \(shortBagName(for: scanned.suitcaseId))")
                     .font(.caption.monospaced())
-                    .foregroundStyle(scanned.needsName ? Sheet.warn : Sheet.ink.opacity(0.55))
+                    .foregroundStyle(showsHint ? Sheet.warn : Sheet.ink.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -119,7 +122,7 @@ struct ItemsScreen: View {
             }
             Section {
                 Button(role: .destructive) { deleting = scanned.wrappedValue } label: {
-                    Label("Delete item", systemImage: "trash")
+                    Label("Remove from inventory", systemImage: "trash")
                 }
             }
         }
@@ -131,7 +134,7 @@ struct ItemsScreen: View {
     @ViewBuilder private func menu(_ target: ScannedItem) -> some View {
         moveMenu(target)
         Divider()
-        Button("Delete", systemImage: "trash", role: .destructive) { deleting = target }
+        Button("Remove from inventory", systemImage: "trash", role: .destructive) { deleting = target }
     }
 
     @ViewBuilder private func moveMenu(_ target: ScannedItem) -> some View {

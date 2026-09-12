@@ -118,6 +118,31 @@ blocks the demo. Each item names the file, what is wrong, and the fix.
 - **`docs/PAN_INTEGRATION.md`** documents the visual-rollout contract as if a visual backend
   existed; add the honesty-note requirement it now carries to `README.md`'s PAN mention.
 
+Concrete doc-vs-code mismatches (each verified by grep; fix the doc unless noted):
+
+- `README.md:59` runs `swiftc … Tests/main.swift`; the file is `tests/main.swift` (fails on a
+  case-sensitive filesystem). `README.md:8` likewise calls the directory `Tests/`.
+- `README.md:27-31` endpoint table lacks every `/suitcases` route and the `/plan` routes, and
+  does not say `POST /items` now requires `suitcaseId`. `SCAN_OUTPUT.md:9-44` sample and field
+  table omit `suitcaseId` too.
+- `docs/PHYSICS.md:749-755` and `docs/INTEGRATION.md:121-128` list the CLI as `validate`,
+  `example`, `scan-to-object`; `physics/__main__.py` also has `validate-packer3d`
+  (`--strategy`, `--items`, `--pretty`). `docs/PHYSICS.md:5` "ten modules" is now fifteen.
+- `OVERVIEW.md` stack table (Rust/C++ solver behind Swift FFI, Metal voxel ops, SQLite/Core
+  Data, CloudKit, Vision/mobile-SAM masks): none of it exists; the stack is Python packer3d +
+  physics, FastAPI, MongoDB, Grok. Rewrite the table or label it "original plan".
+- `docs/PAN_ACCESS.md:24,88-91`: "only PAN.md mentions PAN", "no .env* in the tree", and a
+  four-variable config table are all stale (`pan/`, `physics/pan.py`, `.env.example`,
+  `PAN_ENDPOINT_PATH`).
+- `docs/SWIFT_PORT.md:32-40` says Validator/Incremental have no tests and counts 118; there
+  are `ValidatorTests.swift`, `IncrementalTests.swift`, 178 tests. `docs/SWIFT_PORTABILITY.md:3`
+  says 163 tests, and its `:34-38` "reported, not fixed" `bench --objects -5` crash is guarded at
+  `Sources/PackPhysicsCLI/main.swift:198`.
+- `packer3d/README.md:14,251-265` "42 edge-case tests" (103 now); module map omits
+  `physics_bridge.py` and `geometry.py`; `OptimizerConfig`/`DecoderParams` field lists omit
+  `multi_start` and `chunk`. `packer3d/ALGORITHM.md:380` "112 tests" (103).
+- `scripts/README.md:22` omits `scenario.json`, which the script writes and reads back.
+
 ## 7. Branch and worktree hygiene
 
 - `integration` (this branch) holds Gaps 1–5, the physics pre-pass and ranked search;

@@ -45,7 +45,7 @@ struct ScanScreen: View {
     /// ARSession, and the Pack tab's AR overlay would then never get the camera.
     var cameraLive = true
     @State private var item: ScannedItem?
-    @State private var status = "Point at your open suitcase on the floor, then tap it"
+    @State private var status = ""
     @State private var suitcaseId: String?
     @State private var mode = ScanMode.suitcase
     /// The plan the solver actually produced. Outlives the sheet: closing the diagram is how the
@@ -451,7 +451,7 @@ struct ScanScreen: View {
             plan = nil
             items = []
             mode = .suitcase
-            status = "Point at your open suitcase on the floor, then tap it"
+            status = ""
         }
     }
 

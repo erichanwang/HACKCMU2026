@@ -9,6 +9,7 @@ import SwiftUI
 /// only then offers to pack. The solve and the three views of its result already
 /// existed; this screen is the way into them.
 struct PackScreen: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Raised while the AR overlay owns the camera, so the Scan tab stands its own
     /// ARSession down. iOS runs one at a time.
     @Binding var arActive: Bool
@@ -18,6 +19,9 @@ struct PackScreen: View {
     @State private var status = ""
     /// The suitcase currently being solved, so only its own button spins.
     @State private var packing: String?
+    /// 0 open, 1 shut. The plan does not open until the bag does, so pressing play
+    /// always reads as one motion: zip it up, then show what is inside.
+    @State private var zip: Double = 0
     @State private var plan: PackingPlan?
     @State private var planNotice: String?
     @State private var showingPlan = false
@@ -79,7 +83,7 @@ struct PackScreen: View {
                 // the time the same line is the load against the limit.
                 Group {
                     if packing == bag.id {
-                        ZipperBar()
+                        ZipperBar(progress: zip)
                     } else {
                         LoadBar(value: value)
                     }
@@ -186,10 +190,21 @@ struct PackScreen: View {
 
     private func pack(_ bag: API.Suitcase) {
         packing = bag.id
+        zip = 0
+        let shut: Duration = reduceMotion ? .zero : .milliseconds(900)
+        if reduceMotion {
+            zip = 1
+        } else {
+            withAnimation(.easeInOut(duration: 0.9)) { zip = 1 }
+        }
         Task {
-            defer { packing = nil }
+            defer { packing = nil; zip = 0 }
+            // The solve runs while the zip closes; whichever finishes second decides
+            // when the plan opens, and the bag is never shown open mid-zip.
+            async let request = API.plan(suitcaseId: bag.id)
+            try? await Task.sleep(for: shut)
             do {
-                let (solved, unpacked, pendingLabels) = try await API.plan(suitcaseId: bag.id)
+                let (solved, unpacked, pendingLabels) = try await request
                 plan = solved
                 planNotice = nil
                 status = unpacked.isEmpty ? "" : "Didn't fit: \(unpacked.map(\.label).joined(separator: ", "))"
@@ -302,38 +317,42 @@ struct LoadBar: View {
 /// accent, and the pull runs the length on a loop until the plan comes back. It is the
 /// same 14pt line the LoadBar occupies, so the card does not jump when it swaps in.
 /// Reduce Motion parks the pull halfway rather than running it.
-struct ZipperBar: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+struct ZipperBar: View, Animatable {
+    /// 0 fully open, 1 fully shut. Driven by the caller so the zip is one deliberate
+    /// motion that finishes, not a spinner that loops while something else happens.
+    var progress: Double
+
+    /// Without this the Canvas would jump straight from open to shut: SwiftUI
+    /// interpolates animatable data, not arbitrary state a body happens to read.
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion)) { context in
-            let cycle = 1.7
-            let phase = reduceMotion
-                ? 0.55
-                : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycle) / cycle
-            Canvas { ctx, size in
-                let midY = size.height / 2
-                let pullX = size.width * phase
-                let pitch: CGFloat = 7
+        Canvas { ctx, size in
+            let phase = max(0, min(1, progress))
+            let midY = size.height / 2
+            let pullX = size.width * phase
+            let pitch: CGFloat = 7
 
-                var x: CGFloat = 1
-                while x < size.width - 1 {
-                    let closed = x < pullX - 3
-                    let spread: CGFloat = closed ? 1.6 : 4.6
-                    let colour = closed ? Sheet.accent : Sheet.ink.opacity(0.2)
-                    for side in [CGFloat(-1), CGFloat(1)] {
-                        let rect = CGRect(x: x, y: midY + side * spread - 1.5, width: 4.2, height: 3)
-                        ctx.fill(Path(roundedRect: rect, cornerRadius: 1.2), with: .color(colour))
-                    }
-                    x += pitch
+            var x: CGFloat = 1
+            while x < size.width - 1 {
+                let closed = x < pullX - 3
+                let spread: CGFloat = closed ? 1.6 : 4.6
+                let colour = closed ? Sheet.accent : Sheet.ink.opacity(0.2)
+                for side in [CGFloat(-1), CGFloat(1)] {
+                    let rect = CGRect(x: x, y: midY + side * spread - 1.5, width: 4.2, height: 3)
+                    ctx.fill(Path(roundedRect: rect, cornerRadius: 1.2), with: .color(colour))
                 }
-
-                // The pull itself, with its tab hanging below the line.
-                let body = CGRect(x: pullX - 4.5, y: midY - 6.5, width: 9, height: 13)
-                ctx.fill(Path(roundedRect: body, cornerRadius: 3), with: .color(Sheet.accent))
-                let tab = CGRect(x: pullX - 1.8, y: midY + 5, width: 3.6, height: 7)
-                ctx.fill(Path(roundedRect: tab, cornerRadius: 1.8), with: .color(Sheet.accent.opacity(0.7)))
+                x += pitch
             }
+
+            // The pull itself, with its tab hanging below the line.
+            let body = CGRect(x: pullX - 4.5, y: midY - 6.5, width: 9, height: 13)
+            ctx.fill(Path(roundedRect: body, cornerRadius: 3), with: .color(Sheet.accent))
+            let tab = CGRect(x: pullX - 1.8, y: midY + 5, width: 3.6, height: 7)
+            ctx.fill(Path(roundedRect: tab, cornerRadius: 1.8), with: .color(Sheet.accent.opacity(0.7)))
         }
         .frame(height: 14)
         .accessibilityElement(children: .ignore)

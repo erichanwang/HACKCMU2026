@@ -29,6 +29,15 @@ let suitcaseFloorWallMeters: Float = suitcaseWallMeters
 /// bag and set it before the demo. Defaults to `suitcaseWallMeters` (bit-identical to no calibration).
 let suitcaseHandleWallMeters: Float = suitcaseWallMeters
 
+/// A horizontal plane this big (m²) counts as the floor for the purpose of advancing
+/// the scan prompts — roughly a 30cm square.
+private let floorPlaneAreaMeters: Float = 0.09
+
+/// ponytail: below this interior depth a "suitcase" is a closed lid or a tap on the
+/// floor, not a bag worth packing. A fixed threshold, not a lid detector; if someone
+/// really packs a 6cm case, this is the number to revisit.
+private let openSuitcaseInteriorMeters: Float = 0.07
+
 /// What the next tap captures: the bag itself, or something to put in it.
 enum ScanMode: Hashable {
     case suitcase, item
@@ -87,6 +96,51 @@ struct ScanView: UIViewRepresentable {
 
         init(item: Binding<ScannedItem?>, status: Binding<String>, suitcaseId: Binding<String?>, mode: ScanMode) {
             _item = item; _status = status; _suitcaseId = suitcaseId; self.mode = mode
+        }
+
+        /// Every string `guide` writes. A prompt may only ever replace another prompt:
+        /// a measurement, an error or a label must never be wiped by the next frame's
+        /// advice.
+        static let prompts: Set<String> = [
+            "Move the phone slowly so it can see the room",
+            "Point the camera at the floor near your suitcase",
+            "Open your suitcase on the floor, then tap inside it",
+            "Tap the bag again to steady it, or switch to Item",
+            "Switch to Suitcase and scan the bag first",
+            "Point at an item next to the bag, then tap it",
+        ]
+
+        /// One instruction at a time, advancing as the session actually learns the room:
+        /// find the room, find the floor, then do the thing this mode is for.
+        func guide(_ frame: ARFrame) {
+            guard !scanning, item == nil else { return }          // a result is on screen
+            guard status.isEmpty || Coordinator.prompts.contains(status) else { return }
+            let next: String
+            switch frame.camera.trackingState {
+            case .normal:
+                if !seesFloor(frame) {
+                    next = "Point the camera at the floor near your suitcase"
+                } else if mode == .suitcase {
+                    next = suitcaseId == nil
+                        ? "Open your suitcase on the floor, then tap inside it"
+                        : "Tap the bag again to steady it, or switch to Item"
+                } else {
+                    next = suitcaseId == nil
+                        ? "Switch to Suitcase and scan the bag first"
+                        : "Point at an item next to the bag, then tap it"
+                }
+            default:
+                next = "Move the phone slowly so it can see the room"
+            }
+            if status != next { status = next }
+        }
+
+        /// A horizontal plane big enough to be a floor rather than a speck of noise.
+        private func seesFloor(_ frame: ARFrame) -> Bool {
+            frame.anchors.contains { anchor in
+                guard let plane = anchor as? ARPlaneAnchor, plane.alignment == .horizontal else { return false }
+                return plane.planeExtent.width * plane.planeExtent.height >= floorPlaneAreaMeters
+            }
         }
 
         @objc func tap(_ g: UITapGestureRecognizer) {
@@ -177,6 +231,10 @@ struct ScanView: UIViewRepresentable {
                     let interior = interiorBox(steadied, wall: suitcaseWallMeters,
                                                wallHeight: suitcaseFloorWallMeters,
                                                wallDepth: suitcaseHandleWallMeters)
+                    guard interior.height >= openSuitcaseInteriorMeters else {
+                        self.status = "That looks closed or flat — open the lid and tap inside the bag"
+                        return
+                    }
                     self.suitcase = (interior, planeY + suitcaseWallMeters)
                     self.show(interior, in: view)
                     self.status = "Creating suitcase… (tap the bag again to steady it, or switch to Item)"
@@ -376,6 +434,9 @@ extension ScanView.Coordinator: ARSessionDelegate {
     /// ARKit calls the delegate on the main queue, so the assumption holds — it traps loudly
     /// if that ever stops being true, which beats a data race that doesn't.
     nonisolated func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        MainActor.assumeIsolated { refreshPlaneY() }
+        MainActor.assumeIsolated {
+            refreshPlaneY()
+            guide(frame)
+        }
     }
 }

@@ -314,6 +314,7 @@ final class IOTests: XCTestCase {
         let data = try Data(contentsOf: url)
         let file = try panCandidates(from: data)
         XCTAssertEqual(file.backend, "cache(mock)")
+        XCTAssertEqual(file.backendNote, "synthetic frames drawn by the mock, not a world-model prediction")
         XCTAssertTrue(file.panAvailable)
         XCTAssertEqual(file.candidates.count, 3)
 
@@ -321,6 +322,9 @@ final class IOTests: XCTestCase {
         XCTAssertEqual(a.physicsStatus, "valid")
         XCTAssertEqual(a.simulationStatus, "complete")
         XCTAssertEqual(a.executionRisk, "low")
+        // a rollout the UI can show must arrive with the label for what it is
+        XCTAssertEqual(a.backend, "mock")
+        XCTAssertEqual(a.backendNote, "synthetic frames drawn by the mock, not a world-model prediction")
 
         let c = file.candidates.first { $0.candidateId == "C" }!
         XCTAssertEqual(c.physicsStatus, "invalid")
@@ -328,6 +332,7 @@ final class IOTests: XCTestCase {
         XCTAssertNil(c.executionRisk)
         XCTAssertNil(c.panPreviewVideo)
         XCTAssertNil(c.panFinalFrame)
+        XCTAssertNil(c.backend)  // no rollout ran, so nothing to label
 
         XCTAssertFalse(file.steps.isEmpty)
     }

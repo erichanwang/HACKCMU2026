@@ -9,6 +9,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from pymongo import MongoClient
 
+from planner import plan as solve
+
 RIGIDITIES = ("rigid", "soft", "fragile")
 PROMPT = (
     "Identify the main object in this photo; it is about to be packed in a suitcase. "
@@ -103,6 +105,27 @@ def get_suitcase(suitcase_id: str):
     return public(doc) | {"items": [public(d) for d in db.items.find({"suitcaseId": suitcase_id})]}
 
 
+@app.post("/suitcases/{suitcase_id}/plan")
+def create_plan(suitcase_id: str):
+    suitcase = db.suitcases.find_one({"_id": suitcase_id})
+    if suitcase is None:
+        raise HTTPException(404, "no such suitcase")
+    items = list(db.items.find({"suitcaseId": suitcase_id}))
+    if not items:
+        raise HTTPException(409, "suitcase has no scanned items to pack")
+    doc = {"_id": suitcase_id, "suitcaseId": suitcase_id, "createdAt": now()} | solve(suitcase, items)
+    db.plans.replace_one({"_id": suitcase_id}, doc, upsert=True)
+    return public(doc)
+
+
+@app.get("/suitcases/{suitcase_id}/plan")
+def get_plan(suitcase_id: str):
+    doc = db.plans.find_one({"_id": suitcase_id})
+    if doc is None:
+        raise HTTPException(404, "no plan for this suitcase yet; POST this URL to make one")
+    return public(doc)
+
+
 @app.post("/items")
 def create_item(item: str = Form(...), image: UploadFile = File(...)):
     try:
@@ -126,6 +149,8 @@ class Patch(BaseModel):
     label: str | None = None
     rigidity: str | None = None
     compressibility: float | None = None
+    mass: float | None = None
+    keepUpright: bool | None = None
 
 
 @app.patch("/items/{item_id}")
@@ -134,7 +159,13 @@ def update_item(item_id: str, patch: Patch):
         raise HTTPException(422, f"rigidity must be one of {RIGIDITIES}")
     if patch.compressibility is not None and not patch.compressibility >= 1:
         raise HTTPException(422, "compressibility must be >= 1")
+    if patch.mass is not None and not patch.mass >= 0:
+        raise HTTPException(422, "mass must be >= 0")
     fields = {}
+    if patch.mass is not None:
+        fields |= {"mass": float(patch.mass)}
+    if patch.keepUpright is not None:
+        fields |= {"keepUpright": patch.keepUpright}
     if patch.label is not None:
         fields |= {"label": patch.label.strip()[:60], "labelSource": "user"}
     if patch.rigidity is not None:

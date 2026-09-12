@@ -7,6 +7,7 @@ from physics.pan import (
     RealPanBackend,
     build_observation,
     describe_action,
+    result_note,
     simulate_candidate_actions,
 )
 from physics.schema import Container, Object, Scene
@@ -118,3 +119,18 @@ def test_real_pan_backend_parses_json_schema_response():
     assert result.status == "complete"
     assert result.backend == "ifm-k2-horizon"
     assert result.metadata["risk"]["accessibility_risk"] == 0.2
+    # The display path (examples/pan_demo.py) prints this verbatim: a K2-Horizon
+    # answer must never be shown as if it were a visual PAN rollout.
+    assert result_note(result) == "textual reasoning, not a visual PAN rollout"
+
+
+def test_result_note_labels_every_displayable_result():
+    assert result_note(MockPanBackend().simulate(build_observation("s").as_dict(), "place the shoe")) == (
+        "deterministic stand-in, not a world-model prediction"
+    )
+    # nothing to mislabel when no rollout ran
+    gated = simulate_candidate_actions(
+        _scene(), "s", [PanAction(object_id="shoe", target_position=(0.125, 0.045, 0.1075))], MockPanBackend()
+    )[0]["pan"]
+    assert gated.status == "unavailable"
+    assert result_note(gated) is None

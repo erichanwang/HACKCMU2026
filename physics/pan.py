@@ -210,6 +210,23 @@ class RealPanBackend:
         )
 
 
+def result_note(result: SimulationResult) -> Optional[str]:
+    """What a result actually IS, for display. `RealPanBackend` labels itself in
+    `metadata["note"]`; the mock only sets `metadata["mock"]`, so say so for it.
+    None when there is no rollout to mislabel (unavailable/failed).
+
+    Never show a `SimulationResult` without this -- neither backend produces a
+    visual PAN rollout (see the module docstring) and nothing downstream may
+    imply otherwise.
+    """
+    note = result.metadata.get("note")
+    if note:
+        return str(note)
+    if result.metadata.get("mock"):
+        return "deterministic stand-in, not a world-model prediction"
+    return None
+
+
 # --- Action language generation ---------------------------------------------
 
 

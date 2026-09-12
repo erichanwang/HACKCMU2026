@@ -7,7 +7,7 @@ solver; if the table is wrong, the solver is wrong.
 
 ```sh
 python3 tools/packbench/packbench.py                                   # full corpus, ~2.5 min
-python3 tools/packbench/packbench.py --quick                           # 4 fixtures, ~21 s
+python3 tools/packbench/packbench.py --quick                           # 4 fixtures, ~20 s
 python3 tools/packbench/packbench.py --baseline tools/packbench/baseline.json
 python3 tools/packbench/packbench.py --quick --baseline tools/packbench/baseline.json --check
 python3 tools/packbench/packbench.py --json run.json                   # save the full run
@@ -166,7 +166,7 @@ identical runs; the table and the delta are byte-identical for the same
 `--iters`/`--seed` (`--time` is a wall-clock budget and therefore *not*
 reproducible — use it to see production behaviour, never to compare revisions).
 
-## `--quick`: four fixtures, ~21 s
+## `--quick`: four fixtures, ~20 s
 
 The full corpus is ~2.5 minutes of solver time (it was ~7 before the weights fix, which
 cut `carryon_overfilled` from ~190 s to ~85 s), and `carryon_overfilled` is over half of
@@ -176,14 +176,15 @@ what is left. `--quick` runs:
 |---|---|---|
 | `adversarial_exact_fit` | 1.0 | **Packing pressure.** Five trays tile 97.7% of a Pelican 1510 with 1-2 mm slack; exactly one ordering fits. First-fit already gets 5/5, so anything below that is a real regression rather than a hard case - and it costs one second to find out. |
 | `upright_bottles` | 5.1 | **A heightmap cavity**, plus upright constraints. `packing_cube_half_full` sags from a 12 cm rim to 7 cm in the middle, so nesting a bottle base into the dip is worth real volume, and `item_metadata` squashes exactly that grid by `1/k`. Eleven `allow_lay_down: false` items and a 30.5 cm wine bottle in a 31 cm bag mean a rotation bug shows up as dropped items immediately - and after `e4590e6` those eleven upright constraints are finally being graded. |
-| `nested_foam_cutout` | 5.2 | **A nest that actually happens.** A hard camera case with one empty foam cut-out and a lens that fits the cut-out and nothing else, so the only way to pack it is inside the case's cavity - and `nested` in the table is 1 instead of 0. The corpus's only cover for the whole cavity path (`solid_boxes`' pooling, `irregular` classification, the decoder's fragile-below rule, `nested_in`); see `fixtures/manifest.json` for why every number in it is forced. |
+| `nested_foam_cutout` | 3.7 | **A nest that actually happens.** A hard camera case with one empty foam cut-out and a lens that fits the cut-out and nothing else, so the only way to pack it is inside the case's cavity - and `nested` in the table is 1 instead of 0. The corpus's only cover for the whole cavity path (`solid_boxes`' pooling, `irregular` classification, the decoder's fragile-below rule, `nested_in`); see `fixtures/manifest.json` for why every number in it is forced. |
 | `camera_kit_fragile` | 10.3 | **Fragility as the binding resource.** ~11 L of `fragile` + `keepUpright` gear that nothing may be stacked on, so floor area runs out before volume does. Deliberately has no heightmap grids, which makes the fragile constraint the only thing being measured. It also leaves 2 of 21 items behind at 42.7% utilisation, the corpus's widest gap between what the solver manages and what the fixture notes say a person manages, so it is the fixture most likely to move. |
 
-Packing pressure, a heightmap cavity, fragility and a real nest for ~21 s of solver time;
+Packing pressure, a heightmap cavity, fragility and a real nest for ~20 s of solver time;
 three consecutive `--quick` runs on this laptop took 12.5, 13.9 and 15.0 s wall before
-`nested_foam_cutout` (5.2 s) joined them. Treat the per-fixture seconds as a ratio, not a
-promise - they are this machine, at `--iters 40`, and they moved by 2x when the weights
-landed.
+`nested_foam_cutout` (3.7 s) joined them. Treat the per-fixture seconds as a ratio, not a
+promise - they are this machine, at `--iters 40`, they moved by 2x when the weights landed,
+and they move again with load: the same `--quick` took 32 s wall with several other agents
+on the laptop.
 
 The skipped fixtures are skipped for cost and redundancy: `carryon_overfilled`
 (~85 s) and `clothes_dominated` (~32 s) are the expensive ones, `checked_heavy_light`

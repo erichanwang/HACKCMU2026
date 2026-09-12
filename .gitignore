@@ -1,6 +1,17 @@
+# personal / local
 CLAUDE.local.md
+.claude/settings.local.json
+.DS_Store
+
+# Xcode (project is regenerated from project.yml with `xcodegen`)
 *.xcodeproj
+*.xcworkspace
 xcuserdata/
 DerivedData/
+*.xcarchive
+*.ipa
+*.dSYM*
+
+# Swift build output
 .build/
-.DS_Store
+.swiftpm/

@@ -10,6 +10,8 @@ let minHeightMeters: Float = 0.01
 let searchRadiusMeters: Float = 0.5
 /// Grid cell for separating the tapped object from its neighbours.
 let clusterCellMeters: Float = 0.02
+/// Resolution of the captured shape (heightmap cell). Mesh triangles are sampled at half this spacing.
+let shapeCellMeters: Float = 0.01
 
 struct ScanView: UIViewRepresentable {
     @Binding var item: ScannedItem?
@@ -56,16 +58,23 @@ struct ScanView: UIViewRepresentable {
             }
             let planeY = table.transform.columns.3.y
 
-            // Mesh vertices above the table near the tap.
+            // Mesh surface above the table near the tap, sampled densely across each triangle.
             var pts: [SIMD3<Float>] = []
+            let r2 = searchRadiusMeters * searchRadiusMeters
             for mesh in frame.anchors.compactMap({ $0 as? ARMeshAnchor }) {
-                let v = mesh.geometry.vertices
-                for i in 0..<v.count {
-                    let raw = v.buffer.contents().advanced(by: v.offset + v.stride * i).assumingMemoryBound(to: SIMD3<Float>.self).pointee
+                let v = mesh.geometry.vertices, f = mesh.geometry.faces
+                func vertex(_ i: UInt32) -> SIMD3<Float> {
+                    let raw = v.buffer.contents().advanced(by: v.offset + v.stride * Int(i)).assumingMemoryBound(to: SIMD3<Float>.self).pointee
                     let w = mesh.transform * SIMD4<Float>(raw, 1)
-                    let p = SIMD3<Float>(w.x, w.y, w.z)
-                    let dx = p.x - seed.x, dz = p.z - seed.z
-                    if p.y - planeY > minHeightMeters, dx * dx + dz * dz < searchRadiusMeters * searchRadiusMeters { pts.append(p) }
+                    return SIMD3<Float>(w.x, w.y, w.z)
+                }
+                let idx = f.buffer.contents().assumingMemoryBound(to: UInt32.self)
+                for t in 0..<f.count {
+                    let a = vertex(idx[t * 3]), b = vertex(idx[t * 3 + 1]), c = vertex(idx[t * 3 + 2])
+                    let m = (a + b + c) / 3
+                    let dx = m.x - seed.x, dz = m.z - seed.z
+                    guard dx * dx + dz * dz < r2, max(a.y, b.y, c.y) - planeY > minHeightMeters else { continue }
+                    pts += densify(a, b, c, spacing: shapeCellMeters / 2).filter { $0.y - planeY > minHeightMeters }
                 }
             }
 
@@ -73,9 +82,11 @@ struct ScanView: UIViewRepresentable {
             guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
                 status = "Nothing above the table here (\(pts.count) pts)"; return
             }
-            let scanned = ScannedItem(box)
+            let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
+            let scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
             item = scanned
-            status = "\(cluster.count) pts"
+            status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
+            print(scanned.asciiMap)
             print(String(data: try! JSONEncoder().encode(scanned), encoding: .utf8)!)
             show(box, in: view)
         }

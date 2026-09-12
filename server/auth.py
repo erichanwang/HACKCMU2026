@@ -12,13 +12,24 @@ _jwks_cache = {"keys": None, "fetched_at": 0.0}
 
 
 def _jwks() -> list[dict]:
-    """Auth0 signing keys, cached for an hour (they rotate rarely)."""
+    """Auth0 signing keys, cached for an hour (they rotate rarely).
+
+    A refetch failure (JWKS endpoint down/slow/unreachable, or a bad response body)
+    falls back to the stale cache instead of raising, since Auth0 signing keys
+    rotate rarely and a stale key set beats an outage. Only raises when there's
+    no cache at all yet.
+    """
     if _jwks_cache["keys"] is None or time.time() - _jwks_cache["fetched_at"] > 3600:
         domain = os.environ["AUTH0_DOMAIN"]
-        r = httpx.get(f"https://{domain}/.well-known/jwks.json", timeout=10)
-        r.raise_for_status()
-        _jwks_cache["keys"] = r.json()["keys"]
-        _jwks_cache["fetched_at"] = time.time()
+        try:
+            r = httpx.get(f"https://{domain}/.well-known/jwks.json", timeout=10)
+            r.raise_for_status()
+            _jwks_cache["keys"] = r.json()["keys"]
+            _jwks_cache["fetched_at"] = time.time()
+        except (httpx.HTTPError, ValueError, KeyError):
+            if _jwks_cache["keys"] is None:
+                raise
+            logger.warning("JWKS refetch failed, serving stale cache", exc_info=True)
     return _jwks_cache["keys"]
 
 
@@ -49,3 +60,6 @@ def require_auth(authorization: str = Header(None)) -> dict:
     except jwt.JWTError as exc:
         logger.warning("auth rejected: invalid token: %s", exc)
         raise HTTPException(401, f"invalid token: {exc}")
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        logger.warning("auth service unavailable: %r", exc)
+        raise HTTPException(503, "auth service unavailable")

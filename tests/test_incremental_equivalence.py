@@ -16,6 +16,8 @@ Also pins the two bugs an earlier differential run found:
 """
 from __future__ import annotations
 
+import dataclasses
+import math
 import random
 import unittest
 
@@ -155,6 +157,65 @@ class TestExactEquivalence(unittest.TestCase):
                                                          objects=[good, bad]))),
                 )
                 self.assertEqual(pv.placed_ids, ["a"])
+
+
+_HAS_FOOTPRINTS = "footprint" in {f.name for f in dataclasses.fields(Object)}
+
+
+@unittest.skipUnless(_HAS_FOOTPRINTS, "scanned footprints are not in this schema yet")
+class TestPrismsFallBackToTheFullPipeline(unittest.TestCase):
+    """A scanned `footprint` makes an object a convex prism, and the cached rows
+    in incremental.py are its OBB. `validate` must notice and hand the scene to
+    `validate_layout` rather than answer from box geometry -- measured on the
+    hull-footprints branch as 169/200 random all-prism scenes diverging without
+    this fallback."""
+
+    @staticmethod
+    def _prism(oid, rx, rz, sides, position, dims):
+        fp = [
+            (rx * math.cos(2 * math.pi * i / sides), rz * math.sin(2 * math.pi * i / sides))
+            for i in range(sides)
+        ]
+        return Object(id=oid, dimensions=dims, position=position, footprint=fp)
+
+    def test_prism_scene_matches_validate_layout(self):
+        rng = random.Random(42)
+        container = Container(id="container", dimensions=(1.0, 0.8, 0.6), position=(0.0, 0.4, 0.0))
+        for trial in range(20):
+            objects = []
+            for i in range(rng.randint(1, 5)):
+                dims = (rng.uniform(0.1, 0.3), rng.uniform(0.05, 0.3), rng.uniform(0.1, 0.3))
+                pos = (rng.uniform(-0.4, 0.4), dims[1] / 2.0, rng.uniform(-0.2, 0.2))
+                if rng.random() < 0.7:
+                    objects.append(
+                        self._prism(f"p{i}", dims[0] / 2, dims[2] / 2,
+                                    rng.choice([3, 4, 5, 6]), pos, dims)
+                    )
+                else:
+                    objects.append(Object(id=f"p{i}", dimensions=dims, position=pos))
+            scene = Scene(container=container, objects=objects)
+            pv = PlacementValidator(container)
+            for obj in objects:
+                pv.commit(obj)
+            with self.subTest(trial=trial):
+                self.assertEqual(
+                    result_to_json(pv.validate()), result_to_json(validate_layout(scene))
+                )
+
+    def test_removing_the_last_prism_restores_the_incremental_path(self):
+        container = Container(id="container", dimensions=(1.0, 0.8, 0.6), position=(0.0, 0.4, 0.0))
+        box = Object(id="box", dimensions=(0.2, 0.2, 0.2), position=(-0.3, 0.1, 0.0))
+        prism = self._prism("prism", 0.1, 0.1, 5, (0.3, 0.1, 0.0), (0.2, 0.2, 0.2))
+        pv = PlacementValidator(container)
+        pv.commit(box)
+        pv.commit(prism)
+        self.assertEqual(pv._prisms, 1)
+        pv.remove("prism")
+        self.assertEqual(pv._prisms, 0)
+        self.assertEqual(
+            result_to_json(pv.validate()),
+            result_to_json(validate_layout(Scene(container=container, objects=[box]))),
+        )
 
 
 class TestPrecomputeRowIsBitIdentical(unittest.TestCase):

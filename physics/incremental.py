@@ -39,7 +39,11 @@ Each pipeline stage is decomposed by what its result actually depends on:
   or cannot_support_weight -- with no such flag in the scene the load is dead
   code in `check_constraints` too.
 - metrics: genuinely O(n^2) and nothing `valid`/`score` depends on, so
-  `validate(metrics=False)` skips it. That is the inner-loop setting.
+  `validate(metrics=False)` skips it. That is the inner-loop setting. When
+  metrics ARE asked for, `scene_metrics(precompute(to_scene()))` runs -- the
+  same two calls `validate_layout` makes, rather than a hand-assembled
+  `SceneGeometry` that would have to be updated every time that dataclass
+  grows a field.
 
 Exactness is not argued, it is tested: tests/test_incremental_equivalence.py
 runs several hundred random scenes (mixed rigidity, random orientation, every
@@ -49,6 +53,16 @@ covered there: containment is settled from the object's AABB when the
 container is world-axis-aligned, and an axis-aligned pair is *cleared* without
 SAT when its three face overlaps do not exceed epsilon (the 9 cross axes
 reduce to those three plus a positive multiple of `collision.EPS_PARALLEL`).
+
+Prisms
+-------
+An object carrying a scanned `footprint` is a convex PRISM, not a box, and the
+cached rows here are its OBB. Rather than answer approximately, `validate` /
+`try_place_exact` detect any committed prism and hand the whole scene to
+`validate_layout` -- correct, just not incremental. Making prisms incremental
+means caching footprint polygons and prism ring vertices per object and
+routing the narrow phase, support footprint and COM through them; until then
+the exactness guarantee below is a BOX guarantee.
 
 Equality holds at this validator's default epsilons, which are
 `validate_layout`'s: epsilon=1e-6, contact_eps=1e-3, floating_threshold=0.05.
@@ -187,8 +201,9 @@ from physics.constraints import _up_axis_cosines
 from physics.containment import _build_result, _containment_arrays, check_containment
 from physics.geometry import OBB, SIGNS, obb_from, obb_vertices
 from physics.metrics import scene_metrics
-from physics.scene_geometry import MalformedSceneError, SceneGeometry, _quats_to_matrices
+from physics.scene_geometry import MalformedSceneError, _quats_to_matrices, precompute
 from physics.schema import Container, Object, Scene
+from physics.validator import validate_layout
 
 # Private helpers borrowed from `physics.support` on purpose: the exact
 # incremental path below has to reproduce `check_support`'s polygon math
@@ -438,6 +453,11 @@ class PlacementValidator:
         # add/remove.
         self._coll: dict[tuple[str, str], tuple[bool, dict]] = {}
         self._con_cache: tuple[list[dict], list[dict]] | None = None
+        # Objects carrying a scanned `footprint` are convex PRISMS, not boxes.
+        # Every cached row here is the object's OBB, so the exact path cannot
+        # speak for them; `validate` falls back to the full pipeline instead of
+        # answering wrongly. See "Prisms" in the module docstring.
+        self._prisms = 0
 
     @property
     def placed_ids(self) -> list[str]:
@@ -490,6 +510,8 @@ class PlacementValidator:
             self._rec[other].below_c.pop(object_id, None)
 
         self._con_cache = None
+        if getattr(rec.obj, "footprint", None) is not None:
+            self._prisms -= 1
         self._refresh_support(dirty)
 
     def incremental_metrics(self, obj: Object) -> dict:
@@ -576,6 +598,8 @@ class PlacementValidator:
         self._index[oid] = len(self._ids)
         self._ids.append(oid)
         self._rec[oid] = rec
+        if getattr(obj, "footprint", None) is not None:
+            self._prisms += 1
         self._arrays_dirty = True
         self._con_cache = None
 
@@ -607,6 +631,17 @@ class PlacementValidator:
         The returned violation/warning dicts are the cached ones -- read them,
         don't mutate them.
         """
+        if self._prisms:
+            # Not incremental, but correct: scanned prisms need the footprint
+            # narrow phase / footprint support that the cached OBB rows cannot
+            # express, so hand the whole scene to the real pipeline.
+            result = validate_layout(
+                self.to_scene(), floating_threshold=self.floating_threshold
+            )
+            if not metrics:
+                result["metrics"] = {}
+            return result
+
         violations: list[dict] = []
         warnings: list[dict] = []
 
@@ -646,7 +681,7 @@ class PlacementValidator:
             "score": max(0.0, 1.0 - severity_sum / max(1, len(self._ids))),
             "violations": violations,
             "warnings": warnings,
-            "metrics": scene_metrics(self._build_geom()) if metrics else {},
+            "metrics": scene_metrics(precompute(self.to_scene())) if metrics else {},
         }
 
     def try_place_exact(self, obj: Object, *, metrics: bool = True) -> dict:
@@ -1155,39 +1190,6 @@ class PlacementValidator:
 
         self._con_cache = (violations, warnings)
         return self._con_cache
-
-    def _build_geom(self) -> SceneGeometry:
-        """A `SceneGeometry` over the cached rows -- only `scene_metrics` needs
-        one, so it is assembled on demand rather than maintained."""
-        recs = [self._rec[oid] for oid in self._ids]
-        objects = [r.obj for r in recs]
-        scene = Scene(container=self.container, objects=objects)
-        n = len(recs)
-        if n == 0:
-            empty3 = np.zeros((0, 3))
-            return SceneGeometry(
-                scene, objects, [], {}, self._container_obb, self._container_vertices,
-                self._floor_y, [], empty3, np.zeros((0, 3, 3)), empty3,
-                np.zeros((0, 8, 3)), empty3, empty3, np.zeros(0),
-            )
-        vertices = np.array([r.verts for r in recs])
-        return SceneGeometry(
-            scene=scene,
-            objects=objects,
-            ids=list(self._ids),
-            index=dict(self._index),
-            container_obb=self._container_obb,
-            container_vertices=self._container_vertices,
-            container_floor_y=self._floor_y,
-            obbs=[r.obb for r in recs],
-            centers=np.array([r.center for r in recs]),
-            axes=np.array([r.axes for r in recs]),
-            half_extents=np.array([r.he for r in recs]),
-            vertices=vertices,
-            aabb_min=vertices.min(axis=1),
-            aabb_max=vertices.max(axis=1),
-            masses=np.array([r.obj.mass_kg for r in recs], dtype=float),
-        )
 
     # ------------------------------------------------------------------
     # internals

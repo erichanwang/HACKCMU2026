@@ -63,6 +63,8 @@ struct ScanView: UIViewRepresentable {
         /// The bag interior from the last Suitcase-mode tap, and the y of its floor. The plan overlay
         /// has nowhere to go until this is set.
         var suitcase: (interior: BoxFit, planeY: Float)?
+        /// One tap at a time: set while a scan's geometry is off on a background thread.
+        var scanning = false
         var planOverlay: AnchorEntity?
         var shownPlan: PackingPlan?
 
@@ -71,6 +73,7 @@ struct ScanView: UIViewRepresentable {
         }
 
         @objc func tap(_ g: UITapGestureRecognizer) {
+            guard !scanning else { status = "Still measuring the last tap"; return }
             guard let view, let frame = view.session.currentFrame else { return }
             let point = g.location(in: view)
 
@@ -92,8 +95,10 @@ struct ScanView: UIViewRepresentable {
                 status = "Tap the object, not the table"; return
             }
 
-            // Mesh surface above the table near the tap, sampled densely across each triangle.
-            var pts: [SIMD3<Float>] = []
+            // Mesh surface above the table near the tap. The vertex/index buffers belong to this
+            // frame, so the triangles get copied out here, on the main thread; densifying and
+            // fitting them is the slow part and runs off it below.
+            var tris: [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] = []
             let r2 = searchRadiusMeters * searchRadiusMeters
             for mesh in frame.anchors.compactMap({ $0 as? ARMeshAnchor }) {
                 let v = mesh.geometry.vertices, f = mesh.geometry.faces
@@ -106,71 +111,96 @@ struct ScanView: UIViewRepresentable {
                     let m = (a + b + c) / 3
                     let dx = m.x - seed.x, dz = m.z - seed.z
                     guard dx * dx + dz * dz < r2, max(a.y, b.y, c.y) - planeY > minHeightMeters else { continue }
-                    pts += densify(a, b, c, spacing: shapeCellMeters / 2).filter { $0.y - planeY > minHeightMeters }
+                    tris.append((a, b, c))
                 }
             }
 
-            let cluster = connectedCluster(pts, seed: seed, cell: clusterCellMeters)
-            guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
-                status = "Nothing above the table here (\(pts.count) pts)"; return
-            }
-            guard isUsableBox(width: box.width, height: box.height, depth: box.depth, maxDimension: maxItemDimensionMeters) else {
-                status = "That doesn't look like one item — check for a nearby wall or the floor, then rescan"; return
-            }
-            // Suitcase mode: the fitted box is the bag's outer shell; the interior is a wall thinner.
-            // No heightmap, no photo, no label.
-            if mode == .suitcase {
-                let interior = interiorBox(box, wall: suitcaseWallMeters)
-                suitcase = (interior, planeY + suitcaseWallMeters)
-                show(interior, in: view)
-                status = "Creating suitcase…"
-                Task { @MainActor in
-                    do {
-                        self.suitcaseId = try await API.createSuitcase(
-                            name: "scanned suitcase", dimensions: [interior.width, interior.height, interior.depth])
-                        self.status = "Suitcase captured — switch to Item and tap what goes in"
-                    } catch {
-                        self.status = "server: \(error.localizedDescription)"
+            scanning = true
+            status = "Measuring…"
+            let mode = self.mode
+            Task { @MainActor [weak self, tris] in
+                // The hop. Only value types go across: the copied triangles and a few Floats. Not
+                // `self` (Coordinator is not Sendable), not `view`, not the ARKit buffers — their
+                // frame is gone by now. Only plain geometry comes back, and everything that touches
+                // ARKit/RealityKit/UIKit or the SwiftUI bindings stays on this side, on the main actor.
+                let (ptCount, cluster, fitted, heights) = await Task.detached(priority: .userInitiated) {
+                    () -> (Int, [SIMD3<Float>], BoxFit?, [[Float]]) in
+                    var pts: [SIMD3<Float>] = []
+                    for (a, b, c) in tris {
+                        pts += densify(a, b, c, spacing: shapeCellMeters / 2).filter { $0.y - planeY > minHeightMeters }
                     }
-                }
-                return
-            }
-            guard let suitcaseId else { status = "Scan the suitcase first"; return }
-
-            let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
-            guard isUsableHeightMap(heights) else {
-                status = "Nothing usable captured on top — move closer and rescan"; return
-            }
-            var scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
-            scanned.suitcaseId = suitcaseId
-            item = scanned
-            status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
-            print(scanned.asciiMap)
-
-            // Photograph the object before the overlay covers it, then ask the server for label + rigidity.
-            guard let crop = screenRect(of: box, in: view) else {
-                status = "Object out of view for the photo — item saved without a label"
-                show(box, in: view)
-                return
-            }
-            view.snapshot(saveToHDR: false) { [weak self] shot in
+                    let cluster = connectedCluster(pts, seed: seed, cell: clusterCellMeters)
+                    guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
+                        return (pts.count, cluster, nil, [])
+                    }
+                    // Suitcase mode never looks at the heightmap, so don't build one.
+                    return (pts.count, cluster, box, mode == .suitcase
+                        ? [] : heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters))
+                }.value
                 guard let self else { return }
-                guard let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else {
-                    Task { @MainActor in self.status = "Couldn't capture a photo — item saved without a label" }
+                defer { self.scanning = false }
+                guard let view = self.view else { return }
+
+                guard let box = fitted else {
+                    self.status = "Nothing above the table here (\(ptCount) pts)"; return
+                }
+                guard isUsableBox(width: box.width, height: box.height, depth: box.depth, maxDimension: maxItemDimensionMeters) else {
+                    self.status = "That doesn't look like one item — check for a nearby wall or the floor, then rescan"; return
+                }
+                // Suitcase mode: the fitted box is the bag's outer shell; the interior is a wall thinner.
+                // No heightmap, no photo, no label.
+                if mode == .suitcase {
+                    let interior = interiorBox(box, wall: suitcaseWallMeters)
+                    self.suitcase = (interior, planeY + suitcaseWallMeters)
+                    self.show(interior, in: view)
+                    self.status = "Creating suitcase…"
+                    Task { @MainActor in
+                        do {
+                            self.suitcaseId = try await API.createSuitcase(
+                                name: "scanned suitcase", dimensions: [interior.width, interior.height, interior.depth])
+                            self.status = "Suitcase captured — switch to Item and tap what goes in"
+                        } catch {
+                            self.status = "server: \(error.localizedDescription)"
+                        }
+                    }
                     return
                 }
-                Task { @MainActor in
-                    do {
-                        let uploaded = try await API.upload(scanned, image: UIImage(cgImage: cg))
-                        self.item = uploaded
-                        self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
-                        if uploaded.labelStatus == "pending" { await self.pollLabel(id: uploaded.id) }
-                    } catch {
-                        self.status = "server: \(error.localizedDescription)"
+                guard let suitcaseId = self.suitcaseId else { self.status = "Scan the suitcase first"; return }
+
+                guard isUsableHeightMap(heights) else {
+                    self.status = "Nothing usable captured on top — move closer and rescan"; return
+                }
+                var scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
+                scanned.suitcaseId = suitcaseId
+                self.item = scanned
+                self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
+                print(scanned.asciiMap)
+
+                // Photograph the object before the overlay covers it, then ask the server for label + rigidity.
+                guard let crop = self.screenRect(of: box, in: view) else {
+                    self.status = "Object out of view for the photo — item saved without a label"
+                    self.show(box, in: view)
+                    return
+                }
+                view.snapshot(saveToHDR: false) { [weak self] shot in
+                    guard let self else { return }
+                    guard let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else {
+                        Task { @MainActor in self.status = "Couldn't capture a photo — item saved without a label" }
+                        return
+                    }
+                    Task { @MainActor in
+                        do {
+                            let uploaded = try await API.upload(scanned, image: UIImage(cgImage: cg))
+                            self.item = uploaded
+                            self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
+                            if uploaded.labelStatus == "pending" { await self.pollLabel(id: uploaded.id) }
+                        } catch {
+                            self.status = "server: \(error.localizedDescription)"
+                        }
                     }
                 }
+                self.show(box, in: view)
             }
-            show(box, in: view)
         }
 
         /// Grok failed at upload and the server is retrying in the background; wait for the label.

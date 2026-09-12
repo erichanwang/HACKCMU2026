@@ -25,6 +25,20 @@ class OptimizerConfig:
     balance: bool = True
     com_weight_grid: tuple = (0.0, 0.5, 1.5, 3.0)
 
+    def __post_init__(self):
+        from .geometry import is_finite_number
+        if not is_finite_number(self.time_budget_s) or self.time_budget_s < 0:
+            raise ValueError(f"time_budget_s must be a finite number >= 0, got {self.time_budget_s!r}")
+        if self.max_iterations is not None:
+            if isinstance(self.max_iterations, bool) or not isinstance(self.max_iterations, int) or self.max_iterations < 0:
+                raise ValueError(f"max_iterations must be None or a non-negative int, got {self.max_iterations!r}")
+        if not is_finite_number(self.t_start) or self.t_start <= 0:
+            raise ValueError(f"t_start must be a finite number > 0, got {self.t_start!r}")
+        if not is_finite_number(self.t_end) or self.t_end < 0:
+            raise ValueError(f"t_end must be a finite number >= 0, got {self.t_end!r}")
+        if not self.com_weight_grid or any(not is_finite_number(w) or w < 0 for w in self.com_weight_grid):
+            raise ValueError(f"com_weight_grid must be a non-empty tuple of non-negative numbers, got {self.com_weight_grid!r}")
+
 
 def _sort_keys():
     return {

@@ -12,3 +12,4 @@ __pycache__/
 .pan_cache/
 out/
 .playwright-mcp/
+graphify-out/cache/

@@ -106,36 +106,38 @@ class Item:
 
     @staticmethod
     def from_scan(id: str, shape: str, length: float, depth: float, height: float, mass: float = 0.0, *,
-                  fragile: Optional[bool] = None, keep_upright: bool = False, allow_lay_down: bool = True,
-                  priority: float = 1.0) -> "Item":
+                  fragile: Optional[bool] = None, keep_upright: Optional[bool] = None,
+                  allow_lay_down: bool = True, priority: float = 1.0) -> "Item":
         """Build an item from a lidar measurement: bounding dims (length, depth, height) + shape.
 
         ``shape`` is "box" or "cylinder" (case-insensitive; "cuboid"/"cube" and "cyl"/"can"/"bottle"
         also accepted).  Any other shape (oval, trapezoid, mannequin, ...) is packed as its bounding
-        box with ``fragile=True`` by default (nothing may rest on a non-flat top).
+        box, and defaults to ``fragile=True`` (nothing may rest on a non-flat top) and
+        ``keep_upright=True`` (an unrecognized/irregular scan is never deliberately tipped onto
+        its side by the solver -- both defaults can be overridden explicitly).
         A cylinder is assumed to stand along its height, radius = min(length, depth)/2.
         Mass is unknown to the scanner; leave it 0 and the CoM falls back to the volume centroid,
         or pass a measured/estimated mass.
         """
         kind = str(shape).strip().lower()
         if kind in ("box", "cuboid", "cube", "rect", "rectangular"):
-            return Item.box(id, length, depth, height, mass, fragile=bool(fragile), keep_upright=keep_upright,
+            return Item.box(id, length, depth, height, mass, fragile=bool(fragile), keep_upright=bool(keep_upright),
                             priority=priority)
         if kind in ("cylinder", "cyl", "can", "bottle", "tube", "round"):
             _check_positive(length, f"item {id} length")
             _check_positive(depth, f"item {id} depth")
             return Item.cylinder(id, min(length, depth) / 2.0, height, mass, fragile=bool(fragile),
-                                 keep_upright=keep_upright, allow_lay_down=allow_lay_down, priority=priority)
+                                 keep_upright=bool(keep_upright), allow_lay_down=allow_lay_down, priority=priority)
         # anything else (oval, trapezoid, mannequin, ...) packs as its bounding box; its top is
-        # not flat, so by default nothing is allowed to rest on it (fragile=True).
+        # not flat (fragile=True by default) and it's never deliberately tipped over (keep_upright=True).
         it = Item.box(id, length, depth, height, mass, fragile=True if fragile is None else fragile,
-                      keep_upright=keep_upright, priority=priority)
+                      keep_upright=True if keep_upright is None else keep_upright, priority=priority)
         object.__setattr__(it, "scan_shape", kind or "irregular")
         return it
 
     @staticmethod
     def from_mesh(id: str, vertices, faces=None, mass: float = 0.0, *, fragile: Optional[bool] = None,
-                  keep_upright: bool = False, allow_lay_down: bool = True, priority: float = 1.0,
+                  keep_upright: Optional[bool] = None, allow_lay_down: bool = True, priority: float = 1.0,
                   yaw_search_deg: float = 1.0, classify: bool = True) -> "Item":
         """Build an item from a scanned mesh (``vertices`` (N,3), optional triangle ``faces`` (M,3)).
 
@@ -143,8 +145,11 @@ class Item:
           footprint; the chosen yaw is stored in ``scan_yaw_deg`` for the frontend.
         * With faces, the closed-mesh volume is measured and the shape is classified:
           volume/bbox ~ 1 -> box, ~ pi/4 with a square footprint -> cylinder, otherwise irregular.
-        * Irregular objects pack as their bounding box and default to ``fragile=True``
-          (their top is not flat, so nothing is stacked on them).
+          ``classify=False`` skips detection and always treats the mesh as irregular.
+        * Irregular objects pack as their bounding box and default to both ``fragile=True``
+          (their top is not flat, so nothing is stacked on them) and ``keep_upright=True`` (the
+          solver never deliberately tips an unrecognized shape onto its side) -- override either
+          explicitly if you know better.
         """
         import numpy as np
         V = np.asarray(vertices, dtype=float).reshape(-1, 3)
@@ -187,16 +192,95 @@ class Item:
         elif classify and vol is None:
             kind = "box"   # no faces -> can only trust the bounding box
         if kind == "box":
-            it = Item.box(id, dims[0], dims[1], dims[2], mass, fragile=bool(fragile), keep_upright=keep_upright,
+            it = Item.box(id, dims[0], dims[1], dims[2], mass, fragile=bool(fragile), keep_upright=bool(keep_upright),
                           priority=priority)
         elif kind == "cylinder":
             it = Item.cylinder(id, min(dims[0], dims[1]) / 2.0, dims[2], mass, fragile=bool(fragile),
-                               keep_upright=keep_upright, allow_lay_down=allow_lay_down, priority=priority)
+                               keep_upright=bool(keep_upright), allow_lay_down=allow_lay_down, priority=priority)
         else:
             it = Item.box(id, dims[0], dims[1], dims[2], mass, fragile=True if fragile is None else fragile,
-                          keep_upright=keep_upright, priority=priority)
+                          keep_upright=True if keep_upright is None else keep_upright, priority=priority)
         object.__setattr__(it, "scan_shape", kind)
         object.__setattr__(it, "scan_yaw_deg", best_yaw)
+        if vol is not None:
+            object.__setattr__(it, "true_volume", float(vol))
+        return it
+
+    @staticmethod
+    def from_scanned_heightmap(data: dict, mass: float = 0.0, *, units: str = "cm",
+                               fragile: Optional[bool] = None, keep_upright: Optional[bool] = None,
+                               allow_lay_down: bool = True, priority: float = 1.0,
+                               classify: bool = True) -> "Item":
+        """Build an item from the LiDAR spike's scan JSON (see ``SCAN_OUTPUT.md``):
+        ``{"id","width","depth","height","cellSize","heights"}``, all in centimetres by default
+        (pass ``units="m"`` if already converted).  ``heights[i][j]`` is the object's real surface
+        height at that footprint cell (0 = nothing there) -- an open shoe, an L-shaped bracket, or
+        a hole through the middle all show up here, unlike a plain bounding box.
+
+        Classification, using the heightmap (falls back to "box" with no ``heights``, or with
+        ``classify=False``):
+          * footprint mostly filled and volume ~ the full box -> **box**
+          * roughly square footprint with a circular fill fraction (~ pi/4) -> **cylinder**
+          * otherwise -> **irregular** (packed as its bounding box, defaulting to both
+            ``fragile=True`` -- its top is not flat/complete -- and ``keep_upright=True`` --
+            never deliberately tipped onto its side by the solver; override either explicitly).
+        Real (heightmap-integrated) volume, not the bounding-box volume, is stored as
+        ``true_volume`` and used for utilisation metrics.
+
+        Raises ``ValueError`` if required keys (``id``, ``width``, ``depth``, ``height``) are
+        missing, if ``heights`` is a ragged (non-rectangular) grid, or if any value is
+        non-finite -- rather than letting a raw ``KeyError``/numpy error leak out.
+        """
+        import numpy as np
+        for key in ("id", "width", "depth", "height"):
+            if key not in data:
+                raise ValueError(f"scan payload is missing required key {key!r}: {data!r}")
+        scale = 0.01 if units == "cm" else 1.0
+        iid = str(data["id"])
+        width = float(data["width"]) * scale
+        depth = float(data["depth"]) * scale
+        height = float(data["height"]) * scale
+        heights = data.get("heights")
+        cell = float(data.get("cellSize", 0.0)) * scale
+        if not is_finite_number(width) or width <= 0:
+            raise ValueError(f"scan {iid}: width must be a finite number > 0, got {data['width']!r}")
+        if not is_finite_number(depth) or depth <= 0:
+            raise ValueError(f"scan {iid}: depth must be a finite number > 0, got {data['depth']!r}")
+        if not is_finite_number(height) or height <= 0:
+            raise ValueError(f"scan {iid}: height must be a finite number > 0, got {data['height']!r}")
+        kind, vol = "box", None
+        if classify and heights:
+            row_lens = {len(row) for row in heights}
+            if len(row_lens) > 1:
+                raise ValueError(f"scan {iid}: ragged heightmap -- rows have lengths {sorted(row_lens)}")
+            arr = np.asarray(heights, dtype=float) * scale
+            if not np.all(np.isfinite(arr)):
+                raise ValueError(f"scan {iid}: heightmap contains non-finite values")
+            if np.any(arr < -EPS):
+                raise ValueError(f"scan {iid}: heightmap contains negative heights")
+            rows, cols = arr.shape if arr.ndim == 2 else (0, 0)
+            n = rows * cols
+            if n > 0 and cell > 0:
+                vol = float(arr.sum()) * cell * cell
+                fill_frac = float((arr > 1e-9).sum()) / n
+                bbox_vol = width * depth * height
+                ratio = (vol / bbox_vol) if bbox_vol > 0 else 0.0
+                square = abs(width - depth) <= 0.08 * max(width, depth, 1e-9)
+                if ratio >= 0.9 and fill_frac >= 0.9:
+                    kind = "box"
+                elif square and abs(fill_frac - math.pi / 4) <= 0.12:
+                    kind = "cylinder"
+                else:
+                    kind = "irregular"
+        if kind == "cylinder":
+            it = Item.cylinder(iid, min(width, depth) / 2.0, height, mass, fragile=bool(fragile),
+                               keep_upright=bool(keep_upright), allow_lay_down=allow_lay_down, priority=priority)
+        else:
+            it = Item.box(iid, width, depth, height, mass,
+                          fragile=(kind == "irregular" if fragile is None else bool(fragile)),
+                          keep_upright=(kind == "irregular" if keep_upright is None else bool(keep_upright)),
+                          priority=priority)
+        object.__setattr__(it, "scan_shape", kind)
         if vol is not None:
             object.__setattr__(it, "true_volume", float(vol))
         return it

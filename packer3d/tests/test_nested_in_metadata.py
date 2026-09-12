@@ -57,7 +57,9 @@ class NestedInTest(unittest.TestCase):
         placements = {p["item_id"]: p for p in result.to_dict()["placements"]}
         self.assertNotIn("nested_in", placements["bowl"])
         self.assertEqual(placements["cup"]["nested_in"]["item_id"], "bowl")
-        self.assertEqual(len(placements["cup"]["nested_in"]["cavity"]), 6)
+        # Wire form: `position` + `dims`, the spelling `server/app_plan.py::_nesting` reads.
+        self.assertEqual(len(placements["cup"]["nested_in"]["position"]), 3)
+        self.assertEqual(len(placements["cup"]["nested_in"]["dims"]), 3)
         import json
         self.assertIn("nested_in", json.loads(result.to_json())["placements"][1])
 

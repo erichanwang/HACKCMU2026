@@ -87,14 +87,12 @@ struct ScanView: UIViewRepresentable {
             let r2 = searchRadiusMeters * searchRadiusMeters
             for mesh in frame.anchors.compactMap({ $0 as? ARMeshAnchor }) {
                 let v = mesh.geometry.vertices, f = mesh.geometry.faces
-                func vertex(_ i: UInt32) -> SIMD3<Float> {
-                    let raw = v.buffer.contents().advanced(by: v.offset + v.stride * Int(i)).assumingMemoryBound(to: SIMD3<Float>.self).pointee
-                    let w = mesh.transform * SIMD4<Float>(raw, 1)
-                    return SIMD3<Float>(w.x, w.y, w.z)
-                }
-                let idx = f.buffer.contents().assumingMemoryBound(to: UInt32.self)
-                for t in 0..<f.count {
-                    let a = vertex(idx[t * 3]), b = vertex(idx[t * 3 + 1]), c = vertex(idx[t * 3 + 2])
+                for (a, b, c) in meshTriangles(
+                    vertexBuffer: v.buffer.contents(), vertexOffset: v.offset, vertexStride: v.stride,
+                    indexBuffer: f.buffer.contents(), primitiveCount: f.count,
+                    indexCountPerPrimitive: f.indexCountPerPrimitive, bytesPerIndex: f.bytesPerIndex,
+                    worldVertex: { let w = mesh.transform * SIMD4<Float>($0, 1); return SIMD3<Float>(w.x, w.y, w.z) }
+                ) {
                     let m = (a + b + c) / 3
                     let dx = m.x - seed.x, dz = m.z - seed.z
                     guard dx * dx + dz * dz < r2, max(a.y, b.y, c.y) - planeY > minHeightMeters else { continue }

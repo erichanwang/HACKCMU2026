@@ -32,60 +32,35 @@ struct ContentView: View {
     @State private var showSettings = false
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
             if showingInventory {
                 InventoryRings(items: inventory, select: { item = $0 }, dismiss: { showingInventory = false })
                     .transition(.opacity)
             }
-            VStack(spacing: 8) {
-                Picker("mode", selection: $mode) {
-                    Text("Suitcase").tag(ScanMode.suitcase)
-                    Text("Item").tag(ScanMode.item)
-                }
-                .pickerStyle(.segmented)
-                if mode == .item, suitcaseId == nil {
-                    Text("Scan the suitcase first").font(.footnote)
-                }
-                if let item {
-                    Text(String(format: "%.1f × %.1f × %.1f cm", item.width * 100, item.depth * 100, item.height * 100))
-                    if item.label != nil { ItemEditor(item: Binding($item)!) }
-                }
-                Text(status).font(.footnote)
-                HStack(spacing: 16) {
-                    Button("Pack") { pack() }.disabled(suitcaseId == nil || packing)
-                    Button("Items (\(items.count))") { showingItems = true }.disabled(suitcaseId == nil)
-                    Button("Reset") { confirmingReset = true }.disabled(suitcaseId == nil)
-                }
-                .sheet(isPresented: $showingItems) { itemList }
-                .confirmationDialog("Delete this suitcase? Scanned items stay in your inventory.",
-                                    isPresented: $confirmingReset, titleVisibility: .visible) {
-                    Button("Reset", role: .destructive) { reset() }
-                }
-                Button(serverURL) { showSettings = true }.font(.caption2).lineLimit(1)
+            VStack(spacing: 0) {
+                topBar
+                Spacer()
+                // Above the panel, not over it: the panel's own bottom-right corner is the Reset button.
+                HStack { Spacer(); backpack }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                panel
             }
-                .font(.system(.title2, design: .monospaced))
-                .padding()
-                .background(.black.opacity(0.6))
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                // The segmented picker makes the panel full-width, so the screen's bottom-right
-                // corner is the panel's; the backpack floats over it rather than beside it.
-                .overlay(alignment: .bottomTrailing) { backpack }
-                .padding(.bottom, 40)
-                .sheet(isPresented: $showSettings) {
-                    Form {
-                        TextField("http://mac-lan-ip:8000", text: $serverURL).keyboardType(.URL)
-                        TextField("bearer token (optional)", text: $authToken)
-                    }
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                }
+            // Camera-app chrome: dark over the live feed whatever the system theme. Sheets follow the system.
+            .environment(\.colorScheme, .dark)
         }
-        .sheet(isPresented: $showingDiagram) {
-            if let plan { PlanDiagramView(plan: plan) }
-        }
+        .tint(.indigo)
         .animation(.easeOut(duration: 0.2), value: showingInventory)
+        .sheet(isPresented: $showingItems) { itemList }
+        .sheet(isPresented: $showSettings) { SettingsSheet(serverURL: $serverURL, authToken: $authToken) }
+        .sheet(isPresented: $showingDiagram) {
+            if let plan { PlanViewer(plan: plan).presentationDragIndicator(.visible) }
+        }
+        .confirmationDialog("Delete this suitcase? Scanned items stay in your inventory.",
+                            isPresented: $confirmingReset, titleVisibility: .visible) {
+            Button("Reset", role: .destructive) { reset() }
+        }
         // Quiet on launch: a server that isn't up yet must not replace the first-tap hint.
         .task { if let saved = try? await API.inventory() { inventory = saved } }
         .onChange(of: item) { _, new in
@@ -101,18 +76,44 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Chrome
+
+    private var topBar: some View {
+        HStack {
+            Picker("Scan mode", selection: $mode) {
+                Text("Suitcase").tag(ScanMode.suitcase)
+                Text("Item").tag(ScanMode.item)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 240)
+            .padding(6)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Spacer()
+            Button { showSettings = true } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.body.weight(.semibold))
+                    .frame(width: 44, height: 44)
+                    .background(.regularMaterial, in: Circle())
+            }
+            .accessibilityLabel("Server settings")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
     /// Toggles the inventory rings; the count badge is what makes a scan visibly land somewhere.
     private var backpack: some View {
         Button {
             showingInventory.toggle()
         } label: {
             Image(systemName: showingInventory ? "xmark" : "backpack.fill")
+                .font(.body.weight(.semibold))
                 .frame(width: 48, height: 48)
-                .background(.white.opacity(showingInventory ? 0.25 : 0.12), in: Circle())
+                .background(.regularMaterial, in: Circle())
                 .overlay(alignment: .topTrailing) {
                     if !inventory.isEmpty {
                         Text("\(inventory.count)")
-                            .font(.system(.caption2, design: .monospaced).bold())
+                            .font(.caption2.bold().monospacedDigit())
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(.white, in: Capsule())
                             .foregroundStyle(.black)
@@ -120,34 +121,108 @@ struct ContentView: View {
                 }
         }
         .accessibilityLabel(showingInventory ? "Close inventory" : "Inventory, \(inventory.count) items")
-        .padding(8)
+    }
+
+    private var panel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if mode == .item, suitcaseId == nil {
+                Label("Scan the suitcase first", systemImage: "suitcase")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            statusRow
+            if let item {
+                Divider()
+                if item.label != nil {
+                    ItemEditor(item: Binding($item)!)
+                } else {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("New item").font(.headline)
+                        Spacer()
+                        Text(item.sizeText).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            actions
+        }
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+
+    /// Every in-flight status (ScanView's and this file's) ends in "…"; a failed request is
+    /// "<what>: <error>". Both are conventions of the strings, not fields on a model.
+    private var statusRow: some View {
+        HStack(spacing: 10) {
+            if status.contains("…") {
+                ProgressView().controlSize(.small)
+            } else if ["server:", "plan:", "items:", "reset:", "delete:"].contains(where: { status.hasPrefix($0) }) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+            Text(status).font(.subheadline)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 10) {
+            Button { pack() } label: {
+                Label("Pack", systemImage: "shippingbox.fill").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(suitcaseId == nil || packing)
+            Button { showingItems = true } label: { Label("\(items.count)", systemImage: "list.bullet") }
+                .buttonStyle(.bordered)
+                .disabled(suitcaseId == nil)
+                .accessibilityLabel("Items in this suitcase: \(items.count)")
+            Button(role: .destructive) { confirmingReset = true } label: { Image(systemName: "trash") }
+                .buttonStyle(.bordered)
+                .disabled(suitcaseId == nil)
+                .accessibilityLabel("Reset suitcase")
+        }
+        .controlSize(.large)
+        .fontWeight(.semibold)
+        .monospacedDigit()
     }
 
     /// What is in the suitcase right now, re-read from the server each time the sheet opens.
     private var itemList: some View {
-        List {
-            ForEach(items) { scanned in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(scanned.labelStatus == "pending" ? "labelling…" : (scanned.label ?? "unlabelled"))
-                    Text(String(format: "%.1f × %.1f × %.1f cm · %@",
-                                scanned.width * 100, scanned.depth * 100, scanned.height * 100,
-                                scanned.rigidity ?? "?"))
-                        .font(.caption)
+        NavigationStack {
+            List {
+                ForEach(items) { scanned in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(scanned.labelStatus == "pending" ? "Labelling…" : (scanned.label ?? "Unlabelled"))
+                            .font(.body.weight(.medium))
+                        Text("\(scanned.sizeText) · \(scanned.rigidity ?? "rigidity unknown")")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
-            .onDelete { offsets in
-                let ids = offsets.map { items[$0].id }
-                items.remove(atOffsets: offsets)
-                inventory.removeAll { ids.contains($0.id) }  // same item, both counts
-                Task {
-                    for id in ids {
-                        do { try await API.delete(itemId: id) } catch { status = "delete: \(error.localizedDescription)" }
+                .onDelete { offsets in
+                    let ids = offsets.map { items[$0].id }
+                    items.remove(atOffsets: offsets)
+                    inventory.removeAll { ids.contains($0.id) }  // same item, both counts
+                    Task {
+                        for id in ids {
+                            do { try await API.delete(itemId: id) } catch { status = "delete: \(error.localizedDescription)" }
+                        }
                     }
                 }
             }
+            .overlay {
+                if items.isEmpty {
+                    ContentUnavailableView("Nothing scanned yet", systemImage: "shippingbox",
+                                           description: Text("Switch to Item and tap something next to the bag."))
+                }
+            }
+            .navigationTitle("In this suitcase")
+            .navigationBarTitleDisplayMode(.inline)
         }
+        .presentationDetents([.medium, .large])
         .task { await loadItems() }
     }
+
+    // MARK: - Server calls
 
     private func loadItems() async {
         guard let suitcaseId else { return }
@@ -192,25 +267,70 @@ struct ContentView: View {
     }
 }
 
+extension ScannedItem {
+    /// Stored in metres (team contract); centimetres only here, at the moment of display.
+    var sizeText: String { String(format: "%.1f × %.1f × %.1f cm", width * 100, depth * 100, height * 100) }
+}
+
 /// Shows the server's label and rigidity guess; edits are sent back as user overrides.
 struct ItemEditor: View {
     @Binding var item: ScannedItem
     @State private var label = ""
 
     var body: some View {
-        TextField("label", text: $label)
-            .textFieldStyle(.roundedBorder)
-            .onAppear { label = item.label ?? "" }
-            .onChange(of: item.id) { _, _ in label = item.label ?? "" }
-            .onSubmit { Task { item = try await API.update(id: item.id, label: label, rigidity: nil) } }
-        Picker("rigidity", selection: Binding(get: { item.rigidity ?? "rigid" }, set: { r in
+        HStack(alignment: .firstTextBaseline) {
+            TextField("Label", text: $label)
+                .font(.headline)
+                .submitLabel(.done)
+                .onAppear { label = item.label ?? "" }
+                .onChange(of: item.id) { _, _ in label = item.label ?? "" }
+                .onSubmit { Task { item = try await API.update(id: item.id, label: label, rigidity: nil) } }
+            Text(item.sizeText).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+        }
+        Picker("Rigidity", selection: Binding(get: { item.rigidity ?? "rigid" }, set: { r in
             Task { item = try await API.update(id: item.id, label: nil, rigidity: r) }
         })) {
-            ForEach(["rigid", "soft", "fragile"], id: \.self) { Text($0).tag($0) }
+            ForEach(["rigid", "soft", "fragile"], id: \.self) { Text($0.capitalized).tag($0) }
         }
         .pickerStyle(.segmented)
-        if let d = item.description, !d.isEmpty { Text(d).font(.caption) }
-        Text("~\(String(format: "%.1f", item.mass ?? 0)) kg · squeezes \(String(format: "%.1f", item.compressibility ?? 1))×\(item.keepUpright == true ? " · keep upright" : "")").font(.caption2)
-        Text("\(item.labelSource ?? "") label · \(item.rigiditySource ?? "") rigidity").font(.caption2)
+        if let d = item.description, !d.isEmpty {
+            Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        }
+        Text("~\(String(format: "%.1f", item.mass ?? 0)) kg · squeezes \(String(format: "%.1f", item.compressibility ?? 1))×\(item.keepUpright == true ? " · keep upright" : "")")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+        Text("\(item.labelSource ?? "") label · \(item.rigiditySource ?? "") rigidity")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+    }
+}
+
+/// Server address and bearer token, kept in UserDefaults; API.base re-reads them on every request.
+struct SettingsSheet: View {
+    @Binding var serverURL: String
+    @Binding var authToken: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("http://192.168.1.20:8000", text: $serverURL).keyboardType(.URL)
+                } header: {
+                    Text("Server address")
+                } footer: {
+                    Text("The Mac running the packing server, on the same Wi-Fi as this phone. `ipconfig getifaddr en0` on the Mac prints its address.")
+                }
+                Section("Bearer token") {
+                    TextField("Optional", text: $authToken)
+                }
+            }
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Done") { dismiss() } }
+        }
+        .presentationDetents([.medium])
     }
 }

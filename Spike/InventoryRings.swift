@@ -55,7 +55,7 @@ struct InventoryRings: View {
                 Color.black.opacity(0.45).ignoresSafeArea().onTapGesture(perform: dismiss)
                 if items.isEmpty {
                     Text("Nothing scanned yet")
-                        .font(.system(.body, design: .monospaced))
+                        .font(.body)
                         .foregroundStyle(.white)
                         .position(center)
                 }
@@ -76,7 +76,7 @@ struct InventoryRings: View {
         let label = item.labelStatus == "pending" ? "labelling…" : (item.label ?? "unlabelled")
         return Button { select(item) } label: {
             Text(label)
-                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                .font(.caption2.weight(.semibold))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)

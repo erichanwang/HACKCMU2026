@@ -15,6 +15,9 @@ enum AppTab: Hashable { case home, scan, items, pack }
 
 struct ContentView: View {
     @State private var tab = AppTab.home
+    /// Held here so changing either re-evaluates the tree that reads `Sheet`.
+    @AppStorage("accentName") private var accentName = "Orange"
+    @AppStorage("appearance") private var appearance = Appearance.light.rawValue
     /// True while the Pack tab's AR overlay owns the camera.
     @State private var arActive = false
 
@@ -34,7 +37,7 @@ struct ContentView: View {
                 .tag(AppTab.pack)
         }
         .tint(Sheet.accent)
-        .preferredColorScheme(.light)
+        .preferredColorScheme(Appearance(rawValue: appearance)?.scheme ?? .light)
     }
 }
 
@@ -124,15 +127,18 @@ struct ScanScreen: View {
                 }
                 panel
             }
-            // Light chrome over the live feed, matching every other screen.
-            .environment(\.colorScheme, .light)
+            // Chrome over the live feed follows the app's own appearance setting.
         }
         .tint(Sheet.accent)
         .animation(.easeOut(duration: 0.2), value: showingInventory)
         .sheet(isPresented: $showingItems) { itemList }
         .sheet(isPresented: $showSettings) { SettingsSheet(serverURL: $serverURL, authToken: $authToken) }
         .sheet(isPresented: $showingPlanSheet) {
-            if let plan { PlanSheet(plan: plan, notice: planNotice, arActive: $planARActive) }
+            if let plan {
+                PlanSheet(plan: plan, notice: planNotice,
+                          scans: Dictionary(inventory.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+                          arActive: $planARActive)
+            }
         }
         .confirmationDialog("Delete this suitcase? Scanned items stay in your inventory.",
                             isPresented: $confirmingReset, titleVisibility: .visible) {
@@ -526,6 +532,8 @@ struct ItemEditor: View {
 struct SettingsSheet: View {
     @Binding var serverURL: String
     @Binding var authToken: String
+    @AppStorage("accentName") private var accentName = "Orange"
+    @AppStorage("appearance") private var appearance = Appearance.light.rawValue
     /// Which model the server asks to identify a scan. Sent with every upload; the
     /// server re-asks the same one on its background retries.
     @AppStorage("labelModel") private var labelModel = "both"
@@ -540,6 +548,21 @@ struct SettingsSheet: View {
                     Text("Server address")
                 } footer: {
                     Text("The Mac running the packing server, on the same Wi-Fi as this phone. `ipconfig getifaddr en0` on the Mac prints its address.")
+                }
+                Section("Appearance") {
+                    Picker("Theme", selection: $appearance) {
+                        ForEach(Appearance.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("Undertone", selection: $accentName) {
+                        ForEach(Sheet.accents, id: \.name) { entry in
+                            HStack {
+                                Circle().fill(entry.color).frame(width: 14, height: 14)
+                                Text(entry.name)
+                            }
+                            .tag(entry.name)
+                        }
+                    }
                 }
                 Section {
                     Picker("Model", selection: $labelModel) {

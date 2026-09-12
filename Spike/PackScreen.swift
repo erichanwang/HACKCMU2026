@@ -48,7 +48,7 @@ struct PackScreen: View {
             .refreshable { await load() }
             .navigationDestination(isPresented: $showingPlan) {
                 if let plan {
-                    PlanSheet(plan: plan, notice: planNotice, arActive: $arActive)
+                    PlanSheet(plan: plan, notice: planNotice, scans: scansByID, arActive: $arActive)
                         .navigationTitle("Plan")
                         .navigationBarTitleDisplayMode(.inline)
                 }
@@ -149,6 +149,26 @@ struct PackScreen: View {
         .padding(.top, 20)
     }
 
+    /// The scans behind the placements, by item id. With these the plan draws each
+    /// item's real recorded surface fitted into the box the solver gave it — so a soft
+    /// item the solver squeezed or folded is visibly squeezed, not a tidy rectangle.
+    private var scansByID: [String: ScannedItem] {
+        Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Placements the solver fitted into less room than the item was scanned at. The
+    /// server already allows for this (physics/prepack.py computes a compression
+    /// allowance and hands soft items fold options); this is where it becomes visible.
+    private func squeezedCount(_ plan: PackingPlan) -> Int {
+        let scans = scansByID
+        return plan.placements.filter { placement in
+            guard let scan = scans[placement.itemID] else { return false }
+            let scanned = Double(scan.width * scan.height * scan.depth)
+            let placed = Double(placement.size.x * placement.size.y * placement.size.z)
+            return scanned > 0 && placed < scanned * 0.95
+        }.count
+    }
+
     // MARK: - Numbers
 
     private func contents(of bag: API.Suitcase) -> [ScannedItem] {
@@ -211,6 +231,11 @@ struct PackScreen: View {
                 plan = solved
                 planNotice = nil
                 status = unpacked.isEmpty ? "" : "Didn't fit: \(unpacked.map(\.label).joined(separator: ", "))"
+                let squeezed = squeezedCount(solved)
+                if squeezed > 0 {
+                    let note = "\(squeezed) \(squeezed == 1 ? "item is" : "items are") folded or squeezed to fit"
+                    status += status.isEmpty ? note : " · " + note
+                }
                 if pendingLabels > 0 {
                     status += status.isEmpty ? "\(pendingLabels) still being identified" : ", \(pendingLabels) still being identified"
                 }

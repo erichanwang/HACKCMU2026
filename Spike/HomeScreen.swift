@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The landing page: the whole screen is the control, and the gesture carries you in.
 ///
@@ -250,11 +251,56 @@ struct HomeScreen: View {
 }
 
 /// The one place the app's ink, paper and signal are named.
+///
+/// Paper, card, ink and hairline resolve per trait collection, so one definition covers
+/// both appearances and every screen follows the toggle without plumbing. The accent is
+/// the user's, read from `UserDefaults`; `ContentView` holds the same key so changing it
+/// re-evaluates the tree that reads these.
 enum Sheet {
-    static let paper = Color.white
-    static let card = Color(red: 0.976, green: 0.976, blue: 0.980)
-    static let hairline = Color(red: 0.102, green: 0.122, blue: 0.169).opacity(0.10)
-    static let ink = Color(red: 0.102, green: 0.122, blue: 0.169)
-    static let accent = Color(red: 0.839, green: 0.329, blue: 0.122)
-    static let warn = Color(red: 0.702, green: 0.443, blue: 0.031)
+    static var paper: Color { adaptive(light: 1, 1, 1, dark: 0.055, 0.063, 0.075) }
+    static var card: Color { adaptive(light: 0.976, 0.976, 0.980, dark: 0.102, 0.114, 0.133) }
+    static var ink: Color { adaptive(light: 0.102, 0.122, 0.169, dark: 0.949, 0.957, 0.969) }
+    static var hairline: Color { ink.opacity(0.12) }
+    static var warn: Color { adaptive(light: 0.702, 0.443, 0.031, dark: 0.886, 0.647, 0.235) }
+
+    /// The undertone. One saturated colour carries the whole app, so it is the only
+    /// thing worth letting someone change.
+    static let accents: [(name: String, color: Color)] = [
+        ("Orange", Color(red: 0.839, green: 0.329, blue: 0.122)),
+        ("Blue", Color(red: 0.098, green: 0.435, blue: 0.839)),
+        ("Green", Color(red: 0.078, green: 0.529, blue: 0.357)),
+        ("Violet", Color(red: 0.424, green: 0.310, blue: 0.812)),
+        ("Pink", Color(red: 0.831, green: 0.243, blue: 0.478)),
+        ("Graphite", Color(red: 0.231, green: 0.255, blue: 0.294)),
+    ]
+
+    static var accentName: String { UserDefaults.standard.string(forKey: "accentName") ?? "Orange" }
+
+    static var accent: Color {
+        accents.first { $0.name == accentName }?.color ?? accents[0].color
+    }
+
+    private static func adaptive(light lr: CGFloat, _ lg: CGFloat, _ lb: CGFloat,
+                                 dark dr: CGFloat, _ dg: CGFloat, _ db: CGFloat) -> Color {
+        Color(UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: dr, green: dg, blue: db, alpha: 1)
+                : UIColor(red: lr, green: lg, blue: lb, alpha: 1)
+        })
+    }
+}
+
+/// Light, dark, or whatever the phone is set to.
+enum Appearance: String, CaseIterable {
+    case system, light, dark
+
+    var scheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+
+    var label: String { rawValue.capitalized }
 }

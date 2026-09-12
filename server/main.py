@@ -53,6 +53,7 @@ class Guess(BaseModel):
 
 
 def detect(image: bytes) -> dict:
+    """Ask Claude what the object is. 502 with the reason when it can't answer; the app shows that."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return dict(UNKNOWN)
     media_type = "image/png" if image.startswith(b"\x89PNG") else "image/jpeg"
@@ -71,9 +72,9 @@ def detect(image: bytes) -> dict:
         if out is None:
             raise ValueError(f"no parsed output (stop_reason={r.stop_reason})")
     except (anthropic.APIError, ValueError) as e:
-        # The item is still worth storing; the user can fix the label by hand.
-        print(f"labelling failed ({type(e).__name__}): {str(e)[:200]}", flush=True)
-        return dict(UNKNOWN)
+        msg = f"labelling failed ({type(e).__name__}): {str(e)[:200]}"
+        print(msg, flush=True)
+        raise HTTPException(502, msg)
     return {"label": out.label[:60], "description": out.description[:200], "rigidity": out.rigidity,
             "compressibility": compressibility(out.compressibility, out.rigidity),
             "mass": min(50.0, max(0.0, out.mass)), "keepUpright": out.keepUpright}
@@ -151,7 +152,10 @@ def create_item(item: str = Form(...), image: UploadFile | None = File(None)):
         raise HTTPException(400, "item must be JSON with id and suitcaseId")
     if db.suitcases.find_one({"_id": suitcase_id}) is None:
         raise HTTPException(404, "no such suitcase")
-    guess = detect(image.file.read()) if image is not None else dict(UNKNOWN)
+    try:
+        guess = detect(image.file.read()) if image is not None else dict(UNKNOWN)
+    except HTTPException:
+        guess = dict(UNKNOWN)  # the scan is still worth storing; the user can fix the label by hand
     sources = {"labelSource": "auto", "rigiditySource": "auto", "compressibilitySource": "auto"}
     if image is None:  # confirmed or typed-in item: the fields the app sends are authoritative
         for field in ("label", "description", "rigidity", "compressibility", "mass", "keepUpright"):

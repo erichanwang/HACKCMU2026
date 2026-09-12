@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import time
+import os
 import unittest
 
 import numpy as np
@@ -358,6 +359,7 @@ class TestPrismPerf(unittest.TestCase):
     batched path for the per-pair prism loop. Sanity bound, not a benchmark:
     fastest of 5 rounds (a mean is hostage to whatever else the box is doing)."""
 
+    @unittest.skipUnless(os.environ.get("PHYSICS_PERF_TESTS"), "wall-clock budget: flakes under shared CPU load; PHYSICS_PERF_TESTS=1 on a quiet machine")
     def test_dense_mixed_scene(self):
         rng = np.random.default_rng(20260911)
         fp = _ngon(8, 0.1)

@@ -1023,6 +1023,19 @@ def _drift_corner_err(true_out: dict, drifted_out: dict, placements: list[dict])
     return max_err
 
 
+# How much of the plan overlay's ARAnchor-tracked horizontal/rotational world drift is modelled as
+# corrected by the time the overlay is drawn. Not 1.0 (full correction): the table plane is
+# re-observed against live depth data every frame, so a fresh read of it is close to ground truth
+# regardless of how much the world has drifted -- but a plain ARAnchor at the bag's origin has no
+# equivalent (nothing re-observes "the bag" the way ARKit re-observes the table), so it only gets
+# whatever *partial* correction ARKit's generic pose-graph revision happens to apply. tests/swift/
+# drift Section 4d sweeps this fraction and finds a break-even point per scenario; 0.8 is the same
+# deliberately non-idealised point picked there for its gate, kept identical here so both checks
+# assert against the same claim about real hardware -- see that section for the sweep and why 1.0
+# would just restate the assumption as a result.
+ANCHOR_CORRECTION_FRACTION = 0.8
+
+
 def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, placements: list[dict]) -> None:
     """World-origin drift + plane error between scan time and overlay time, at the mid/worst
     magnitudes tests/swift/drift/main.swift itself characterised. `placements` must come from a
@@ -1035,31 +1048,35 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
     `session.add(anchor:)` and lets ARKit correct that anchor's transform as it refines its
     world-tracking pose graph (showPlan). tests/swift/drift's own before/after (Sections 4 and 4d)
     model these as: `vertical_cm` (the table's estimated height drifting between scan and overlay)
-    corrected by the first fix, and `axis_deg`/`horizontal_cm` (world-frame rotation/translation
-    drift over the same window) corrected by the second. Neither fix touches `plane_cm` -- one
-    instant's plane-fit noise, present the moment either anchor is (re-)read, not something that
-    "drifted" afterwards. Modelled the same way here: `plane_cm` is kept in both rows unreduced;
-    `vertical_cm`, `axis_deg` and `horizontal_cm` are zeroed for "today" and kept for "frozen".
-    Whether ARKit's anchor-transform correction is in practice as complete as this model assumes
-    -- there is no live re-observation of "the bag" the way the table plane gets one every frame --
-    is NOT verified here; that needs a real device."""
+    fully corrected by the first fix -- the plane is re-observed against live depth every frame, so
+    a fresh read is close to ground truth regardless of drift -- and `axis_deg`/`horizontal_cm`
+    (world-frame rotation/translation drift over the same window) only PARTIALLY corrected by the
+    second, at `ANCHOR_CORRECTION_FRACTION`: a plain ARAnchor has no live re-observation of "the
+    bag" backing it, only ARKit's own pose-graph revision, so claiming full correction there would
+    be the modelling assumption restated as a result, not a measurement. Neither fix touches
+    `plane_cm` -- one instant's plane-fit noise, present the moment either anchor is (re-)read, not
+    something that "drifted" afterwards. Modelled the same way here: `plane_cm` is kept in both
+    rows unreduced; `vertical_cm` is zeroed for "today"; `axis_deg`/`horizontal_cm` are scaled by
+    `(1 - ANCHOR_CORRECTION_FRACTION)` for "today" and kept in full for "frozen"."""
     pivot = np.array([SUITCASE_ARGS["cx"], SUITCASE_ARGS["cz"]])
     print("== drift: world-origin drift + plane/axis error between scan and overlay ==")
-    print("(planeY is re-resolved live -- Spike/ScanView.swift's refreshPlaneY -- and the plan "
-          "overlay is now anchored to a tracked ARAnchor -- showPlan -- so vertical, horizontal and "
-          "rotational world drift are all modelled as corrected; only the one-instant plane-fit "
-          "noise below is not)")
+    print(f"(planeY is re-resolved live -- Spike/ScanView.swift's refreshPlaneY -- fully correcting "
+          f"vertical world drift; the plan overlay's tracked ARAnchor -- showPlan -- is modelled as "
+          f"correcting only {ANCHOR_CORRECTION_FRACTION * 100:.0f}% of horizontal/rotational world "
+          f"drift, since nothing re-observes the bag the way the plane is re-observed every frame; "
+          f"plane-fit noise is corrected by neither)")
     print(f"{'scenario':<58} {'corner err (today/frozen)':<28} {'escape (today/frozen)':<28} fits? (today)")
-    worst_esc, worst_label = 0.0, ""
+    worst_esc, worst_label, worst_corner_err = 0.0, "", 0.0
     for label, (plane_cm, vertical_cm, axis_deg, horizontal_cm) in (
             ("mid-range", DRIFT_MID), ("worst realistic", DRIFT_WORST)):
         # The real table never moves -- what drifts is ARKit's world-frame belief about its
         # height/rotation/position, i.e. purely an *input* error to the overlay, not a change in
         # the points LiDAR would see. frozen bakes in the tap-time reading noise (plane_cm) and
         # everything the world frame has since drifted by (vertical_cm, axis_deg, horizontal_cm);
-        # today re-reads/re-anchors live, so only the reading noise -- present at any instant --
-        # survives.
-        today = _drift_fit(driver, true_suitcase_points, pivot, 0.0, 0.0,
+        # today re-reads/re-anchors live, so vertical_cm is fully gone and axis_deg/horizontal_cm
+        # only partially are -- the reading noise (plane_cm), present at any instant, always survives.
+        residual = 1 - ANCHOR_CORRECTION_FRACTION
+        today = _drift_fit(driver, true_suitcase_points, pivot, axis_deg * residual, horizontal_cm * residual,
                             TABLE_Y + plane_cm / 100, placements)
         frozen = _drift_fit(driver, true_suitcase_points, pivot, axis_deg, horizontal_cm,
                              TABLE_Y + plane_cm / 100 + vertical_cm / 100, placements)
@@ -1077,16 +1094,21 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
                     f"{axis_deg:.0f}deg axis, {horizontal_cm:.0f}cm horizontal drift)")
         print(f"{scenario:<58} {corner_err * 100:5.2f} / {frozen_corner_err * 100:5.2f} cm         "
               f"{max_esc * 100:5.2f} / {frozen_esc * 100:5.2f} cm ({escaped} corners)   {verdict}")
-        if max_esc > worst_esc:
-            worst_esc, worst_label = max_esc, label
-    if worst_esc > 1e-4:
-        warn("drift escape", f"worst {worst_esc * 100:.2f} cm at {worst_label} drift, "
-                              f"live-planeY and tracked-ARAnchor corrected (plane-fit noise is not, "
-                              f"and the ARAnchor correction itself is unverified without a device)")
-    print("note: with vertical/horizontal/rotational drift all modelled as corrected, what's left "
-          "in the today column is plane_cm's own fit noise (present the instant the anchors are "
-          "read, not something either fix can re-derive); the frozen column keeps the full "
-          "pre-fix exposure for contrast.")
+        if max_esc >= worst_esc:
+            worst_esc, worst_label, worst_corner_err = max_esc, label, corner_err
+    # Always fires (unless the residual happens to be exactly zero): at less-than-100% anchor
+    # correction there is always something left over to report, and a WARN that can structurally
+    # never print is exactly the "row that cannot appear" problem a gate should not have.
+    warn("drift residual", f"worst {worst_corner_err * 100:.2f} cm corner error / {worst_esc * 100:.2f} cm escape "
+                            f"at {worst_label} drift, modelling the plan overlay's ARAnchor at only "
+                            f"{ANCHOR_CORRECTION_FRACTION * 100:.0f}% horizontal/rotational correction "
+                            f"(plane-fit noise is corrected by neither fix; the {ANCHOR_CORRECTION_FRACTION * 100:.0f}% "
+                            f"figure itself is a modelling choice, not a device measurement -- see tests/swift/drift "
+                            f"Section 4d for the full sweep and break-even points)")
+    print("note: vertical world drift is modelled as fully corrected (live plane re-fit); horizontal "
+          f"and rotational drift are modelled as only {ANCHOR_CORRECTION_FRACTION * 100:.0f}% corrected "
+          "(tracked ARAnchor, no live ground truth); plane-fit noise is corrected by neither. The "
+          "frozen column keeps the full pre-fix exposure for contrast.")
     print("")
 
 

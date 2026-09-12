@@ -67,6 +67,11 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
+_PACKER3D_ROOT = ROOT / "packer3d"
+if (_PACKER3D_ROOT / "packer3d" / "__init__.py").is_file() and str(_PACKER3D_ROOT) not in sys.path:
+    sys.path.append(str(_PACKER3D_ROOT))  # sibling source dir, same trick as physics/packer3d_adapter.py
+from packer3d.models import Item, oriented_solid_boxes  # noqa: E402 -- needs the sys.path append above
+
 RNG_SEED = 20260912
 TABLE_Y = 0.80          # world height of the table plane, metres
 WALL = 0.01             # suitcaseWallMeters, Spike/ScanView.swift
@@ -569,6 +574,44 @@ def boxes_overlap(a_pos, a_size, b_pos, b_size, eps: float = 1e-4) -> bool:
     return all(a_pos[i] < b_pos[i] + b_size[i] - eps and b_pos[i] < a_pos[i] + a_size[i] - eps for i in range(3))
 
 
+# app_plan.py's placement frame is packer3d's with y/z swapped, no reflection:
+# "app(x, y, z) = (packer_x, packer_z, packer_y)". `oriented_solid_boxes` only decomposes a
+# height-grid item into its cavity boxes for orientations "xyz"/"yxz" (the two that keep the
+# item's own "up" along world z); app_plan.py's `_ROTATION` maps exactly those two packer
+# orientations to the app rotation strings "XYZ"/"ZYX", everything else falls back to the plain
+# bbox in oriented_solid_boxes anyway, so only those two need naming here.
+_APP_ROTATION_TO_PACKER_ORIENTATION = {"XYZ": "xyz", "ZYX": "yxz"}
+
+
+def placement_solid_boxes(placement: dict, items_by_id: dict) -> list:
+    """`placement`'s occupied boxes (list of packer-frame ``(lo, hi)`` tuples), decomposed into
+    cavity solids via `packer3d`'s own `Item.solid_boxes()`/`oriented_solid_boxes` -- the same
+    algorithm `packer3d.verify` and `physics/packer3d_adapter.py` use -- instead of one bbox per
+    placement, so a legitimately nested item (e.g. a cup inside a bowl) isn't reported as an
+    overlap with its container."""
+    pos, size = placement["position"], placement["size"]
+    packer_pos = (pos["x"], pos["z"], pos["y"])
+    packer_dims = (size["x"], size["z"], size["y"])
+    item = items_by_id.get(placement["itemId"])
+    if item is None:
+        return [(packer_pos, tuple(packer_pos[k] + packer_dims[k] for k in range(3)))]
+    orientation = _APP_ROTATION_TO_PACKER_ORIENTATION.get(placement.get("rotation"), "")
+    return oriented_solid_boxes(item, packer_pos, packer_dims, orientation)
+
+
+def solids_overlap(placement_a: dict, placement_b: dict, items_by_id: dict) -> bool:
+    """True iff any solid sub-box of `placement_a` truly overlaps any solid sub-box of
+    `placement_b` -- unlike a bare bounding-box test, this lets one item's cavity legitimately
+    contain another's solid."""
+    for a_lo, a_hi in placement_solid_boxes(placement_a, items_by_id):
+        a_size = [a_hi[k] - a_lo[k] for k in range(3)]
+        for b_lo, b_hi in placement_solid_boxes(placement_b, items_by_id):
+            b_size = [b_hi[k] - b_lo[k] for k in range(3)]
+            if boxes_overlap(a_lo, a_size, b_lo, b_size):
+                return True
+    return False
+
+
 # --- degradation report -------------------------------------------------------------------
 
 
@@ -773,6 +816,43 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
 LID_OPEN_ESCAPE_TOLERANCE_M = 0.010
 
 
+def pin_nesting_overlap_check() -> None:
+    """Regression pin for `solids_overlap`, both directions -- no driver/docker needed, so it
+    always runs, even when the rest of the pipeline skips. A bowl (box item with a cavity carved
+    into one quadrant of its height grid, like `Item.solid_boxes`) with a cup placed in that
+    cavity must NOT be reported as an overlap; two genuinely overlapping plain boxes still must
+    be. Without the second half, "always accepts" would pass just as silently as the bug this
+    check replaces."""
+    # 4x4 height grid, one corner cell (x>=0.15, z>=0.15) empty: fill_frac 15/16 and
+    # volume/bbox 15/16 both clear the 0.9 "box" classification threshold (a coarser cavity,
+    # e.g. one of 2x2, reads as "cylinder" and falls back to the plain bbox -- see models.py's
+    # from_scanned_heightmap classifier -- which would make this pin test nothing).
+    bowl = Item.from_scanned_heightmap({"id": "bowl", "dimensions": [0.2, 0.1, 0.2], "cellSize": 0.05,
+                                         "heights": [[0.1, 0.1, 0.1, 0.1], [0.1, 0.1, 0.1, 0.1],
+                                                     [0.1, 0.1, 0.1, 0.1], [0.1, 0.1, 0.1, 0.0]]})
+    cup = Item.from_scanned_heightmap({"id": "cup", "dimensions": [0.04, 0.04, 0.04], "cellSize": 0.04,
+                                        "heights": [[0.04]]})
+    items_by_id = {"bowl": bowl, "cup": cup}
+    bowl_p = {"itemId": "bowl", "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+              "size": {"x": 0.2, "y": 0.1, "z": 0.2}, "rotation": "XYZ"}
+    cup_p = {"itemId": "cup", "position": {"x": 0.155, "y": 0.0, "z": 0.155},
+             "size": {"x": 0.04, "y": 0.04, "z": 0.04}, "rotation": "XYZ"}
+    assert boxes_overlap([0.0, 0.0, 0.0], [0.2, 0.1, 0.2], [0.155, 0.0, 0.155], [0.04, 0.04, 0.04]), \
+        "sanity: bowl/cup bboxes should overlap, or this isn't testing nesting at all"
+    assert not solids_overlap(bowl_p, cup_p, items_by_id), \
+        "cup nested in the bowl's cavity must not be reported as an overlap"
+
+    a = Item.from_scanned_heightmap({"id": "a", "dimensions": [0.1, 0.1, 0.1], "cellSize": 0.1, "heights": [[0.1]]})
+    b = Item.from_scanned_heightmap({"id": "b", "dimensions": [0.1, 0.1, 0.1], "cellSize": 0.1, "heights": [[0.1]]})
+    items_by_id2 = {"a": a, "b": b}
+    a_p = {"itemId": "a", "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+           "size": {"x": 0.1, "y": 0.1, "z": 0.1}, "rotation": "XYZ"}
+    b_p = {"itemId": "b", "position": {"x": 0.05, "y": 0.0, "z": 0.05},
+           "size": {"x": 0.1, "y": 0.1, "z": 0.1}, "rotation": "XYZ"}
+    assert solids_overlap(a_p, b_p, items_by_id2), "two genuinely overlapping boxes must still fail"
+    print("== nesting overlap check pinned: bowl/cup nesting accepted, genuine overlap rejected ==\n")
+
+
 def lid_open_true_interior_check(true_out: dict, degraded_out: dict, placements: list[dict]) -> None:
     """The plan was built from the (possibly lid-inflated) degraded suitcase; does it still fit
     the true, undegraded interior once drawn with the degraded anchor? Asserts it does, within
@@ -804,6 +884,7 @@ def main() -> int:
     mongo_name: str | None = None
     server: subprocess.Popen | None = None
     try:
+        pin_nesting_overlap_check()
         driver = build_driver(tmp_root)
 
         print(f"degradations active this run: "
@@ -864,6 +945,7 @@ def main() -> int:
 
         # 3) POST every item
         item_ids = []
+        items_by_id = {}  # item id -> packer3d Item, so the overlap check below can decompose cavities
         for it, fit in zip(items, item_fits):
             doc = {"id": f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": suitcase_doc["id"],
                    "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
@@ -872,6 +954,7 @@ def main() -> int:
             if status != 200:
                 fail(f"POST /items ({it['name']}) -> {status}: {resp}")
             item_ids.append(resp["id"])
+            items_by_id[doc["id"]] = Item.from_scanned_heightmap(doc)
             print(f"      + {it['name']:<12} {doc['dimensions'][0]:.3f}x{doc['dimensions'][1]:.3f}x"
                   f"{doc['dimensions'][2]:.3f} m  label={resp['label']}")
 
@@ -909,11 +992,7 @@ def main() -> int:
         for i in range(len(placements)):
             for j in range(i + 1, len(placements)):
                 pi, pj = placements[i], placements[j]
-                pos_i = [pi["position"]["x"], pi["position"]["y"], pi["position"]["z"]]
-                size_i = [pi["size"]["x"], pi["size"]["y"], pi["size"]["z"]]
-                pos_j = [pj["position"]["x"], pj["position"]["y"], pj["position"]["z"]]
-                size_j = [pj["size"]["x"], pj["size"]["y"], pj["size"]["z"]]
-                if boxes_overlap(pos_i, size_i, pos_j, size_j):
+                if solids_overlap(pi, pj, items_by_id):
                     fail(f"{pi['label']} (step {pi['step']}) overlaps {pj['label']} (step {pj['step']})")
 
         print(f"[5/5] every placement is inside the bag, no two overlap, all world positions finite")

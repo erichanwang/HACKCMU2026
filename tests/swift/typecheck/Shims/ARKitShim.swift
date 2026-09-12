@@ -49,7 +49,10 @@ public class ARSession {
     public func run(_ configuration: ARConfiguration) {}
     public var currentFrame: ARFrame? { fatalError() }
     public weak var delegate: ARSessionDelegate?
+    /// developer.apple.com/documentation/arkit/arsession/add(anchor:) -- registers a tracked
+    /// anchor whose transform ARKit revises as it refines the world-tracking pose graph.
     public func add(anchor: ARAnchor) {}
+    /// developer.apple.com/documentation/arkit/arsession/remove(anchor:)
     public func remove(anchor: ARAnchor) {}
 }
 
@@ -74,6 +77,7 @@ public class ARFrame {
 
 public class ARAnchor {
     public var transform: simd_float4x4 { fatalError() }
+    /// developer.apple.com/documentation/arkit/aranchor/init(transform:)
     public init(transform: simd_float4x4) {}
 }
 

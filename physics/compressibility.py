@@ -9,11 +9,11 @@ class is to actually use that headroom (`RIGIDITY_ALLOWANCE_FRACTION`), and
 hard-capped at 95% of the extent so nothing is ever treated as compressing
 itself away to nothing.
 
-This single scalar-per-axis model is intentionally crude: real fabric/foam
-compression is anisotropic (squishes differently in different directions)
-and load-dependent (how hard it's being pushed), not a single k-derived
-number. Good enough for a hackathon MVP; a real deformation/FEM model is out
-of scope here.
+`compression_allowance_on_axis_m` adds the anisotropy on top: a folded stack
+squashes through its layers and barely at all across them, so the same k buys
+a caller much less allowance in plane than along the layer normal. Still crude
+-- it is not load-dependent (how hard the thing is being pushed) and a real
+deformation/FEM model is out of scope here.
 """
 from __future__ import annotations
 
@@ -53,6 +53,45 @@ def compression_allowance_m(obj: Object, extent_m: float) -> float:
     k = max(1.0, float(obj.compressibility_k))
     allowance = extent_m * (1.0 - 1.0 / k) * fraction
     return float(min(max(0.0, allowance), _MAX_COMPRESSION_FRACTION * extent_m))
+
+
+# A folded/rolled soft item is a stack of layers with air between them. Squeezing
+# it along the layer normal (the thin axis -- pressing down on a stack of shirts)
+# just pushes that air out, so the whole k-derived allowance is available. Squeezing
+# it *in plane* (shortening a folded shirt from 30cm to 25cm without refolding it)
+# means crushing the weave itself, which barely gives at all. The old single-scalar
+# model applied the layer-normal number to whatever axis a caller asked about.
+#
+# 1.0 is not a new number: it reproduces `compression_allowance_m` exactly, which is
+# what today's callers already use on the height axis (= the thin axis for a scanned
+# garment stack). 0.15 is ESTIMATED -- fabric in tension gives a little, not nothing.
+LAYER_NORMAL_ANISOTROPY = 1.0
+IN_PLANE_ANISOTROPY = 0.15
+
+
+def layer_axis_index(dimensions) -> int:
+    """Index of the fold's layer normal: the object's thinnest axis.
+
+    A folded stack of clothes is thin through its layers and wide across them, so
+    the smallest of `dimensions` is the direction the layers stack in. Ties go to
+    the lowest index; for a cube every axis is as good as any other anyway.
+    """
+    return min(range(3), key=lambda i: float(dimensions[i]))
+
+
+def compression_allowance_on_axis_m(obj: Object, extent_m: float, axis_index: int) -> float:
+    """Axis-aware `compression_allowance_m`: how much of `extent_m` along the
+    object's own axis `axis_index` (0=width, 1=height, 2=depth) is plausible squish.
+
+    Full allowance along the object's layer normal (`layer_axis_index`), a small
+    fraction of it in plane. Rigid objects are still 0.0 on every axis.
+    """
+    factor = (
+        LAYER_NORMAL_ANISOTROPY
+        if axis_index == layer_axis_index(obj.dimensions)
+        else IN_PLANE_ANISOTROPY
+    )
+    return compression_allowance_m(obj, extent_m) * factor
 
 
 def axis_projected_extent_m(obb: OBB, axis: np.ndarray) -> float:

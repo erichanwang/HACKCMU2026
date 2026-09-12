@@ -341,32 +341,54 @@ struct ScanView: UIViewRepresentable {
                     self.show(box, in: view)
                     return
                 }
-                view.snapshot(saveToHDR: false) { [weak self] shot in
-                    guard let self else { return }
-                    guard let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else {
-                        Task { @MainActor in self.status = "Couldn't capture a photo — item saved without a label" }
-                        return
-                    }
-                    Task { @MainActor in
-                        do {
-                            let uploaded = try await API.upload(scanned, image: UIImage(cgImage: cg))
-                            self.item = uploaded
-                            if uploaded.labelStatus == "pending" {
-                                self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
-                                await self.pollLabel(id: uploaded.id)
-                            } else {
-                                // Terminal already: "unidentified" and "failed" never poll, and
-                                // before this they fell through showing "labelled unknown".
-                                self.status = labelStatusMessage(labelStatus: uploaded.labelStatus,
-                                                                 label: uploaded.label,
-                                                                 identifyHint: uploaded.identifyHint)
+                // `snapshot` renders whatever the ARView is drawing, and what it is drawing
+                // includes the scene-reconstruction wireframe (`debugOptions`, set in makeUIView).
+                // Every photo the models got was therefore a red triangle mesh laid over the
+                // object, and they described the mesh: "quilted fabric", "woven fabric mesh",
+                // "textured surface ... likely a floor or mat". The overlay comes off for the
+                // capture and goes straight back on in the completion handler, whatever it got.
+                //
+                // The hop to the next runloop turn is what makes it stick: the box overlay added
+                // by `show` — called after the snapshot, both before and now — never appears in
+                // the photo, which is how we know a snapshot carries the frame as it stood at the
+                // call, not at completion. Clearing debugOptions in the same turn would land the
+                // same way: too late for the frame being captured.
+                // ponytail: one main-actor hop, no frame callback. If a wireframe still shows up
+                // on device, take the photo from the ARFrame's own capturedImage (PosedFrame +
+                // PixelSampler, as bakeColorMap already does) — no overlay exists there at all.
+                view.debugOptions = []
+                Task { @MainActor in
+                    view.snapshot(saveToHDR: false) { [weak self] shot in
+                        // Snapshot completions are not documented to land on the main thread, and
+                        // an ARView may only be touched there, so the overlay goes back on through
+                        // the main actor like every other UI touch in this closure.
+                        Task { @MainActor in view.debugOptions = [.showSceneUnderstanding] }
+                        guard let self else { return }
+                        guard let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else {
+                            Task { @MainActor in self.status = "Couldn't capture a photo — item saved without a label" }
+                            return
+                        }
+                        Task { @MainActor in
+                            do {
+                                let uploaded = try await API.upload(scanned, image: UIImage(cgImage: cg))
+                                self.item = uploaded
+                                if uploaded.labelStatus == "pending" {
+                                    self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
+                                    await self.pollLabel(id: uploaded.id)
+                                } else {
+                                    // Terminal already: "unidentified" and "failed" never poll, and
+                                    // before this they fell through showing "labelled unknown".
+                                    self.status = labelStatusMessage(labelStatus: uploaded.labelStatus,
+                                                                     label: uploaded.label,
+                                                                     identifyHint: uploaded.identifyHint)
+                                }
+                            } catch {
+                                self.status = "server: \(error.localizedDescription)"
                             }
-                        } catch {
-                            self.status = "server: \(error.localizedDescription)"
                         }
                     }
+                    self.show(box, in: view)
                 }
-                self.show(box, in: view)
             }
         }
 

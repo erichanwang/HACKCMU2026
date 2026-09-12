@@ -50,28 +50,16 @@ QUICK = ("adversarial_exact_fit.json", "camera_kit_fragile.json", "upright_bottl
 UTIL_DROP = 0.05
 
 
-def validator_items(scenario: dict) -> list:
-    """The scenario's items in the spelling `packer3d_adapter.item_metadata` actually reads.
-
-    `packer3d.scenario._item_from_dict` accepts `keep_upright` OR the server document's
-    `keepUpright`, but `item_metadata` reads only `keep_upright` - so a fixture that uses
-    the camelCase spelling is PACKED upright and then GRADED as if it had never asked to
-    be, and every upright violation is invisible. `server/planner.py` never hits this
-    because it validates against `physics.prepack.prepare_items` output, which emits
-    `keep_upright`; the harness has to do the same normalisation to match the server.
-    """
-    return [d | {"keep_upright": bool(d["keepUpright"])}
-            if "keepUpright" in d and "keep_upright" not in d else d
-            for d in scenario.get("items", [])]
-
-
 def run_scenario(scenario: dict, candidates, iters, time_budget):
     """`(candidates, items_given)`; one candidate per (strategy, seed). Shape matches planner.rank."""
     container, items, _config, weights = load_scenario(scenario)
     # `weights` is the objective the SCENARIO FILE declares (5 of the 7 fixtures set
     # non-default `unpacked`/`com`); dropping it optimises a different problem than the
-    # fixture describes and flips which candidate wins - see README, "Why the weights".
-    vitems = validator_items(scenario)
+    # fixture describes and flips which candidate wins - see README, "what the harness runs".
+    # The raw fixture items go to the validator unchanged: a fixture IS a packer3d scenario
+    # item, i.e. what `physics.prepack.prepare_items` produces for the server, so re-running
+    # prepack on one would feed a stage its own output. See the README for the evidence.
+    vitems = scenario.get("items", [])
     n_opt = sum(1 for s, _ in candidates if s == "optimized") or 1
     out = []
     for strategy, seed in candidates:
@@ -384,10 +372,6 @@ def selftest() -> int:
     dirty["run"]["dirty"] = True
     regs, warns = regressions(dirty, base)
     assert regs == [] and any("DIRTY" in w for w in warns), (regs, warns)
-    # the keep_upright normalisation the validator needs
-    assert validator_items({"items": [{"id": "a", "keepUpright": True}]})[0]["keep_upright"] is True
-    assert validator_items({"items": [{"id": "a", "keep_upright": False, "keepUpright": True}]}) == \
-        [{"id": "a", "keep_upright": False, "keepUpright": True}], "an explicit spelling wins"
     print("selftest: ok")
     return 0
 

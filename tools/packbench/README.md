@@ -16,39 +16,68 @@ python3 tools/packbench/packbench.py --selftest                        # the gat
 
 ## The harness runs what the scenario file says
 
-`load_scenario` returns `(container, items, config, weights)` and the harness used to
-throw `weights` away. Five of the seven fixtures declare non-default weights
-(`adversarial_exact_fit` `unpacked: 30, com: 2`, `carryon_overfilled` `unpacked: 14,
-com: 4`, `clothes_dominated` `unpacked: 12, com: 4`, `camera_kit_fragile` `unpacked:
-12`, `upright_bottles` `com: 8`), so the harness was optimising a different objective
-than the fixture describes. On `carryon_overfilled` that decided the *winner*:
+The harness's job is to predict `server/planner.py`. It used to disagree with it, and
+with a direct run of the same candidate at the same deterministic settings: on
+`carryon_overfilled` it reported `naive 23/41 46.8%` where `optimized:0` packs 25 items,
+valid, 0 violations, and should win on `planner.rank`'s `items_packed`.
+
+**The harness was the wrong one, in exactly one place: it dropped the weights.**
+`load_scenario` returns `(container, items, config, weights)` and the fourth value went
+into `_weights`. Five of the seven fixtures declare non-default weights
+(`adversarial_exact_fit` `unpacked: 30, com: 2`; `carryon_overfilled` `unpacked: 14,
+com: 4`; `clothes_dominated` `unpacked: 12, com: 4`; `camera_kit_fragile` `unpacked: 12`;
+`upright_bottles` `com: 8`), so the harness was optimising a different problem than the
+fixture describes. On `carryon_overfilled` that decided the *winner*:
 
 | | packed | util | physics | chosen |
 |---|---|---|---|---|
 | weights dropped | 23 | 46.8% | valid | **naive** — `optimized:0` reached 27 items but at 2 `UNSUPPORTED_OBJECT`, so `rank` put it below first-fit |
 | weights passed | 25 | 48.6% | valid | **optimized:0** |
 
-`pack_optimized(..., weights=weights)` now gets them. `pack_naive` does not take
-weights and does not need them — first-fit has no objective to weight.
-
-The harness also normalises one spelling before grading. `packer3d.scenario` accepts
-`keep_upright` *or* the server document's `keepUpright`, but
-`physics.packer3d_adapter.item_metadata` reads only `keep_upright` — so a fixture using
-the camelCase spelling was packed upright and then graded as though it had never asked
-to be, and `upright_bottles`, whose entire point is eleven upright items, had its upright
-constraint checked on *zero* of them. `server/planner.py` never hits this because it
-validates against `physics.prepack.prepare_items` output, which emits `keep_upright`;
-`validator_items()` does the same normalisation so the harness matches the server. It
-changes no number in today's corpus — the solver was already respecting the constraint —
-but the check is now actually running.
+`pack_optimized(..., weights=weights)` now gets them. `pack_naive` takes none and needs
+none — first-fit has no objective to weight. Ablating the change one fixture at a time,
+`carryon_overfilled` is the only one whose chosen candidate moves.
 
 The fixtures' `optimizer` blocks set nothing beyond the budget and seed that `--iters` /
-`--time` / `--seed` deliberately own, so `config` is still discarded; that is a
-deliberate choice, not an oversight.
+`--time` / `--seed` deliberately own, so `config` is still discarded; that is a choice,
+not an oversight.
 
-> The committed `baseline.json` was re-recorded after both of these. Do not diff against
-> anything measured before them — `carryon_overfilled` moves from `naive 23/41 46.8%` to
-> `optimized:0 25/41 48.6%`, which is the fix, not a regression.
+### Why the harness does *not* run `physics.prepack.prepare_items`
+
+`server/planner.py` builds its scenario items with `prepare_items(...)` and validates
+against that, which raises the fair question of whether the harness should too. It should
+not, and cannot:
+
+- **A fixture already *is* prepack's output form.** `prepare_items` consumes a *scan
+  document* (`dimensions: [width, height, depth]` in metres, `rigidity`,
+  `compressibility`, `keepUpright`, `mass`) and emits a *packer3d scenario item*. The
+  fixtures are packer3d scenario files — `dims: [l, w, h]`, `shape`, `count`, `radius`,
+  `heights`/`cellSize`. Calling `prepare_items` on one raises
+  `KeyError: 'dimensions'`; it would be feeding a pipeline stage its own output.
+- **It would change nothing even if it ran.** prepack's whole effect on the packed
+  geometry is to replace the raw scan `compressibility` with
+  `height / (height - compression_allowance_m(...))`, and for a soft item under the 95%
+  cap that expression *is* `k`. Translating all 39 fixture items that carry
+  `compressibility > 1` into scan-document form and running them through
+  `prepare_items` returns the identical `k` for every one, and no fixture has
+  `compressibility > 1` on a non-soft item (which is the one case where prepack and the
+  loader would disagree, prepack refusing to compress what the loader compresses).
+- **The grader reads the fixture's own keys.** Since `e4590e6`, `item_metadata` squashes a
+  soft item's cavity grid and height by `compressibility` under the same
+  `rigidity == "soft"` gate the loader uses, and accepts `keep_upright` *or* `keepUpright`.
+  Both keys are present in the fixtures in exactly those spellings, so the raw fixture
+  items grade the same geometry the server's prepack output would.
+
+Before `e4590e6` the second half of that was false: `item_metadata` read only
+`keep_upright`, so the corpus's 25 camelCase `keepUpright` items — all 11 in
+`upright_bottles`, whose entire purpose is upright constraints — were packed upright and
+then graded as though they had never asked to be. This harness carried a normalisation
+for that for one commit; `e4590e6` fixed it at the source and the normalisation is gone.
+
+> **Do not diff against anything measured before `e4590e6`**, including every number
+> quoted in `fixtures/manifest.json`'s per-fixture `baseline` blocks (`loop @ 875137d`).
+> The committed `baseline.json` is stamped with the commit it measured; that stamp, not
+> the manifest prose, is the machine-readable bar.
 
 ## `--check`: what counts as a regression
 
@@ -141,6 +170,6 @@ all zeros. Fixtures are iterated in sorted filename order and the JSON is dumped
 with sorted keys, so two saved runs diff cleanly. The only part of the output that
 moves between two identical runs is the header's clock line.
 
-`--selftest` asserts the `--check` rules (and the `keep_upright` normalisation) against
-synthetic run/baseline dicts in milliseconds, with no solver and no fixtures. Run it
-after touching `regressions()`; it is the thing that fails if the gate's logic breaks.
+`--selftest` asserts every `--check` rule against synthetic run/baseline dicts in
+milliseconds, with no solver and no fixtures. Run it after touching `regressions()`; it is
+the thing that fails if the gate's logic breaks.

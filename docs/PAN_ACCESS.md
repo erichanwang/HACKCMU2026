@@ -1,0 +1,116 @@
+# PAN Access Reconnaissance
+
+Recon date: 2026-09-12. Every claim below is tagged `[VERIFIED: source]` or `[UNKNOWN]`.
+Nothing here is inferred. No endpoint, SDK name, parameter, or auth scheme was invented.
+
+## (a) Executive answer
+
+1. **No.** There is no programmatic PAN interface available to us right now — no public API,
+   no SDK, no downloadable weights, no hosted inference demo, and no HackCMU-specific access
+   path found locally or on the network.
+2. **Via nothing.** The only contact route IFM publishes is a generic "Collaborate With Us"
+   web form (name / email / message); PAN's own site exposes only a blog link and the paper.
+3. **Verified how:** enumerated all 31 links on ifm.ai (no api/docs/sdk/playground/signup);
+   traced panworld.ai network traffic (pre-rendered video, zero POST, no inference call);
+   PyPI `ifm-ai` is an explicit "SDK coming soon" placeholder; no PAN repo on any IFM GitHub
+   org; no PAN checkpoint on huggingface.co/IFM.
+
+## (b) Sources checked
+
+| Source | Finding | Tag |
+|---|---|---|
+| `env` var names matching pan/ifm/hackcmu/world/model | No PAN/IFM vars. 3 substring false positives only: `HERDR_PANE_ID`, `CODEX_COMPANION_SESSION_ID`, `CODEX_COMPANION_TRANSCRIPT_PATH` | [VERIFIED: `env \| sed 's/=.*//' \| grep -i`] |
+| `python3 -m pip list` (147 pkgs) | Zero matches for pan/ifm/world/model/cosmos/genesis | [VERIFIED: pip list] |
+| `HACKCMU2026` + `HACKCMU2026-pan` trees | Only file mentioning PAN/IFM is `PAN.md` itself. No `.env*` in either tree | [VERIFIED: find + grep -ril] |
+| `~/Downloads/hackcmu26{,.zip}` | Unrelated project ("CT Proximity Risk Viewer"). Zero PAN/IFM references, no `.env` | [VERIFIED: grep -rilE over tree] |
+| `~/Downloads`, `~/Documents`, `~/Desktop`, `~/.config`, `~/.local/share` | No sponsor starter kit, notebook, or PDF mentioning PAN/IFM | [VERIFIED: find -iregex] |
+| Discord / Slack export | None present (only `~/.config/discord` app config, not an export) | [VERIFIED: find -itype d] |
+| arXiv 2511.09057 (abs + full HTML) | Paper exists, 4 versions (v1–v4). Interface shape extracted — see (c) | [VERIFIED: arxiv.org/abs/2511.09057, arxiv.org/html/2511.09057v1] |
+| `ifm.ai/` | 31 links total. Nav = About / Our Models / Collaborate. **No** api, developer, docs, sdk, playground, console, platform, waitlist, or sign-up link | [VERIFIED: DOM anchor enumeration via browser] |
+| `ifm.ai/collaborate/` | Only access route: WordPress contact form, fields = name / email / message. No API signup, no PAN waitlist, no published email | [VERIFIED: form DOM inspection] |
+| `ifm.ai/pan/` | HTTP 301 → `panworld.ai/` (403 to non-browser UA) | [VERIFIED: browser navigation] |
+| `panworld.ai/` (the real PAN site) | Research showcase. Outbound links: Blog (MBZUAI news), Paper (arXiv PDF), socials. No API/docs/SDK/demo-access/pricing | [VERIFIED: DOM snapshot] |
+| panworld.ai "Interactive world simulation" widget | **Pre-rendered, not live inference.** Clicking a world issued 759/760 requests to `customer-cj3dhsc8puv3jkww.cloudflarestream.com`; zero non-GET requests; no `/api/` or generate/infer/predict path | [VERIFIED: browser network trace] |
+| `ifm.mbzuai.ac.ae/pan/` | 2.6 KB shell that iframes `https://panworld.ai/` | [VERIFIED: curl + link extraction] |
+| `github.com/ifm-ai` | 7 repos (uno, PRism-synthesis, search360, horizon-post-train, xllm, PRism-annotator, PRism-curator). **No PAN repo** | [VERIFIED: org repo listing] |
+| `github.com/MBZUAI-IFM` | 8 repos (incl. `WR-Arena`, a world-model *diagnostic/benchmark* tool). **No PAN repo** | [VERIFIED: GitHub API] |
+| `github.com/mbzuai-oryx` | 55 repos, no name matching pan/world | [VERIFIED: GitHub API] |
+| GitHub repo search for `2511.09057` | 0 results — no public reimplementation citing the paper | [VERIFIED: GitHub search API] |
+| `huggingface.co/IFM` | 10 models (all K2-Horizon) + 10 datasets. **No PAN checkpoint.** Org bio mentions PAN only as a description | [VERIFIED: HF org page] |
+| HF model search "PAN world model" | No IFM/PAN checkpoint | [VERIFIED: HF search] |
+| PyPI `ifm-ai` | **EXISTS, v0.0.1, 1535-byte wheel.** Author "Institute of Foundation Models"; summary: *"Placeholder reserving the ifm-ai package name. Full IFM Python SDK coming soon."*; `Development Status :: 1 - Planning`; homepage `https://ifm.ai`; uploaded 2026-07-17 | [VERIFIED: pypi.org/pypi/ifm-ai/json] |
+| PyPI `ifm`, `pan-world-model`, `ifm-pan`, `panwm`, `pan-sdk`, `ifm-sdk` | All HTTP 404 — not published | [VERIFIED: PyPI JSON API] |
+| PyPI `pan` | Exists but unrelated (a pandoc/markdown article builder) | [VERIFIED: pypi.org/pypi/pan/json] |
+| `hackcmu.org` | DNS does not resolve (`getaddrinfo ENOTFOUND`) | [VERIFIED: WebFetch + curl] |
+| `hackcmu-2026.devpost.com` | HTTP 404 | [VERIFIED: WebFetch] |
+| `hackcmu20.devpost.com` | HackCMU **2020** page. Sponsors: Aptiv, ASML, CMU, EchoAR, Facebook, Microsoft, Sandia, Stevens Capital. No IFM/PAN | [VERIFIED: WebFetch] |
+| HackCMU 2026 sponsor list / PAN workshop materials | Not found on any public page | [UNKNOWN] |
+| IFM/PAN as a confirmed HackCMU 2026 sponsor | Could not confirm from any public source | [UNKNOWN] |
+
+## (c) PAN's published interface shape (from the paper)
+
+All items `[VERIFIED: arxiv.org/html/2511.09057v1]` unless noted.
+
+- **Title:** "PAN: A World Model for General, Actionable, and Long-Horizon World Simulation",
+  PAN Team, Institute of Foundation Models. (The HuggingFace papers page renders the title as
+  "General, **Interactable**, and Long-Horizon" — the title changed across v1–v4.
+  [VERIFIED: huggingface.co/papers/2511.09057])
+- **Per-step input:** an observation `o_t` — quote: *"(e.g., images or video frames)"* — plus
+  *"the proposed action `a_t` represented by natural language."*
+- **Per-step output:** *"the next predicted observation `ô_{t+1}`"*, emitted as video frames.
+- **Action conditioning:** natural language, one action per step. The official blog confirms
+  the backbone *"ingests the accumulated world history, the current observation, and the next
+  proposed action"*, e.g. *"grasp the yellow can from the middle tray"*.
+  [VERIFIED: mbzuai.ac.ae news article on PAN]
+- **Multi-step / continuation:** supported. *"closed-loop rollouts by recursively feeding back
+  its state prediction"*, via a *"chunk-wise causal attention mask"* where *"the predicted
+  output from the previous chunk becomes conditioning for the next."*
+- **Chunking:** *"the window size is 21, which corresponds to 81 real video frames"*, and
+  *"shifts by 10 latent frames"* per step; referred to as *"81-frame clip[s]"*.
+- **Architecture:** Generative Latent Prediction (GLP) — vision encoder and backbone from
+  `Qwen2.5-VL-7B-Instruct`; video diffusion decoder *"adapted from Wan2.1-T2V-14B"* with
+  *"Causal Swin-DPM"*.
+- **Resolution:** [UNKNOWN] — not stated in the paper.
+- **FPS / seconds per rollout step:** [UNKNOWN] — not stated. (81 frames per chunk is stated;
+  the frame rate is not, so wall-clock duration cannot be derived.)
+- **Max rollout steps / total horizon:** [UNKNOWN] — no quantitative "up to N steps" claim.
+- **Training cost (context only):** *"trained for 5 epochs using 960 NVIDIA H200 Tensor Core
+  GPUs."*
+
+## (d) Configuration contract — OUR convention, not IFM's
+
+**These four variable names are our own invention for this repo.** IFM publishes no
+configuration contract, no auth scheme, and no base URL. Nothing below is an IFM standard;
+expect to renegotiate all of it once real access exists.
+
+| Var | Role |
+|---|---|
+| `PAN_API_KEY` | **Secret.** Never logged, printed, or committed. Absent ⇒ fall back to the mock backend. |
+| `PAN_BASE_URL` | Base URL of whatever endpoint we are eventually given. No default — we have no verified endpoint. |
+| `PAN_MODEL` | Model/deployment identifier string, if the real interface takes one. |
+| `PAN_TIMEOUT_S` | Per-request timeout in seconds, so PAN latency can never block the solver. |
+
+## (e) Next steps for whoever obtains real access
+
+1. Fill in the real request schema in **`_build_payload`** in `pan/world_model.py` — map our
+   `SimulationRequest` (see `pan/types.py`: `Observation`, `PackingAction`, `Viewpoint`) onto
+   the real wire format. The observation is an image plus a natural-language action string,
+   which matches the paper's per-step contract in (c).
+2. Fill in the real response parsing in **`_parse_response`** in `pan/world_model.py` — map
+   the returned frames/video onto `SimulationResult` (`video_path`, `final_frame_path`,
+   `metadata`, `latency_ms`, `backend`).
+3. Set `PAN_BASE_URL` / `PAN_MODEL` and put `PAN_API_KEY` in a local `.env` (git-ignored).
+   Nothing else in the codebase should need to change — the rest of the app depends only on
+   the `WorldModel` protocol in `pan/types.py`.
+4. If the real interface accepts the previous prediction as the next input, enable multi-step
+   chaining; the paper says PAN supports it, but our client must not assume it until tested.
+5. `pan/world_model.py` did not exist at recon time — the orchestrator is building this seam
+   concurrently. Confirm the two function names before wiring.
+
+## (f) Rate limits and latency expectations
+
+- **Rate limits:** [UNKNOWN]. No public quota, pricing, or throttling documentation exists.
+- **Per-request latency:** [UNKNOWN]. The paper states no inference latency, throughput, or
+  real-time numbers, and there is no endpoint to measure.
+- Practical consequence: treat PAN as unbounded-latency and strictly asynchronous. Keep the
+  `pending / complete / failed / unavailable` status model and cache every completed rollout.

@@ -1,0 +1,504 @@
+{
+  "scene_nearly_full_front_high.png": {
+    "object_colors": {
+      "camera": [
+        145,
+        30,
+        180
+      ],
+      "charger": [
+        170,
+        200,
+        40
+      ],
+      "headphones_case": [
+        0,
+        130,
+        200
+      ],
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ],
+      "toiletry_bottle": [
+        255,
+        195,
+        0
+      ]
+    },
+    "scene": "scene_nearly_full",
+    "viewpoint": "front_high"
+  },
+  "scene_nearly_full_overhead_45.png": {
+    "object_colors": {
+      "camera": [
+        145,
+        30,
+        180
+      ],
+      "charger": [
+        170,
+        200,
+        40
+      ],
+      "headphones_case": [
+        0,
+        130,
+        200
+      ],
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ],
+      "toiletry_bottle": [
+        255,
+        195,
+        0
+      ]
+    },
+    "scene": "scene_nearly_full",
+    "viewpoint": "overhead_45"
+  },
+  "scene_object_touching_wall_front_high.png": {
+    "object_colors": {
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ]
+    },
+    "scene": "scene_object_touching_wall",
+    "viewpoint": "front_high"
+  },
+  "scene_object_touching_wall_overhead_45.png": {
+    "object_colors": {
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ]
+    },
+    "scene": "scene_object_touching_wall",
+    "viewpoint": "overhead_45"
+  },
+  "scene_oversized_object_front_high.png": {
+    "object_colors": {
+      "oversized_duffel": [
+        245,
+        130,
+        48
+      ]
+    },
+    "scene": "scene_oversized_object",
+    "viewpoint": "front_high"
+  },
+  "scene_oversized_object_overhead_45.png": {
+    "object_colors": {
+      "oversized_duffel": [
+        245,
+        130,
+        48
+      ]
+    },
+    "scene": "scene_oversized_object",
+    "viewpoint": "overhead_45"
+  },
+  "scene_rotated_object_in_corner_front_high.png": {
+    "object_colors": {
+      "shoe": [
+        140,
+        100,
+        60
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ]
+    },
+    "scene": "scene_rotated_object_in_corner",
+    "viewpoint": "front_high"
+  },
+  "scene_rotated_object_in_corner_overhead_45.png": {
+    "object_colors": {
+      "shoe": [
+        140,
+        100,
+        60
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ]
+    },
+    "scene": "scene_rotated_object_in_corner",
+    "viewpoint": "overhead_45"
+  },
+  "scene_stacked_objects_front_high.png": {
+    "object_colors": {
+      "headphones_case": [
+        0,
+        130,
+        200
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ]
+    },
+    "scene": "scene_stacked_objects",
+    "viewpoint": "front_high"
+  },
+  "scene_stacked_objects_overhead_45.png": {
+    "object_colors": {
+      "headphones_case": [
+        0,
+        130,
+        200
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ]
+    },
+    "scene": "scene_stacked_objects",
+    "viewpoint": "overhead_45"
+  },
+  "scene_with_collision_front_high.png": {
+    "object_colors": {
+      "camera": [
+        145,
+        30,
+        180
+      ],
+      "charger": [
+        170,
+        200,
+        40
+      ],
+      "headphones_case": [
+        0,
+        130,
+        200
+      ],
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ],
+      "toiletry_bottle": [
+        255,
+        195,
+        0
+      ]
+    },
+    "scene": "scene_with_collision",
+    "viewpoint": "front_high"
+  },
+  "scene_with_collision_overhead_45.png": {
+    "object_colors": {
+      "camera": [
+        145,
+        30,
+        180
+      ],
+      "charger": [
+        170,
+        200,
+        40
+      ],
+      "headphones_case": [
+        0,
+        130,
+        200
+      ],
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ],
+      "toiletry_bottle": [
+        255,
+        195,
+        0
+      ]
+    },
+    "scene": "scene_with_collision",
+    "viewpoint": "overhead_45"
+  },
+  "scene_with_floating_object_front_high.png": {
+    "object_colors": {
+      "charger": [
+        170,
+        200,
+        40
+      ],
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ]
+    },
+    "scene": "scene_with_floating_object",
+    "viewpoint": "front_high"
+  },
+  "scene_with_floating_object_overhead_45.png": {
+    "object_colors": {
+      "charger": [
+        170,
+        200,
+        40
+      ],
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ]
+    },
+    "scene": "scene_with_floating_object",
+    "viewpoint": "overhead_45"
+  },
+  "scene_with_precarious_balance_front_high.png": {
+    "object_colors": {
+      "camera": [
+        145,
+        30,
+        180
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ]
+    },
+    "scene": "scene_with_precarious_balance",
+    "viewpoint": "front_high"
+  },
+  "scene_with_precarious_balance_overhead_45.png": {
+    "object_colors": {
+      "camera": [
+        145,
+        30,
+        180
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ]
+    },
+    "scene": "scene_with_precarious_balance",
+    "viewpoint": "overhead_45"
+  },
+  "scene_with_soft_item_compression_front_high.png": {
+    "object_colors": {
+      "clothes_bag": [
+        240,
+        50,
+        230
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ]
+    },
+    "scene": "scene_with_soft_item_compression",
+    "viewpoint": "front_high"
+  },
+  "scene_with_soft_item_compression_overhead_45.png": {
+    "object_colors": {
+      "clothes_bag": [
+        240,
+        50,
+        230
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ]
+    },
+    "scene": "scene_with_soft_item_compression",
+    "viewpoint": "overhead_45"
+  },
+  "scene_with_wall_penetration_front_high.png": {
+    "object_colors": {
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ]
+    },
+    "scene": "scene_with_wall_penetration",
+    "viewpoint": "front_high"
+  },
+  "scene_with_wall_penetration_overhead_45.png": {
+    "object_colors": {
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ]
+    },
+    "scene": "scene_with_wall_penetration",
+    "viewpoint": "overhead_45"
+  },
+  "valid_packed_scene_front_high.png": {
+    "object_colors": {
+      "camera": [
+        145,
+        30,
+        180
+      ],
+      "charger": [
+        170,
+        200,
+        40
+      ],
+      "headphones_case": [
+        0,
+        130,
+        200
+      ],
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ],
+      "toiletry_bottle": [
+        255,
+        195,
+        0
+      ]
+    },
+    "scene": "valid_packed_scene",
+    "viewpoint": "front_high"
+  },
+  "valid_packed_scene_overhead_45.png": {
+    "object_colors": {
+      "camera": [
+        145,
+        30,
+        180
+      ],
+      "charger": [
+        170,
+        200,
+        40
+      ],
+      "headphones_case": [
+        0,
+        130,
+        200
+      ],
+      "laptop": [
+        220,
+        90,
+        130
+      ],
+      "shoe": [
+        140,
+        100,
+        60
+      ],
+      "toiletry_bag": [
+        0,
+        128,
+        128
+      ],
+      "toiletry_bottle": [
+        255,
+        195,
+        0
+      ]
+    },
+    "scene": "valid_packed_scene",
+    "viewpoint": "overhead_45"
+  }
+}

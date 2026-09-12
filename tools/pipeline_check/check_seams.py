@@ -32,18 +32,36 @@ swapped from "spend N seconds" to "run N iterations" (`OPTIMIZER_ITERATIONS`, th
 time. Nothing else about the run changes: same solver, same ranking, same chosen candidate.
 
 Proving it can fail: `--perturb {escape,rotation,overlap,nest,nest_outside,step,height}` corrupts the plan
-after planning, in memory, so each assertion can be seen catching its own seam.
+after planning, in memory, so each assertion can be seen catching its own seam. `--perturb`
+touches the main fixture only; the two cavity fixtures below always run as planned.
 
-KNOWN RED, as of 2026-09-12 (this is what the check found on its first run, not a flaw in
-the fixture): the last two seams fail because `physics/packer3d_adapter.item_metadata` hands
-`_cavity_local_boxes` the *uncompressed* scan `heights`/`dimensions`, while packer3d packed
-`Item.compressed(k)`. Every soft scanned item is therefore graded as a stack of cavity cells
-taller than the box the solver reserved, which invents collisions and "unsupported" verdicts
-for correct plans -- and `server/planner.rank` ranks candidates on that verdict. Scaling the
-grid and height by the same k `packer3d/scenario.py::_item_from_dict` uses (or having
-`physics/prepack.py` write the squashed height into the document it emits) turns both green;
-verified by monkeypatching `item_metadata`. Both files are owned elsewhere, so the fix is not
-in this directory.
+Three fixtures, because the `nestedIn` cavity seam needs a plan that actually has a cavity:
+
+  ITEMS           the general fixture: compression, cylinders, keepUpright, an unpacked item.
+                  No nesting, so the nestedIn-shape assertion reports N/A on it -- not PASS.
+  NEST_ITEMS      a rigid case with a foam recess and a lens that fits only inside it. The real
+                  solver nests here, so the whole chain is asserted against genuine solver
+                  output: packer3d's `nested_in`, the y/z swap into `nestedIn`, the pair's
+                  shared volume against the declared cavity, the Swift decoder (silent on the
+                  nested pair, still loud on the same overlap undeclared), and the verdict.
+  NEST_GAP_ITEMS  the same seam with an open box, the shape a bowl or a shoe really scans as.
+                  Reported as a GAP, with the diagnosis, and the assertions above engage on it
+                  automatically the day it nests. See below.
+
+KNOWN GAP, as of 2026-09-12: an open-topped scan never reaches the cavity path at all, and this
+is not the solver declining a cavity it could use. A shape with a genuine cavity has true volume
+/ bbox < 0.9, so `Item.from_scanned_heightmap` classifies it `irregular`, which defaults it to
+`fragile=True` ("its top is not flat, don't stack on it") -- and `packer3d/decoder.py` rejects
+any candidate whose base rests on a fragile solid, which the cavity's own floor is. So the one
+place resting is intended is the one place it is forbidden. `physics/prepack.packable` only ever
+*sets* `fragile`, never clears it, so no SCAN_OUTPUT document can get past it. Verified by
+flipping that single flag on the open-box fixture: the solver then nests it immediately. The
+recessed-case fixture nests today only because its dip is 5% of the bounding volume, which keeps
+it classified `box`. The fix is in packer3d/physics, not in this directory.
+
+A second, quieter trap the fixtures have to respect: `Item.solid_boxes` max-pools `heights` to
+4 x 4 blocks, taking each block's TALLEST cell. A cavity that is not a whole number of pooled
+blocks is pooled away and the item has no cavity at all (see `recess_grid`).
 """
 from __future__ import annotations
 
@@ -62,6 +80,7 @@ for _p in (ROOT, ROOT / "packer3d", ROOT / "server"):
         sys.path.insert(0, str(_p))
 
 import planner  # noqa: E402  server/planner.py -- the real entry point the POST /plan route uses
+from packer3d.models import oriented_solid_boxes  # noqa: E402
 from packer3d.scenario import load_scenario  # noqa: E402
 from physics.compressibility import compression_allowance_m  # noqa: E402
 from physics.packer3d_adapter import scene_from_packer3d, swap_yz  # noqa: E402
@@ -126,16 +145,81 @@ ITEMS = [
 ]
 
 
+# ------------------------------------------------- fixture #2 and #3: plans with a real cavity
+# `nestedIn` is the one seam nothing used to reach with real solver output. These two fixtures
+# reach it (or show exactly what stops it), through `planner.plan` like every other fixture here.
+def recess_grid(rows, cols, top, floor, r0, r1, c0, c1) -> list[list[float]]:
+    """A `heights` grid with a rectangular dip: `top` everywhere, `floor` on cells
+    [r0, r1) x [c0, c1). Rows run along width, columns along depth, as everywhere else.
+
+    The dip has to line up with `Item.solid_boxes`' max-pooling (4 x 4 blocks, `np.array_split`
+    of the row/col indices) or it vanishes: max-pooling takes the TALLEST cell in a block, so a
+    block holding one rim cell is solid to its full height. A recess that is not a whole number
+    of pooled blocks leaves the item with no cavity at all and no nest is possible -- that is a
+    property of the solver's own decomposition, not of the scan.
+    """
+    return [[floor if (r0 <= i < r1 and c0 <= j < c1) else top for j in range(cols)]
+            for i in range(rows)]
+
+
+# A rigid case with a foam cut-out, and a lens that fits the cut-out. The dip is 1 of the 16
+# pooled blocks and 5% of the bounding volume, so `from_scanned_heightmap` still classifies the
+# case as a **box** -- which matters: see NEST_GAP_ITEMS.
+NEST_SUITCASE = {"_id": "nest-bag", "name": "Fixture camera bag", "dimensions": [0.42, 0.13, 0.26]}
+NEST_ITEMS = [
+    scan("camera-case", 0.40, 0.10, 0.24, label="Camera case with a foam recess", mass=1.2,
+         keepUpright=True, suitcaseId="nest-bag",
+         heights=recess_grid(40, 24, 0.10, 0.02, 10, 20, 6, 12)),
+    # 0.09 x 0.07 x 0.05 against a 0.10 x 0.06 x 0.08 cut-out: fits inside it, and nowhere else
+    # (2 cm of floor beside the case, 3 cm of headroom above it), so a nest is the only way to
+    # pack it -- if the solver declines, the item is unpacked and the check says so.
+    scan("lens", 0.09, 0.07, 0.05, label="Spare lens", mass=0.4, suitcaseId="nest-bag"),
+    # rides on the case's lid: a neighbour that is NOT nested, so the overlap half of the
+    # contract still has an ordinary pair to be strict about
+    scan("pouch", 0.10, 0.02, 0.08, label="Cable pouch", mass=0.2, suitcaseId="nest-bag"),
+]
+
+# The same seam with an open box instead of a recessed one -- the shape a bowl or a shoe really
+# scans as. Same construction as tests/plan_contract/make_plan.py's NEST_ITEMS (not imported;
+# that file is owned elsewhere). This one does NOT nest today, and check_nested_chain reports
+# why rather than passing vacuously.
+NEST_GAP_SUITCASE = {"_id": "gap-bag", "name": "Fixture open-box bag", "dimensions": [0.24, 0.10, 0.24]}
+NEST_GAP_ITEMS = [
+    scan("bowl", 0.22, 0.08, 0.22, label="Open box", mass=0.5, suitcaseId="gap-bag",
+         heights=recess_grid(22, 22, 0.08, 0.01, 3, 19, 3, 19)),
+    scan("socks", 0.10, 0.04, 0.10, label="Socks", rigidity="soft", compressibility=1.5,
+         mass=0.5, suitcaseId="gap-bag"),
+]
+
+
 # ------------------------------------------------------------------------------- reporting
 class Report:
+    """Four states, deliberately distinct. A seam that cannot be asserted must never read as
+    PASS -- "0 of 7 placements declare nestedIn" printed as PASS is exactly how the nesting
+    contract went unexercised for a day: vacuously green, so nobody looked.
+
+      PASS / FAIL  an assertion that ran
+      N/A          nothing in this plan to assert against (not a pass, not a failure)
+      GAP          the pipeline cannot reach this seam yet, with the diagnosis. Loud, exit 0,
+                   and the assertions engage on their own the day the pipeline reaches it.
+    """
+
     def __init__(self) -> None:
         self.failures: list[str] = []
+        self.gaps: list[str] = []
 
     def __call__(self, seam: str, ok: bool, detail: str) -> bool:
         print(f"{'PASS' if ok else 'FAIL'}  {seam}\n        {detail}")
         if not ok:
             self.failures.append(seam)
         return ok
+
+    def note(self, seam: str, detail: str) -> None:
+        print(f"N/A   {seam}\n        {detail}")
+
+    def gap(self, seam: str, detail: str) -> None:
+        print(f"GAP   {seam}\n        {detail}")
+        self.gaps.append(seam)
 
 
 def vec(v: dict) -> tuple[float, float, float]:
@@ -157,13 +241,33 @@ def fmt(t) -> str:
     return "(" + ", ".join(f"{v:.4f}" for v in t) + ")"
 
 
+def shared(a: dict, b: dict) -> tuple[tuple, tuple]:
+    """The shared volume of two placements' boxes, as (min corner, max corner)."""
+    (alo, ahi), (blo, bhi) = box(a), box(b)
+    return (tuple(max(alo[k], blo[k]) for k in range(3)),
+            tuple(min(ahi[k], bhi[k]) for k in range(3)))
+
+
+def permitted(a: dict, b: dict) -> bool:
+    """`a` is nested in `b` and their whole shared volume lies inside the declared cavity --
+    packing-core/CLAUDE.md: "intersection between a nested item and its host is permitted only
+    inside `cavity`. Overlap anywhere outside it is still an overlap"."""
+    n = a.get("nestedIn")
+    if not n or n.get("itemId") != b["itemId"] or not n.get("cavity"):
+        return False
+    clo, chi = box(n["cavity"])
+    lo, hi = shared(a, b)
+    return all(lo[k] >= clo[k] - EPS and hi[k] <= chi[k] + EPS for k in range(3))
+
+
 # ------------------------------------------------------------------------------ the seams
-def check_container(rep: Report, plan: dict) -> None:
+def check_container(rep: Report, plan: dict, suitcase: dict = None) -> None:
     """app_plan's bag frame vs the suitcase document, and every item inside [0, dimensions]."""
+    suitcase = suitcase or SUITCASE
     dims = vec(plan["container"]["dimensions"])
     rep("container dimensions == suitcase document [width, height, depth]",
-        all(abs(dims[k] - SUITCASE["dimensions"][k]) <= EPS for k in range(3)),
-        f"plan {fmt(dims)} vs document {fmt(tuple(SUITCASE['dimensions']))}")
+        all(abs(dims[k] - suitcase["dimensions"][k]) <= EPS for k in range(3)),
+        f"plan {fmt(dims)} vs document {fmt(tuple(suitcase['dimensions']))}")
 
     worst_min, worst_max = ("", 0.0), ("", 0.0)
     for p in plan["placements"]:
@@ -190,22 +294,15 @@ def check_nesting(rep: Report, plan: dict) -> None:
     bad_host = [f"{p['itemId']} -> {p['nestedIn'].get('itemId')!r}" for p in nested
                 if p["nestedIn"].get("itemId") not in ids or p["nestedIn"]["itemId"] == p["itemId"]
                 or p["nestedIn"].get("cavity") is None]
-    rep("every nestedIn names another placement in this plan and carries its cavity cell",
-        not bad_host, f"{len(nested)} of {len(placements)} placements declare nestedIn; "
-                      f"dangling/self/cavity-less: {bad_host or 'none'}")
-
-    def permitted(a: dict, b: dict) -> bool:
-        """The intersection of a nested item with its host, inside the declared cavity."""
-        n = a.get("nestedIn")
-        if not n or n.get("itemId") != b["itemId"] or not n.get("cavity"):
-            return False
-        clo, chi = box(n["cavity"])
-        (alo, ahi), (blo, bhi) = box(a), box(b)
-        for k in range(3):
-            lo, hi = max(alo[k], blo[k]), min(ahi[k], bhi[k])
-            if lo < clo[k] - EPS or hi > chi[k] + EPS:
-                return False
-        return True
+    seam = "every nestedIn names another placement in this plan and carries its cavity cell"
+    if not nested:
+        # NOT a pass: there is nothing here to check. The nesting chain is asserted against the
+        # fixture that forces a nest (check_nested_chain), not against a plan with no nesting.
+        rep.note(seam, f"no nestedIn in this plan ({len(placements)} placements), so this "
+                       f"assertion had nothing to run against")
+    else:
+        rep(seam, not bad_host, f"{len(nested)} of {len(placements)} placements declare nestedIn; "
+                                f"dangling/self/cavity-less: {bad_host or 'none'}")
 
     offenders, allowed = [], 0
     for i, a in enumerate(placements):
@@ -314,7 +411,7 @@ def check_unpacked(rep: Report, doc: dict, plan: dict) -> None:
         f"plan.placements holds no unpacked item: {set(placed).isdisjoint(unpacked)}")
 
 
-def check_decomposition(rep: Report, doc: dict, plan: dict) -> None:
+def check_decomposition(rep: Report, doc: dict, plan: dict, items: list = None) -> None:
     """The physics layer decomposes a scanned item's placement into cavity cells
     (`packer3d_adapter._objects_from_placement`, one `Object` per max-pooled `heights` cell).
     Whatever it decomposes into must stay INSIDE the box the solver actually reserved and the
@@ -324,7 +421,7 @@ def check_decomposition(rep: Report, doc: dict, plan: dict) -> None:
     Compared in the physics frame, so the app-frame plan box has to be mapped there:
     app (x, y, z) -> physics (x, y, -z), i.e. physics Z runs [-(z + depth), -z].
     """
-    scene, _ = scene_from_packer3d(doc["solver"], items=prepare_items(ITEMS))
+    scene, _ = scene_from_packer3d(doc["solver"], items=prepare_items(items or ITEMS))
     reserved = {}
     for p in plan["placements"]:
         lo, size = vec(p["position"]), vec(p["size"])
@@ -352,14 +449,16 @@ def check_decomposition(rep: Report, doc: dict, plan: dict) -> None:
                      + ("\n        " + "\n        ".join(escapes[:6]) if escapes else ""))
 
 
-def check_physics_agrees(rep: Report, doc: dict, plan: dict) -> None:
+def check_physics_agrees(rep: Report, doc: dict, plan: dict,
+                         suitcase: dict = None, items: list = None) -> None:
     """The verdict stored in the server document is about the packer-frame layout. Rebuild
     the SAME layout out of the app-frame plan JSON (physics_point on the app frame: app
     (x, y, z) -> physics (x, y, -z)) and re-run physics.validator on it. A frame or
     decomposition slip between the two stages shows up as a different verdict."""
-    w, h, d = (float(v) for v in SUITCASE["dimensions"])
+    suitcase, items = suitcase or SUITCASE, items or ITEMS
+    w, h, d = (float(v) for v in suitcase["dimensions"])
     solver = {p["item_id"]: p for p in doc["solver"]["placements"]}
-    upright = {i["id"]: bool(i.get("keep_upright")) for i in prepare_items(ITEMS)}
+    upright = {i["id"]: bool(i.get("keep_upright")) for i in prepare_items(items)}
     objects = []
     for p in plan["placements"]:
         lo, size = vec(p["position"]), vec(p["size"])
@@ -376,43 +475,211 @@ def check_physics_agrees(rep: Report, doc: dict, plan: dict) -> None:
                                   objects=objects))
     stored = doc["validation"]
 
+    # A nested placement is a collision AND a floating item to this re-run, and not to the stored
+    # verdict, and both are right: the stored one graded the host decomposed into cavity cells,
+    # the re-run grades each placement as one solid box, so the cavity's floor is invisible to it.
+    # packing-core/CLAUDE.md excuses exactly those two, and only for a declared cavity that really
+    # contains the shared volume ("the host's cavity counts as support for the nested item, so it
+    # does not read as floating"). The cavity itself is asserted by check_nested_chain, so nothing
+    # is waved through on the field's word alone; every other violation must still match.
+    by_id = {p["itemId"]: p for p in plan["placements"]}
+    excused_pairs, excused_float = set(), set()
+    for a in plan["placements"]:
+        b = by_id.get((a.get("nestedIn") or {}).get("itemId", ""))
+        if b is None or not permitted(a, b):
+            continue
+        excused_pairs.add(tuple(sorted((a["itemId"], b["itemId"]))))
+        if abs(vec(a["position"])[1] - vec(a["nestedIn"]["cavity"]["position"])[1]) <= EPS:
+            excused_float.add((a["itemId"],))   # sitting on the cavity floor, not floating in it
+
     def kinds(v: dict) -> set:
         # the stored verdict decomposes a scanned item into cavity cells (`id#k`); compare
         # the item, not the cell. Collisions name `objects` (a pair), everything else `object`.
         out = set()
         for e in v["violations"]:
             names = e.get("objects") or [e.get("object")]
-            out.add((e["type"], tuple(sorted(str(n or "?").split("#")[0] for n in names))))
+            key = tuple(sorted(str(n or "?").split("#")[0] for n in names))
+            if "COLLISION" in e["type"].upper() and key in excused_pairs:
+                continue
+            if "UNSUPPORTED" in e["type"].upper() and key in excused_float:
+                continue
+            out.add((e["type"], key))
         return out
 
+    excused = sorted(excused_pairs | excused_float)
+    same = kinds(stored) == kinds(rerun)
+    # validity may differ only when every re-run violation is one the cavity explains
     rep("physics verdict in the server document == physics.validator re-run on the plan JSON",
-        bool(stored["valid"]) == bool(rerun["valid"]) and kinds(stored) == kinds(rerun),
+        same and (bool(stored["valid"]) == bool(rerun["valid"]) or (bool(excused) and not kinds(rerun))),
         f"stored valid={stored['valid']} score={stored['score']:.3f} violations={sorted(kinds(stored))} "
         f"| re-run valid={rerun['valid']} score={rerun['score']:.3f} violations={sorted(kinds(rerun))} "
-        f"over {len(objects)} placements")
+        f"over {len(objects)} placements"
+        + (f"; excused by a declared cavity (collision with the host, support from its floor): "
+           f"{excused}, leaving {sorted(kinds(rerun))} to match" if excused else ""))
 
 
-def check_swift_decoder(rep: Report, doc: dict) -> None:
-    """The real Swift decoder: PackingPlan.PlanLoader (structural: units, unique item ids,
-    contiguous steps) plus PackingPlan.geometryIssues()."""
-    binary = os.environ.get("PLAN3D_BIN") or next(
+def plan3d_binary() -> str | None:
+    return os.environ.get("PLAN3D_BIN") or next(
         (str(p) for p in sorted(ROOT.glob("tools/plan3d/.build/*/plan3d")) if p.is_file()), None)
-    if not binary:
-        rep("Swift decoder (tools/plan3d) loads the plan", False,
-            "no plan3d binary: build it with `swift build --package-path tools/plan3d` "
-            "(see this file's docstring) or set PLAN3D_BIN")
-        return
+
+
+def plan3d_run(binary: str, doc: dict) -> tuple[int, str, str]:
     out_dir = tempfile.mkdtemp(prefix="pipeline_check_plan3d_")
     plan_path = Path(out_dir) / "server_document.json"
     plan_path.write_text(json.dumps(doc))
-    cmd = [binary, str(plan_path), out_dir, "--steps", "--unpacked", "--violations"]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run([binary, str(plan_path), out_dir, "--steps", "--unpacked", "--violations"],
+                          capture_output=True, text=True)
     tail = (proc.stdout + proc.stderr).strip().splitlines()
     said = next((l for l in tail if l.startswith("plan:")), tail[0] if tail else "")
-    rep("Swift decoder (tools/plan3d) loads the plan and reports no geometry issues",
-        proc.returncode == 0 and "geometry issues: none" in proc.stdout,
-        f"{Path(binary).name} exit={proc.returncode}: {said or '(no output)'}"
-        + ("" if proc.returncode == 0 else f"\n        stderr: {proc.stderr.strip()[:400]}"))
+    return proc.returncode, proc.stdout, said
+
+
+def check_swift_decoder(rep: Report, doc: dict, label: str = "") -> None:
+    """The real Swift decoder: PackingPlan.PlanLoader (structural: units, unique item ids,
+    contiguous steps) plus PackingPlan.geometryIssues()."""
+    seam = f"Swift decoder (tools/plan3d) loads the plan{label} and reports no geometry issues"
+    binary = plan3d_binary()
+    if not binary:
+        rep(seam, False, "no plan3d binary: build it with `swift build --package-path tools/plan3d` "
+                         "(see this file's docstring) or set PLAN3D_BIN")
+        return
+    code, out, said = plan3d_run(binary, doc)
+    rep(seam, code == 0 and "geometry issues: none" in out,
+        f"{Path(binary).name} exit={code}: {said or '(no output)'}"
+        + ("" if code == 0 else f"\n        stdout/stderr: {out.strip()[:400]}"))
+
+
+def check_nested_chain(rep: Report, doc: dict, plan: dict, ref: dict, label: str) -> None:
+    """The `nestedIn` chain, end to end, on a plan the REAL solver produced -- the one seam that
+    used to be reachable only through a fabricated `--perturb nest` plan.
+
+    packer3d's `nested_in` -> app_plan's `nestedIn` (a y/z frame swap) -> the shared volume of
+    the pair -> the Swift decoder -> the physics verdict. If the solver did not nest, this reports
+    a GAP with the diagnosis instead of a vacuous PASS, and every assertion below engages on its
+    own the day it does.
+    """
+    solver = {p["item_id"]: p for p in doc["solver"]["placements"]}
+    nested = [p for p in doc["solver"]["placements"] if p.get("nested_in")]
+    if not nested:
+        # Why not? A host needs a cavity in its own solid decomposition (occupied < bbox) AND it
+        # must be able to bear weight: the decoder rejects any candidate resting on a fragile
+        # solid, and the cavity floor is one of the host's solids.
+        hosts = [(it, it.occupied_volume < it.bbox_volume - EPS) for it in ref.values()]
+        lines = [f"{it.id}[{getattr(it, 'scan_shape', '?')}] cavity={'yes' if cav else 'no'} "
+                 f"(occupied {it.occupied_volume:.6f} of bbox {it.bbox_volume:.6f} m3) "
+                 f"fragile={it.fragile}" for it, cav in hosts]
+        blocked = [it.id for it, cav in hosts if cav and it.fragile]
+        left = [f"{u['id']} ({u.get('reason', '?')})" for u in doc["solver"]["unpacked"]]
+        rep.gap(f"packer3d emits nested_in on {label}",
+                f"no placement declares nested_in. unpacked: {', '.join(left) or 'none'}\n        "
+                + "; ".join(lines)
+                + (f"\n        {', '.join(blocked)} has a real cavity but is fragile, and "
+                   f"packer3d/decoder.py's fragile-below rule rejects any candidate whose base "
+                   f"rests on a fragile solid -- the cavity floor is one. A scanned shape with a "
+                   f"genuine cavity classifies as `irregular` (true volume / bbox < 0.9), and "
+                   f"`Item.from_scanned_heightmap` defaults irregular to fragile=True, which "
+                   f"`physics/prepack.packable` only ever sets and never clears. So this is not "
+                   f"the solver declining a cavity it could use: the cavity is unreachable by "
+                   f"construction for every open-topped scan." if blocked else ""))
+        return
+
+    # ---- 1. the solver's own record: right host, cavity inside it, clear of its solids.
+    # The host's solids come from packer3d's own `oriented_solid_boxes`, so this is the cavity
+    # against the decomposition the solver actually placed against, not a second copy of it.
+    bad, lines = [], []
+    for p in nested:
+        n = p["nested_in"]
+        host = solver.get(n.get("item_id"))
+        if host is None or p["item_id"] == n.get("item_id"):
+            bad.append(f"{p['item_id']}: nested_in names {n.get('item_id')!r}, not another placement here")
+            continue
+        clo, chi = tuple(n["position"]), tuple(n["position"][k] + n["dims"][k] for k in range(3))
+        hlo = tuple(host["position"])
+        hhi = tuple(hlo[k] + host["dims"][k] for k in range(3))
+        if any(clo[k] < hlo[k] - EPS or chi[k] > hhi[k] + EPS for k in range(3)):
+            bad.append(f"{p['item_id']}: cavity {fmt(clo)}..{fmt(chi)} is not inside "
+                       f"{host['item_id']} {fmt(hlo)}..{fmt(hhi)}")
+        solids = oriented_solid_boxes(ref[host["item_id"]], hlo, host["dims"], host["orientation"])
+        hit = [(blo, bhi) for blo, bhi in solids
+               if all(min(chi[k], bhi[k]) - max(clo[k], blo[k]) > EPS for k in range(3))]
+        if hit:
+            bad.append(f"{p['item_id']}: cavity {fmt(clo)}..{fmt(chi)} cuts into {len(hit)} of "
+                       f"{host['item_id']}'s {len(solids)} solid sub-boxes, first "
+                       f"{fmt(hit[0][0])}..{fmt(hit[0][1])}")
+        lines.append(f"{p['item_id']} in {host['item_id']}: cavity {fmt(clo)}..{fmt(chi)} "
+                     f"(packer frame) inside host {fmt(hlo)}..{fmt(hhi)}, clear of all "
+                     f"{len(solids)} host solids")
+    rep(f"packer3d's nested_in on {label}: cavity inside the host and clear of its solids",
+        not bad, "; ".join(lines) + ("\n        MISMATCH: " + "; ".join(bad) if bad else ""))
+
+    # ---- 2. app_plan carried it across with the axes swapped. Packer frame is x = length,
+    # y = depth, z = up; the bag frame is x = width, y = up, z = depth -- so app = (x, z, y) for
+    # both the min corner and the extent. Frame conversions have been wrong twice today, so the
+    # swap is spelled out here rather than trusted.
+    by_id = {p["itemId"]: p for p in plan["placements"]}
+    bad, lines = [], []
+    for p in nested:
+        n, app = p["nested_in"], by_id.get(p["item_id"], {}).get("nestedIn")
+        if not app:
+            bad.append(f"{p['item_id']}: solver said nested_in, plan says nestedIn={app!r} -- dropped")
+            continue
+        want_pos = (n["position"][0], n["position"][2], n["position"][1])
+        want_size = (n["dims"][0], n["dims"][2], n["dims"][1])
+        got_pos, got_size = vec(app["cavity"]["position"]), vec(app["cavity"]["size"])
+        if app["itemId"] != n["item_id"]:
+            bad.append(f"{p['item_id']}: host {n['item_id']} became {app['itemId']}")
+        if any(abs(want_pos[k] - got_pos[k]) > 1e-9 for k in range(3)) \
+                or any(abs(want_size[k] - got_size[k]) > 1e-9 for k in range(3)):
+            bad.append(f"{p['item_id']}: packer cavity {fmt(tuple(n['position']))} ext "
+                       f"{fmt(tuple(n['dims']))} swaps to {fmt(want_pos)} ext {fmt(want_size)}, "
+                       f"plan says {fmt(got_pos)} ext {fmt(got_size)}")
+        # the placement itself must have taken the same swap, or the cavity is in a frame of its own
+        sp = by_id[p["item_id"]]
+        if any(abs((p["position"][0], p["position"][2], p["position"][1])[k] - vec(sp["position"])[k]) > 1e-9
+               for k in range(3)):
+            bad.append(f"{p['item_id']}: placement position {tuple(p['position'])} did not take the "
+                       f"same y/z swap as its cavity (plan says {fmt(vec(sp['position']))})")
+        lines.append(f"{p['item_id']} in {app['itemId']}: cavity {fmt(got_pos)} ext {fmt(got_size)} "
+                     f"(bag frame) from packer {fmt(tuple(n['position']))} ext {fmt(tuple(n['dims']))}")
+    rep(f"app_plan copied nested_in into nestedIn on {label} with packer (x, y, z) -> bag (x, z, y)",
+        not bad, "; ".join(lines) + ("\n        MISMATCH: " + "; ".join(bad) if bad else ""))
+
+    # ---- 3. the pair's shared volume lies inside the declared cavity (the consumer's own rule)
+    bad, lines = [], []
+    for p in nested:
+        a = by_id.get(p["item_id"])
+        b = by_id.get(p["nested_in"]["item_id"])
+        if not a or not b or not a.get("nestedIn"):
+            continue
+        lo, hi = shared(a, b)
+        clo, chi = box(a["nestedIn"]["cavity"])
+        out = tuple(max(clo[k] - lo[k], hi[k] - chi[k], 0.0) for k in range(3))
+        line = (f"{a['itemId']}/{b['itemId']} share {fmt(lo)}..{fmt(hi)} "
+                f"({(hi[0]-lo[0])*(hi[1]-lo[1])*(hi[2]-lo[2])*1e6:.1f} cm3) inside cavity "
+                f"{fmt(clo)}..{fmt(chi)}")
+        (lines if max(out) <= EPS else bad).append(line + (f", out by {fmt(out)} m" if max(out) > EPS else ""))
+    rep(f"the nested pair's shared volume lies inside the declared cavity on {label}",
+        not bad, "; ".join(lines) + ("\n        OUTSIDE: " + "; ".join(bad) if bad else ""))
+
+    # ---- 4. the Swift decoder: silent on the nested pair, still loud on a genuine overlap.
+    # The negative is the same plan with `nestedIn` removed -- identical geometry, no declaration,
+    # so a decoder that suppresses overlaps by proximity rather than by the field would stay quiet.
+    binary = plan3d_binary()
+    seam = f"Swift decoder is silent on the nested pair but reports the same overlap undeclared ({label})"
+    if not binary:
+        rep(seam, False, "no plan3d binary: set PLAN3D_BIN (see this file's docstring)")
+    else:
+        good_code, good_out, good_said = plan3d_run(binary, doc)
+        stripped = json.loads(json.dumps(doc))
+        for p in stripped["plan"]["placements"]:
+            p["nestedIn"] = None
+        bad_code, bad_out, bad_said = plan3d_run(binary, stripped)
+        quiet = good_code == 0 and "geometry issues: none" in good_out
+        loud = "geometry issues: none" not in bad_out
+        rep(seam, quiet and loud,
+            f"as planned: exit={good_code} {good_said or '(no output)'}\n        "
+            f"with nestedIn stripped: exit={bad_code} "
+            f"{next((l for l in bad_out.splitlines() if 'geometry issue' in l or 'overlap' in l), bad_said) or '(no output)'}")
 
 
 # ------------------------------------------------------------------------------ perturbation
@@ -432,9 +699,9 @@ def perturb(kind: str, doc: dict) -> str:
         q["position"] = dict(p["position"])
         return f"moved {q['itemId']} on top of {p['itemId']} with no nestedIn"
     if kind in ("nest", "nest_outside"):
-        # packer3d emits no `nested_in` today, so a real plan never carries a `nestedIn` and
-        # the cavity half of the contract is otherwise never exercised. Fabricate one: `nest`
-        # declares a cavity that contains the whole intersection (must be PERMITTED),
+        # The main fixture has no nesting of its own (NEST_ITEMS is the fixture the real solver
+        # nests on). Fabricate one here to see the consumer side of the contract both ways:
+        # `nest` declares a cavity that contains the whole intersection (must be PERMITTED),
         # `nest_outside` declares one too short to contain it (must still be REPORTED).
         q = plan["placements"][1]
         q["position"] = dict(p["position"])
@@ -500,10 +767,34 @@ def main() -> int:
     check_physics_agrees(rep, doc, plan)
     check_swift_decoder(rep, doc)
 
+    # the cavity seam, on plans the real solver produced. `--perturb` only ever touches the main
+    # fixture, so these two run as planned whatever it asked for.
+    for name, bag, its in (("the recessed-case fixture", NEST_SUITCASE, NEST_ITEMS),
+                           ("the open-box fixture", NEST_GAP_SUITCASE, NEST_GAP_ITEMS)):
+        d2 = planner.plan(bag, its)
+        p2 = d2["plan"]
+        _, ref2, _, _ = load_scenario({"container": {"id": "ref", "dims": [9.0, 9.0, 9.0]},
+                                       "items": prepare_items(its)})
+        ref2 = {it.id: it for it in ref2}
+        print(f"\n{name}: suitcase {bag['dimensions']} m (w, h, d), {len(its)} scans, "
+              f"strategy={d2['chosen']['strategy']} seed={d2['chosen']['seed']}, "
+              f"{len(p2['placements'])} placed, {len(d2['unpacked'])} unpacked")
+        check_container(rep, p2, bag)
+        check_nesting(rep, p2)   # the pair-strictness seam, now with a real cavity in the plan
+        check_steps(rep, p2)
+        check_swift_decoder(rep, d2, f" ({name})")
+        check_nested_chain(rep, d2, p2, ref2, name)
+        if any(p.get("nested_in") for p in d2["solver"]["placements"]):
+            check_decomposition(rep, d2, p2, its)
+            check_physics_agrees(rep, d2, p2, bag, its)
+
     print()
     if rep.failures:
         print(f"FAILED {len(rep.failures)} seam(s): " + "; ".join(rep.failures))
         return 1
+    if rep.gaps:
+        print(f"all seams hold, {len(rep.gaps)} KNOWN GAP: " + "; ".join(rep.gaps))
+        return 0
     print("all seams hold")
     return 0
 

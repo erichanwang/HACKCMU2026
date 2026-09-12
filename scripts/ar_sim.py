@@ -610,8 +610,13 @@ def footprint_wiring_check(base: str, dims, items: list[dict], item_fits: list[d
               "never reaches a packing decision: physics/prepack.py's physics_object() and "
               "packer3d's own Item builder both read only dimensions/heights/rigidity/etc., "
               "never doc[\"footprint\"] -- the field is stored on the item doc and otherwise inert.")
+        warn("footprint inert", "the phone sends a hull but no packing decision reads it; "
+                                "an L-shaped item still packs as a rectangle")
     else:
-        print("[wiring] UNEXPECTED: footprint correlates with a real outcome change -- "
+        # The goal, not an anomaly: once the physics gate grades the footprint and the solver
+        # packs the prism, the two runs SHOULD diverge. When that lands this becomes an
+        # assertion (footprint must change the verdict) rather than an observation.
+        print("[wiring] footprint now changes a real outcome -- the server half is wired up. "
               f"with={with_metrics} without={without_metrics}")
 
 

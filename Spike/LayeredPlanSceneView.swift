@@ -28,6 +28,24 @@ final class LayeredPlanSceneController: ObservableObject {
     /// Label pivots, re-oriented to face the camera whenever it moves.
     private var labels: [Entity] = []
 
+    /// The scene's backdrop, resolved against the appearance the *app* is set to.
+    ///
+    /// RealityKit resolves a dynamic UIColor against the ARView's own trait collection,
+    /// which follows the system rather than this app's `preferredColorScheme`. Handing it
+    /// `.secondarySystemBackground` therefore painted a dark backdrop whenever the phone
+    /// was dark and the app was light — and since the scene ignores the safe area, the
+    /// translucent tab bar sampled it and went dark too.
+    func applyBackground() {
+        let style: UIUserInterfaceStyle
+        switch UserDefaults.standard.string(forKey: "appearance") {
+        case "dark": style = .dark
+        case "light": style = .light
+        default: style = arView.traitCollection.userInterfaceStyle
+        }
+        let resolved = UIColor(Sheet.card).resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
+        arView.environment.background = .color(resolved)
+    }
+
     private var yaw: Float = .pi / 5
     private var pitch: Float = .pi / 7
     private var distance: Float
@@ -40,7 +58,7 @@ final class LayeredPlanSceneController: ObservableObject {
         let layers = plan.layers()
         layerCount = max(layers.count, 1)
 
-        arView.environment.background = .color(.secondarySystemBackground)
+        applyBackground()
 
         let root = AnchorEntity(world: .zero)
         root.addChild(PlanEntityBuilder.wireframeBox(size: dimensions))
@@ -124,6 +142,7 @@ struct LayeredPlanSceneView: View {
     /// Set when an owner drives the selection — see `PlanSheet`.
     private let externalTopLayer: Binding<Int>?
     @State private var lastDrag: CGSize = .zero
+    @AppStorage("appearance") private var appearance = "light"
 
     private let plan: PackingPlan
 
@@ -192,7 +211,11 @@ struct LayeredPlanSceneView: View {
         // onChange does not fire for the initial value, so the starting position
         // has to be pushed in explicitly — and again whenever the shared index
         // moves, including while this view is off screen.
-        .onAppear { controller.show(upTo: topLayer) }
+        .onAppear {
+            controller.show(upTo: topLayer)
+            controller.applyBackground()
+        }
+        .onChange(of: appearance) { _, _ in controller.applyBackground() }
         .onChange(of: topLayer) { _, value in controller.show(upTo: value) }
     }
 

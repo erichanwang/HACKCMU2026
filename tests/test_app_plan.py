@@ -119,3 +119,27 @@ class TestPlanMetadata(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNesting(unittest.TestCase):
+    """`nestedIn` names the larger placement whose box a placement sits inside; null otherwise."""
+
+    def test_nested_item_names_its_host_and_the_host_none(self):
+        result = {"placements": [
+            {"item_id": "bowl", "position": [0, 0, 0], "dims": [0.3, 0.3, 0.1], "orientation": "xyz"},
+            {"item_id": "cup", "position": [0.1, 0.1, 0.02], "dims": [0.08, 0.08, 0.07], "orientation": "xyz"},
+            {"item_id": "book", "position": [0.4, 0, 0], "dims": [0.2, 0.15, 0.03], "orientation": "xyz"},
+        ]}
+        by_id = {q["itemId"]: q for q in to_app_plan(result, {"_id": "s", "dimensions": [1, 1, 1]}, {})["placements"]}
+        self.assertEqual(by_id["cup"]["nestedIn"], "bowl")
+        self.assertIsNone(by_id["bowl"]["nestedIn"])
+        self.assertIsNone(by_id["book"]["nestedIn"])
+
+    def test_touching_faces_are_not_nesting(self):
+        result = {"placements": [
+            {"item_id": "a", "position": [0, 0, 0], "dims": [0.2, 0.2, 0.1], "orientation": "xyz"},
+            {"item_id": "b", "position": [0, 0, 0.1], "dims": [0.1, 0.1, 0.1], "orientation": "xyz"},
+        ]}
+        plan = to_app_plan(result, {"_id": "s", "dimensions": [1, 1, 1]}, {})
+        self.assertTrue(all(q["nestedIn"] is None for q in plan["placements"]))
+

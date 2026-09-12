@@ -335,7 +335,6 @@ def test_balancing_preserves_geometry_and_validity():
 
 
 # ---------------------------------------------------------------- scale / determinism / contract
-@pytest.mark.slow  # same near-cubic loop as the 1000-item case (decoder._feasible_and_score); unmark both when the decoder fix lands
 def test_many_tiny_items_fast_and_verified():
     items = [Item.box(f"t{i}", 1, 1, 1, mass=1) for i in range(300)]
     c = Container("c", (10, 10, 10), gravity=True)

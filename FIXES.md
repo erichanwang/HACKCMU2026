@@ -20,13 +20,6 @@ against the code on `loop` today (grep or read), not carried over from the morni
 
 ## 2. Bugs
 
-- **The two packer3d wall-clock perf tests are still marked `slow` and excluded by default**
-  (`packer3d/pyproject.toml:19-20`, `test_edge_cases.py:338`, `test_thorough_edge_cases.py:421`)
-  even though today's decoder fix (7358c16) already fixed the thing they were waiting on: run
-  both un-filtered (`pytest -m ''`) and they pass in 8.2s combined, nowhere near their 3s/15s
-  budgets. `test_edge_cases.py:338`'s own comment ("unmark both when the decoder fix lands") is
-  now stale — the fix landed, the unmark didn't. Drop both `@pytest.mark.slow` lines.
-
 ## 3. Risks that will bite in a real demo
 
 - **One uvicorn worker, by decision.** A `POST /plan` (about 3 s of solver) stalls other requests on

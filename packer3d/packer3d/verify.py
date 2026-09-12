@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from .geometry import EPS, is_finite_number, rnd3
-from .models import PackResult
+from .models import PackResult, oriented_solid_boxes
 
 
 def _overlap_len(a0, a1, b0, b1) -> float:
@@ -80,7 +80,12 @@ def verify(result: PackResult, items) -> list:
                 else:
                     continue
                 break
-        solids.append((lo, hi, bool(p.fragile), p.item_id))
+        # decompose into the same heightmap-derived sub-boxes the decoder actually placed
+        # against, instead of one solid bbox -- otherwise a real nested placement (a cup
+        # sitting in a bowl's true-shape cavity) would misreport as an overlap here.
+        sub_boxes = oriented_solid_boxes(it, lo, d, p.orientation) if it is not None else [(lo, hi)]
+        for wlo, whi in sub_boxes:
+            solids.append((wlo, whi, bool(p.fragile), p.item_id))
     n_item_solids = len(solids)   # placements skipped above (non-finite/negative dims) never reach here
     for ob in c.obstacles:
         lo = tuple(float(v) for v in ob.position)

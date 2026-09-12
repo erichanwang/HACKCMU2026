@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 
 from .geometry import EPS, rnd3
-from .models import Container, Item, Placement
+from .models import Container, Item, Placement, oriented_solid_boxes
 
 REASON_TOO_BIG = "larger than the container in every allowed orientation"
 REASON_MASS = "would exceed the container mass limit"
@@ -65,6 +65,7 @@ class PackState:
         self.total_mass = 0.0
         self.mass_moment = np.zeros(3)
         self.total_bbox_vol = 0.0
+        self.total_occupied_vol = 0.0  # sum of solid_boxes() volumes -- <= total_bbox_vol when items have cavities
         self.vol_moment = np.zeros(3)
         self.total_true_vol = 0.0
 
@@ -315,7 +316,7 @@ class PackState:
             self.unpacked.append({"id": item.id, "reason": REASON_MASS})
             return False
         bbox_vol = item.bbox_volume
-        if self.c.usable_volume - self.total_bbox_vol < bbox_vol - EPS:
+        if self.c.usable_volume - self.total_occupied_vol < item.occupied_volume - EPS:
             self.unpacked.append({"id": item.id, "reason": REASON_NO_SPACE})
             return False
         if orient_idx is None:
@@ -351,10 +352,12 @@ class PackState:
         lo = np.round(np.asarray(lo, dtype=float), 9)
         hi = np.round(lo + d, 9)
         center = (lo + hi) / 2.0
-        self._add_solid(lo, hi, item.fragile)
+        for blo, bhi in oriented_solid_boxes(item, lo, d, o.name):
+            self._add_solid(blo, bhi, item.fragile)
         self.total_mass += item.mass
         self.mass_moment += item.mass * center
         self.total_bbox_vol += item.bbox_volume
+        self.total_occupied_vol += item.occupied_volume
         self.vol_moment += item.bbox_volume * center
         self.total_true_vol += item.volume
         self.chosen_orient[item.id] = k

@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated
@@ -38,6 +39,11 @@ PROMPT = (
 UNKNOWN = {"label": "unknown", "description": "", "rigidity": "rigid", "compressibility": 1.0, "mass": 0.0, "keepUpright": False}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # a LiDAR scan's photo has no business being bigger than this
 LABEL_RETRY_S = float(os.environ.get("LABEL_RETRY_S", 10))
+# One call's budget. The models answer in 1.5-2.5s, and since `detect` asks them at the
+# same time this is also very nearly the whole scan's budget — a model that has not
+# answered inside it is dropped from the vote rather than kept waiting for. It was 30s per
+# call, serially, which a single slow model turned into a 30s wait on every scan.
+LABEL_TIMEOUT_S = float(os.environ.get("LABEL_TIMEOUT_S", 15))
 LABEL_MAX_ATTEMPTS = int(os.environ.get("LABEL_MAX_ATTEMPTS", 5))
 SOURCES = {"label": "labelSource", "rigidity": "rigiditySource", "compressibility": "compressibilitySource",
            "mass": "massSource", "keepUpright": "keepUprightSource"}
@@ -148,7 +154,7 @@ def _grok_detect(jpeg: bytes, key: str) -> dict:
                 {"type": "text", "text": PROMPT},
             ]}],
         },
-        timeout=30,
+        timeout=LABEL_TIMEOUT_S,
     )
     r.raise_for_status()
     return _parse_guess(json.loads(r.json()["choices"][0]["message"]["content"]), "Grok")
@@ -166,7 +172,7 @@ def _claude_detect(jpeg: bytes, key: str) -> dict:
                 {"type": "text", "text": PROMPT},
             ]}],
         },
-        timeout=30,
+        timeout=LABEL_TIMEOUT_S,
     )
     r.raise_for_status()
     text = r.json()["content"][0]["text"].strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -189,7 +195,7 @@ def _gemini_detect(jpeg: bytes, key: str) -> dict:
             "generationConfig": {"responseMimeType": "application/json",
                                  "thinkingConfig": {"thinkingBudget": 0}},
         },
-        timeout=30,
+        timeout=LABEL_TIMEOUT_S,
     )
     r.raise_for_status()
     text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -245,7 +251,7 @@ def _pan_vote(candidates: list[tuple[str, dict]], key: str) -> str | None:
                             "suitcase and named it differently:\n" + listing +
                             "\n\nWhich single name best describes one real packable object? "
                             "Reply with that name exactly as written above and nothing else."}]},
-        timeout=30,
+        timeout=LABEL_TIMEOUT_S,
     )
     r.raise_for_status()
     answer = r.json()["choices"][0]["message"]["content"].strip().strip('"').strip()
@@ -276,9 +282,15 @@ def detect(jpeg: bytes, prefer: str = "both") -> dict:
 
     guesses: list[tuple[str, dict]] = []
     first_error: Exception | None = None
-    for name, env_key, func_name in wanted:
+    # All at once: the calls are independent HTTP requests, so asking them in a loop made a
+    # scan wait for the sum of them. Collected back in `_DETECTORS` order, which is what the
+    # tie-break below and "everyone declined" above both read.
+    with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
+        calls = [(name, pool.submit(globals()[func_name], jpeg, os.environ[env_key]))
+                 for name, env_key, func_name in wanted]
+    for name, call in calls:
         try:
-            guesses.append((name, globals()[func_name](jpeg, os.environ[env_key])))
+            guesses.append((name, call.result()))
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
             first_error = first_error or exc
     if not guesses:
@@ -295,7 +307,12 @@ def detect(jpeg: bytes, prefer: str = "both") -> dict:
     pan_key = os.environ.get("PAN_API_KEY") or os.environ.get("IFM_API_KEY")
     by_label = {g["label"].strip(): g for _, g in answered}
     # Only worth asking when there is a disagreement to judge; agreement needs no adjudicator.
-    if prefer == "both" and pan_key and len(by_label) > 1:
+    # Nor when Claude is one of the voices: its 0.66 is an outright majority, and the most PAN
+    # can add to any other label is 0.14 + Gemini's 0.10 + Grok's 0.10 = 0.34, so Claude's
+    # label wins whatever PAN says. Asking anyway cost ~2.5s of scan time for a vote that
+    # could not change the answer.
+    claude_voted = any(name == "claude" for name, _ in answered)
+    if prefer == "both" and pan_key and len(by_label) > 1 and not claude_voted:
         try:
             backed = by_label.get(_pan_vote(answered, pan_key) or "")
             if backed is not None:

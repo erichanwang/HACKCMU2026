@@ -24,21 +24,42 @@ from .search import OptimizerConfig
 
 
 def _item_from_dict(d: dict) -> list:
+    if "id" not in d:
+        raise ValueError(f"item entry is missing required key 'id': {d!r}")
     shape = d.get("shape", "box")
-    common = dict(mass=d.get("mass", 0.0), fragile=bool(d.get("fragile", False)),
-                  keep_upright=bool(d.get("keep_upright", False)), priority=d.get("priority", 1.0))
+    mass = d.get("mass", 0.0)
+    priority = d.get("priority", 1.0)
+    # fragile/keep_upright are passed through only when explicitly present; otherwise None, so
+    # from_scan/from_scanned_heightmap's own "irregular defaults to fragile+upright" logic applies
+    # even when the scenario comes from JSON (a definite bool here would silently override it).
+    fragile = d["fragile"] if "fragile" in d else None
+    keep_upright = d["keep_upright"] if "keep_upright" in d else None
     count = int(d.get("count", 1))
+    if count < 1:
+        raise ValueError(f"item {d['id']!r}: count must be >= 1, got {count}")
     ids = [d["id"]] if count == 1 else [f"{d['id']}_{k + 1}" for k in range(count)]
     out = []
     for iid in ids:
-        if "length" in d:  # lidar payload: length / depth / height + shape
-            out.append(Item.from_scan(iid, shape, d["length"], d["depth"], d["height"],
-                                      allow_lay_down=bool(d.get("allow_lay_down", True)), **common))
+        if "heights" in d:  # lidar spike heightmap payload (SCAN_OUTPUT.md)
+            out.append(Item.from_scanned_heightmap(d, mass=mass, fragile=fragile, keep_upright=keep_upright,
+                                                    priority=priority))
             continue
+        if "length" in d:  # lidar payload: length / depth / height + shape
+            if "depth" not in d or "height" not in d:
+                raise ValueError(f"item {iid!r}: 'length' payload also needs 'depth' and 'height'")
+            out.append(Item.from_scan(iid, shape, d["length"], d["depth"], d["height"], mass,
+                                      fragile=fragile, keep_upright=keep_upright,
+                                      allow_lay_down=bool(d.get("allow_lay_down", True)), priority=priority))
+            continue
+        common = dict(mass=mass, fragile=bool(fragile), keep_upright=bool(keep_upright), priority=priority)
         if shape == "box":
+            if "dims" not in d:
+                raise ValueError(f"item {iid!r}: shape 'box' needs a 'dims' key")
             dims = d["dims"]
             out.append(Item.box(iid, dims[0], dims[1], dims[2], **common))
         elif shape == "cylinder":
+            if "radius" not in d or "height" not in d:
+                raise ValueError(f"item {iid!r}: shape 'cylinder' needs 'radius' and 'height' keys")
             out.append(Item.cylinder(iid, d["radius"], d["height"],
                                      allow_lay_down=bool(d.get("allow_lay_down", True)), **common))
         else:
@@ -58,9 +79,18 @@ def load_scenario(src):
         except (OSError, TypeError):
             pass
         data = json.loads(text)
+    if "container" not in data:
+        raise ValueError("scenario is missing required top-level key 'container'")
     c = data["container"]
+    if "dims" not in c:
+        raise ValueError("scenario container is missing required key 'dims'")
     max_mass = c.get("max_mass", None)
-    obstacles = [Obstacle(o["id"], tuple(o["position"]), tuple(o["dims"])) for o in c.get("obstacles", [])]
+    obstacles = []
+    for o in c.get("obstacles", []):
+        for key in ("id", "position", "dims"):
+            if key not in o:
+                raise ValueError(f"container obstacle entry is missing required key {key!r}: {o!r}")
+        obstacles.append(Obstacle(o["id"], tuple(o["position"]), tuple(o["dims"])))
     container = Container(
         id=c.get("id", "container"), dims=tuple(c["dims"]), shape=c.get("shape", "box"),
         gravity=bool(c.get("gravity", True)), max_mass=math.inf if max_mass is None else float(max_mass),

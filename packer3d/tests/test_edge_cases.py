@@ -499,3 +499,50 @@ def test_from_mesh_classifies_and_finds_tight_bbox():
     assert r.metrics["packed_volume"] == pytest.approx(sum(i.volume for i in items))
     with pytest.raises(ValueError):
         Item.from_mesh("flat", np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]]))
+
+
+def test_from_scanned_heightmap_box_cylinder_irregular():
+    # a plain box: heightmap ~ uniform full height everywhere
+    box_scan = {"id": "crate", "width": 20.0, "depth": 10.0, "height": 8.0, "cellSize": 1.0,
+                "heights": [[8.0] * 10 for _ in range(20)]}
+    box = Item.from_scanned_heightmap(box_scan)
+    assert box.shape == "box" and box.scan_shape == "box" and not box.fragile
+    assert box.dims == pytest.approx((0.20, 0.10, 0.08))
+    assert box.true_volume == pytest.approx(0.20 * 0.10 * 0.08, rel=1e-6)
+
+    # a cylinder: circular footprint over a square bbox (build via distance-from-center mask)
+    n = 30
+    cell = 1.0
+    r = n / 2.0
+    heights = [[8.0 if (i - r + 0.5) ** 2 + (j - r + 0.5) ** 2 <= r * r else 0.0 for j in range(n)]
+               for i in range(n)]
+    cyl_scan = {"id": "can", "width": n * cell, "depth": n * cell, "height": 8.0, "cellSize": cell,
+                "heights": heights}
+    can = Item.from_scanned_heightmap(cyl_scan)
+    assert can.shape == "cylinder" and can.scan_shape == "cylinder"
+    assert can.radius == pytest.approx(0.15, abs=0.01)
+
+    # an L-shaped bracket: one quadrant missing -> irregular, fragile by default
+    heights = [[8.0] * 10 for _ in range(20)]
+    for i in range(10, 20):
+        for j in range(0, 5):
+            heights[i][j] = 0.0
+    l_scan = {"id": "bracket", "width": 20.0, "depth": 10.0, "height": 8.0, "cellSize": 1.0, "heights": heights}
+    bracket = Item.from_scanned_heightmap(l_scan)
+    assert bracket.scan_shape == "irregular" and bracket.fragile
+    assert bracket.true_volume < bracket.bbox_volume
+
+    items = [box, can, bracket]
+    c = Container("bin", (0.6, 0.6, 0.6), gravity=True)
+    r = pack_optimized(c, items, FAST)
+    assert_valid(r, items)
+    assert len(r.placements) == 3
+
+    # units="m" path and JSON scenario routing
+    box_m = dict(box_scan)
+    box_m["width"], box_m["depth"], box_m["height"] = 0.2, 0.1, 0.08
+    box_m["cellSize"] = 0.01
+    box2 = Item.from_scanned_heightmap(box_m, units="m")
+    assert box2.dims == pytest.approx(box.dims)
+    c2, items2, _, _ = load_scenario({"container": {"dims": [0.6, 0.6, 0.6]}, "items": [box_scan]})
+    assert items2[0].scan_shape == "box"

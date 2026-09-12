@@ -290,7 +290,150 @@ you can just draw a box/cylinder of `dims`/`radius`/`height` — no original mes
 
 ---
 
-## 8. Module map (for anyone editing the algorithm itself)
+## 8. Connecting the LiDAR spike's real output (heightmap)
+
+The scanner (`Spike/ScanView.swift`, documented in `SCAN_OUTPUT.md`) does **not** just hand
+you `length/depth/height` + a shape label -- it hands you a bounding box **plus a heightmap**:
+a 2D grid of the object's real surface height at each footprint cell, in centimetres.
+
+```json
+{ "id": "6F3A...", "width": 21.3, "depth": 12.1, "height": 8.4, "cellSize": 1.0,
+  "heights": [[8.4, 8.4, 8.3, 0.0, 0.0, ...], [8.4, 8.4, 8.2, 0.0, 0.0, ...], ...] }
+```
+
+```python
+from packer3d import Item
+item = Item.from_scanned_heightmap(scan_json_dict, mass=1.2)
+item.scan_shape    # "box" | "cylinder" | "irregular" -- classified from the heightmap
+item.true_volume   # real volume integrated from the heightmap, not the bounding-box volume
+```
+
+What it does with the heightmap (instead of just discarding it into a plain box, which is
+what `physics.io.object_from_scanned_item` currently does with this same payload):
+
+* **Real volume**: sums `height * cellSize^2` over every cell, so utilisation metrics reflect
+  the object's actual shape (an open shoe reports much less volume than its bounding box).
+* **Classification**: footprint mostly filled and volume close to the full box -> `"box"`;
+  roughly square footprint with a circular fill fraction (~ pi/4 of the box) -> `"cylinder"`;
+  anything else (an L-bracket, an open shoe, a hole through the middle) -> `"irregular"`,
+  packed as its bounding box with `fragile=True` by default (its top isn't flat/complete).
+* Still **only 2.5D**: a single top-down view, so undercuts and overhangs hidden from the
+  scanner (a mushroom shape) aren't captured -- same limitation the scanner itself documents.
+
+A scan JSON can also be dropped straight into a scenario file's `"items"` list (anything with
+a `"heights"` key is routed here automatically by `load_scenario`).
+
+## 9. Connecting to the `physics` validator / renderer (different coordinate convention)
+
+The rest of the app (`physics/`, documented in `docs/PHYSICS.md` and `docs/INTEGRATION.md`)
+uses a **different** coordinate convention than packer3d does internally:
+
+| | packer3d (internal) | `physics` schema |
+|---|---|---|
+| up axis | z | **y** |
+| item position | bounding box's **min corner** | object's **center** |
+| orientation | axis-permutation string (`"xzy"`) / cylinder axis (`x`/`y`/`z`) | **quaternion** `(x,y,z,w)` |
+| item dims order | (length, width, height) | (width, height, depth) |
+
+`packer3d.physics_bridge` converts one to the other without packer3d importing anything
+outside itself (it only emits plain dicts shaped like `physics.schema.Object`/`Container`,
+plus the exact `{id, position, rotation}` placement list `physics.io.apply_placements`
+expects):
+
+```python
+from packer3d import pack_optimized, to_physics_placements, physics_container_dict, physics_object_dict, verify
+
+result = pack_optimized(container, items, config)
+assert verify(result, items) == []
+
+placements = to_physics_placements(container, result)   # -> [{"id","position","rotation"}, ...]
+container_dict = physics_container_dict(container)       # -> physics.schema.Container(**container_dict)
+object_dicts = [physics_object_dict(it) for it in items] # -> physics.schema.Object(**d) (dims/mass/constraints; no pose)
+
+# then, on the physics side:
+#   from physics.schema import Container, Object, Scene
+#   from physics.io import validate
+#   scene = Scene(Container(**container_dict), [Object(**d) for d in object_dicts])
+#   result = validate(scene, placements)
+```
+
+**Correctness note (why this needed care, not just an axis relabel):** packer3d only tracks
+*which* of an item's dimensions ends up along which world axis (enough to check axis-aligned
+bounding boxes don't overlap) -- it never records which of the (always at least one, often
+two) actual physical rotations achieving that face arrangement was used, because for a
+box/cylinder that distinction is invisible to collision. The bridge picks one consistent,
+always-proper (never mirrored) rotation for each of the 6 box orientations and 3 cylinder
+axes, chosen so that "no reorientation" maps to the identity quaternion. This is verified in
+`tests/test_physics_bridge.py`: every orientation is round-tripped through the *exact*
+`quat_to_matrix` formula from `physics/geometry.py` (copied into the test, not imported, so
+packer3d stays dependency-free) and checked to reproduce the same world-aligned extents and
+position as packer3d's own placement, independent of the bridge's internal formula.
+
+**Known limitation, not fixed here:** for a scanned **irregular** mesh (a mannequin, an open
+shoe) that ambiguity is no longer invisible -- an asymmetric object rendered at "the other"
+valid rotation can look upside-down or backwards even though its bounding box (and every
+physics collision check) is identical. Boxes, cylinders, and anything symmetric under a
+180-degree turn about its own axes are unaffected. Fixing this for real requires packer3d to
+track actual chosen rotations for asymmetric items, not just bounding-box orientation --
+noted here rather than silently working around it.
+
+## 10. Hardening pass (112 tests total, up from 40)
+
+A dedicated adversarial pass found and fixed four real bugs, plus closed several gaps that
+were silent-wrong rather than crashing:
+
+* **`verify()` used to crash** (`ZeroDivisionError`) on a placement with a zero-area footprint
+  above the floor, and could silently pass NaN/inf-corrupted positions (comparisons against NaN
+  are always `False`). Fixed: `verify()` now flags non-finite values, negative dims, and
+  zero-area footprints as explicit violations instead of crashing or staying silent -- the one
+  function whose entire job is "check even a hand-tampered result" now actually does that.
+* **`OptimizerConfig(t_start=0.0)` used to crash** with a raw `ZeroDivisionError` deep in the
+  annealing loop, on the very first call. `OptimizerConfig`/`DecoderParams` fields are now
+  validated at construction (`time_budget_s`, `max_iterations`, `t_start`, `t_end`,
+  `com_weight_grid` all raise a clear `ValueError` for non-finite, negative, or wrong-type
+  values) instead of failing confusingly mid-search.
+* **A cylindrical container used to bridge silently and wrongly** into the physics package's
+  schema, which has no concept of a cylindrical container (`physics.schema.Container` is
+  always an oriented box). `physics_container_dict`/`to_physics_placements` now raise
+  `ValueError` for a non-box container rather than emitting a Scene whose validator would
+  treat every corner of a much-larger bounding box as valid interior space.
+* **The scenario JSON loader used to defeat the "irregular defaults to fragile + upright"
+  smart default** by always forcing a concrete `True`/`False` for `fragile`/`keep_upright`
+  before calling `Item.from_scan`/`from_scanned_heightmap`. Fixed: those fields are now passed
+  through as `None` unless explicitly present in the JSON, matching the same-name Python API.
+* **Irregular scans/meshes now default to `keep_upright=True`** (in addition to the existing
+  `fragile=True`), across `from_scan`, `from_mesh`, and `from_scanned_heightmap`. This is a
+  deliberate product decision, not just a bug fix: an unrecognized/asymmetric object (a
+  mannequin, an open shoe) is never deliberately tipped onto its side by the solver, which is
+  both more realistic for a demo and reduces (though does not eliminate -- see the yaw-sign
+  note below) how often the physics-bridge rotation ambiguity in §9 is actually exercised.
+  Override with an explicit `keep_upright=False` if an item can safely lie down.
+* Every `from_scan`/`from_mesh`/`from_scanned_heightmap` call now validates its own input
+  (missing required keys, ragged heightmap rows, non-finite or negative heightmap values,
+  non-positive width/depth/height) with a clear `ValueError` instead of a raw `KeyError` or an
+  opaque numpy error.
+* The scenario JSON loader validates missing `container`/`dims`/item `id` keys, a shape-specific
+  missing field (`dims` for a box, `radius` for a cylinder, `depth`/`height` for a lidar
+  payload), a missing obstacle key, and rejects `count <= 0` (previously: silently zero items,
+  no error -- a likely typo that would otherwise vanish without a trace).
+
+**Verified, not just fixed:** an independent overlap cross-check re-derives each bridged
+placement's world-space OBB corners from scratch (not reusing `physics_bridge`'s own formula)
+and confirms no two overlap in the *physics* coordinate frame either -- a second, independently
+coded check of the same property `verify()` already checks in packer3d's own frame. Also
+covered: numerical extremes (1e-4 m and 1e5 m scale items in the same run), 1000-item
+performance, three-way fractional-priority competition, boundary equality on `min_support`
+(exactly-required support must pass, not fail), balancing verified to never worsen CoM across
+8 randomized trials while leaving the item-position set unchanged, and orientation
+de-duplication for perfect cubes and square-footprint slabs.
+
+**Still an open, documented limitation (not fixed here, see §9):** the rotation-chirality
+ambiguity for a genuinely asymmetric mesh remains -- `keep_upright=True` narrows it (removes
+the "on its side" ambiguity) but does not remove the remaining left/right yaw-sign ambiguity
+for an asymmetric footprint. Fixing that fully needs packer3d to track actual chosen
+rotations, not just bounding-box orientation, which is a larger change than a hardening pass.
+
+## 11. Module map (for anyone editing the algorithm itself)
 
 | file | responsibility |
 |---|---|
@@ -301,7 +444,8 @@ you can just draw a box/cylinder of `dims`/`radius`/`height` — no original mes
 | `objective.py` | `ObjectiveWeights`, scoring used during search, `compute_metrics` for the final report |
 | `verify.py` | independent from-scratch re-check of containment/overlap/mass/fragile/support — always run this |
 | `bounds.py` | provable lower bounds, `gap_report`, `exhaustive_small` (brute force for <=7 items, sanity-checks the search) |
-| `scenario.py` | JSON scenario loader (`load_scenario`) |
+| `scenario.py` | JSON scenario loader (`load_scenario`) -- also routes heightmap-scan item dicts to `Item.from_scanned_heightmap` |
+| `physics_bridge.py` | converts packer3d output into the physics package's schema (center position, quaternion rotation, Y-up) |
 | `cli.py` | `python -m packer3d.cli scenario.json --time 6 --compare --gap --out result.json` |
 | `visualize.py` | matplotlib debug render: `python -m packer3d.visualize result.json out.png optimized` |
 

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import math
 
-from .geometry import EPS, rnd3
+from .geometry import EPS, is_finite_number, rnd3
 from .models import PackResult
 
 
 def _overlap_len(a0, a1, b0, b1) -> float:
     return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def _all_finite(*vecs) -> bool:
+    return all(is_finite_number(v) for vec in vecs for v in vec)
 
 
 def verify(result: PackResult, items) -> list:
@@ -41,6 +45,12 @@ def verify(result: PackResult, items) -> list:
     solids = []  # (lo, hi, fragile, label) for placements + obstacles
     for p in result.placements:
         it = items_by_id.get(p.item_id)
+        if not _all_finite(p.position, p.dims, p.center) or not is_finite_number(p.mass):
+            errors.append(f"{p.item_id}: non-finite position/dims/center/mass (NaN or inf)")
+            continue
+        if any(v < 0 for v in p.dims):
+            errors.append(f"{p.item_id}: negative dims {p.dims}")
+            continue
         lo = tuple(float(v) for v in p.position)
         d = tuple(float(v) for v in p.dims)
         hi = tuple(lo[k] + d[k] for k in range(3))
@@ -71,13 +81,14 @@ def verify(result: PackResult, items) -> list:
                     continue
                 break
         solids.append((lo, hi, bool(p.fragile), p.item_id))
+    n_item_solids = len(solids)   # placements skipped above (non-finite/negative dims) never reach here
     for ob in c.obstacles:
         lo = tuple(float(v) for v in ob.position)
         hi = tuple(lo[k] + ob.dims[k] for k in range(3))
         solids.append((lo, hi, False, f"obstacle {ob.id}"))
 
     # ---- pairwise overlap (items vs items, items vs obstacles)
-    n_items = len(result.placements)
+    n_items = n_item_solids
     for i in range(len(solids)):
         for j in range(i + 1, len(solids)):
             if i >= n_items and j >= n_items:
@@ -106,6 +117,8 @@ def verify(result: PackResult, items) -> list:
                     support += area
                     if bfrag:
                         errors.append(f"{label} rests on fragile {blabel}")
-        if c.gravity and lo[2] > EPS and support / base < c.min_support - EPS:
+        if base <= 0.0:   # exact zero only: base = d[0]*d[1] of literal (non-negative) dims, no cancellation
+            errors.append(f"{label}: zero-area footprint ({base:.3g})")
+        elif c.gravity and lo[2] > EPS and support / base < c.min_support - EPS:
             errors.append(f"{label} is not supported (support ratio {support / base:.3f} < {c.min_support})")
     return errors

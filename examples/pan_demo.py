@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from physics.io import scene_from_dict
-from physics.pan import MockPanBackend, PanAction, RealPanBackend, simulate_candidate_actions
+from physics.pan import MockPanBackend, PanAction, RealPanBackend, result_note, simulate_candidate_actions
 
 FIXTURE = Path(__file__).parent / "scene_carry_on.json"
 
@@ -37,6 +37,10 @@ def main() -> None:
         print(f"Candidate {label}: {r['action_text']}")
         print(f"  physics: valid={r['physics_valid']} score={r['physics_score']:.2f}")
         print(f"  PAN [{pan.backend}]: status={pan.status} video={pan.video_path} error={pan.error}")
+        # Never print a result without saying what it is (neither backend is a visual PAN rollout).
+        note = result_note(pan)
+        if note:
+            print(f"  what this is: {note}")
         if pan.metadata.get("risk"):
             print(f"  risk: {pan.metadata['risk']}")
         print()

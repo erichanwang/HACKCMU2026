@@ -515,15 +515,22 @@ def compose_side_by_side(
     expected: Optional[np.ndarray] = None,
     frame_indices=(0, -1),
     pad: int = 8,
+    banner: Optional[str] = None,
 ) -> np.ndarray:
     """Labelled grid: one row per candidate, one column per `frame_indices` (+ expected).
 
-    Size is deterministic: with `caption_h = 14`, cell = the largest panel image,
+    `banner` is a header strip drawn above the grid -- the caller uses it to
+    name the world model these frames came from (`pan.types.honesty_note`), so
+    a mock rollout is never shown as if it were a PAN prediction.
+
+    Size is deterministic: with `caption_h = 14`, `banner_h = 26` (0 without a
+    banner), cell = the largest panel image,
     `width  = pad + ncols * (cell_w + pad)` and
-    `height = pad + nrows * (cell_h + caption_h + pad)`.
+    `height = banner_h + pad + nrows * (cell_h + caption_h + pad)`.
     Missing frames leave an empty cell. Returns (H, W, 3) uint8 RGB.
     """
     caption_h = 14
+    banner_h = 26 if banner else 0
     font = ImageFont.load_default()
     ncols = len(frame_indices) + (1 if expected is not None else 0)
     nrows = max(1, len(panels))
@@ -536,12 +543,14 @@ def compose_side_by_side(
 
     canvas = Image.new(
         "RGB",
-        (pad + ncols * (cell_w + pad), pad + nrows * (cell_h + caption_h + pad)),
+        (pad + ncols * (cell_w + pad), banner_h + pad + nrows * (cell_h + caption_h + pad)),
         (40, 40, 44),
     )
     draw = ImageDraw.Draw(canvas)
+    if banner:
+        draw.text((pad, 6), banner, fill=(255, 205, 80), font=ImageFont.load_default(size=16))
     for r, (label, fs) in enumerate(panels):
-        y = pad + r * (cell_h + caption_h + pad)
+        y = banner_h + pad + r * (cell_h + caption_h + pad)
         cells: list[tuple[str, Optional[np.ndarray]]] = []
         for i in frame_indices:
             try:

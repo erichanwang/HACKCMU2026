@@ -1,10 +1,13 @@
 """CLI for the physics validation layer.
 
     python3 -m physics validate scene.json [--placements placements.json] [--pretty]
+    python3 -m physics validate-packer3d result.json [--strategy naive|optimized]
+                                         [--items scenario.json] [--pretty]
     python3 -m physics example
     python3 -m physics scan-to-object item.json
 
-See examples/README.md for sample input files and the exact shapes involved.
+See examples/README.md for sample input files and the exact shapes involved,
+and docs/SOLVER_INTEGRATION.md for the packer3d frame mapping.
 """
 from __future__ import annotations
 
@@ -50,6 +53,22 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 0 if result["valid"] else 1
 
 
+def _cmd_validate_packer3d(args: argparse.Namespace) -> int:
+    from physics.packer3d_adapter import validate_packer3d
+
+    try:
+        result = _load_json(args.result)
+        items = _load_json(args.items) if args.items else None
+        out = validate_packer3d(result, items=items, strategy=args.strategy)
+    except _INPUT_ERRORS as e:
+        print(f"error reading input: {e}", file=sys.stderr)
+        return 2
+
+    text = result_to_json(out)
+    print(json.dumps(json.loads(text), indent=2) if args.pretty else text)
+    return 0 if out["valid"] else 1
+
+
 def _cmd_example(_args: argparse.Namespace) -> int:
     from physics.io import scene_to_dict
     from tests.fixtures import valid_packed_scene
@@ -79,6 +98,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate.add_argument("--placements", help="path to a placements JSON file")
     p_validate.add_argument("--pretty", action="store_true", help="pretty-print the result JSON")
     p_validate.set_defaults(func=_cmd_validate)
+
+    p_p3d = sub.add_parser("validate-packer3d", help="validate a packer3d solver result JSON")
+    p_p3d.add_argument("result", help="path to a packer3d result JSON (single strategy or --compare)")
+    p_p3d.add_argument("--strategy", help="which strategy of a --compare result to validate")
+    p_p3d.add_argument("--items", help="path to the scenario JSON (supplies keep_upright / priority)")
+    p_p3d.add_argument("--pretty", action="store_true", help="pretty-print the result JSON")
+    p_p3d.set_defaults(func=_cmd_validate_packer3d)
 
     p_example = sub.add_parser("example", help="print an example scene JSON")
     p_example.set_defaults(func=_cmd_example)

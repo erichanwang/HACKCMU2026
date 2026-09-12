@@ -106,6 +106,13 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def warn(name: str, detail: str) -> None:
+    """A characterised limitation worth seeing, that is not a failure. scripts/ar_gate.sh lifts
+    these into its summary table as WARN rows, so a GREEN gate never reads as "nothing to know".
+    """
+    print(f"AR-WARN: {name} | {detail}")
+
+
 # --- geometry synthesis (numpy) ----------------------------------------------------------
 
 
@@ -716,7 +723,9 @@ def clutter_check(driver: Path) -> None:
     w, d, h, cell, gap = BOX_ARGS["w"], BOX_ARGS["d"], BOX_ARGS["h"], 0.02, 0.03
     print("== clutter: two boxes 3cm apart, one tap on the first ==")
     print(f"{'grid phase':<12} {'cluster pts':<14} {'of total':<10} {'resulting box (m)':<20} verdict")
-    for phase in (0.0, cell / 2):
+    merged_phases = 0
+    phases = (0.0, cell / 2)
+    for phase in phases:
         cx, cz = 2.0 + phase, 2.0
         a = box_points(np.random.default_rng(RNG_SEED + 100), w=w, d=d, h=h, cx=cx, cz=cz, angle=0.0, table_y=TABLE_Y)
         b = box_points(np.random.default_rng(RNG_SEED + 101), w=w, d=d, h=h, cx=cx + w + gap, cz=cz, angle=0.0,
@@ -729,7 +738,11 @@ def clutter_check(driver: Path) -> None:
         box_str = "x".join(f"{v:.3f}" for v in out["box"])
         print(f"{phase * 100:5.1f} cm     {out['clusterCount']:<14} {out['clusterCount']}/{out['totalCount']:<8} "
               f"{box_str:<20} {'MERGED (known limitation)' if merged else 'separated'}")
+        merged_phases += bool(merged)
     print("")
+    if merged_phases:
+        warn("clutter merge", f"two boxes {gap * 100:.0f} cm apart fuse into one at "
+                              f"{merged_phases}/{len(phases)} grid phases (connectedCluster limitation)")
 
 
 def _drift_fit(driver: Path, true_points: np.ndarray, pivot: np.ndarray, axis_deg: float, horizontal_cm: float,
@@ -776,6 +789,7 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
     print("(planeY is re-resolved live -- Spike/ScanView.swift's refreshPlaneY -- so vertical world "
           "drift is now largely corrected; horizontal drift and axis error are not)")
     print(f"{'scenario':<58} {'corner err (today/frozen)':<28} {'escape (today/frozen)':<28} fits? (today)")
+    worst_esc, worst_label = 0.0, ""
     for label, (plane_cm, vertical_cm, axis_deg, horizontal_cm) in (
             ("mid-range", DRIFT_MID), ("worst realistic", DRIFT_WORST)):
         # The real table never moves -- what drifts is ARKit's world-frame belief about its
@@ -801,6 +815,11 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
                     f"{axis_deg:.0f}deg axis, {horizontal_cm:.0f}cm horizontal drift)")
         print(f"{scenario:<58} {corner_err * 100:5.2f} / {frozen_corner_err * 100:5.2f} cm         "
               f"{max_esc * 100:5.2f} / {frozen_esc * 100:5.2f} cm ({escaped} corners)   {verdict}")
+        if max_esc > worst_esc:
+            worst_esc, worst_label = max_esc, label
+    if worst_esc > 1e-4:
+        warn("drift escape", f"worst {worst_esc * 100:.2f} cm at {worst_label} drift, "
+                              f"live-planeY corrected (horizontal drift and axis error are not)")
     print("note: horizontal drift + axis error dominate both columns here (the interior is tall "
           "enough that the vertical shift alone doesn't threaten containment); it still shows up "
           "as the small today/frozen gap in corner err, all of it in the corrected Y term.")
@@ -867,6 +886,8 @@ def lid_open_true_interior_check(true_out: dict, degraded_out: dict, placements:
           f"vs. degraded interior {degraded_out['interior'][0]:.3f}x{degraded_out['interior'][1]:.3f}x"
           f"{degraded_out['interior'][2]:.3f} m: max escape {max_esc * 100:.2f} cm ({escaped} corners) -- fits? {verdict}")
     print("")
+    warn("lid-open fit", f"max escape {max_esc * 100:.2f} cm ({escaped} corners) vs "
+                         f"{LID_OPEN_ESCAPE_TOLERANCE_M * 100:.2f} cm tolerance")
     if not fits:
         fail(f"lid-open reality check: max escape {max_esc * 100:.2f} cm exceeds "
              f"{LID_OPEN_ESCAPE_TOLERANCE_M * 100:.2f} cm -- an open-lid scan no longer fits the true bag")

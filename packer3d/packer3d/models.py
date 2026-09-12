@@ -813,6 +813,12 @@ class Placement:
     height: Optional[float]
     mass: float
     fragile: bool
+    # The item's TRUE solid volume (``Item.volume``: a mesh integral, a heightmap integral, a
+    # footprint prism, pi r^2 h, or the box only when nothing better is known) -- NOT the
+    # product of ``dims``.  Summing it over placements is therefore already free of the
+    # double count nesting causes in a sum of bounding boxes, because a host's own true volume
+    # excludes the cavity its guest sits in.  For the bounding-box quantity the app reports,
+    # see ``packed_bbox_volume`` below.
     volume: float
     priority: float = 1.0
     scan_shape: Optional[str] = None
@@ -844,6 +850,97 @@ class Placement:
             d["nested_in"] = {"item_id": self.nested_in["item_id"],
                               "position": cav[:3], "dims": cav[3:]}
         return d
+
+
+# ------------------------------------------------------------------- nested placements
+# A nested guest's bounding box lies inside its host's, so any quantity built by summing
+# ``dims`` products over placements counts the shared cubic metres twice.  The app hit this
+# (13.46% claimed against a true 12.14% on its bowl-and-cup fixture) and fixed it in
+# ``packing-core/Sources/PackingPlan/PackingPlan.swift``; the three functions below are that
+# same definition on this side, so the two agree by construction rather than by coincidence.
+# The solver's own ``metrics["packed_volume"]`` sums ``Placement.volume`` -- true solid
+# volume -- and is a different, smaller quantity that never had the double count.
+
+
+def honoured_nesting(placements) -> dict:
+    """``{guest item_id: host item_id}`` for the ``nested_in`` claims a volume count may trust.
+
+    Mirrors ``PackingPlan.honouredNesting()`` exactly, because both sides have to discount the
+    same cubic metres.  ``nested_in`` is the producer's claim, not a fact, and a wrong claim
+    must not be able to buy a discount on a fill figure, so every dubious form is dropped and
+    the placement is treated as un-nested: a host this placement list does not contain, a
+    self-reference, and any chain of hosts that loops back on itself.
+    """
+    ids = {p.item_id for p in placements}
+    host = {}
+    for p in placements:                      # first claim wins, as in the Swift
+        if p.nested_in is not None and p.item_id not in host:
+            host[p.item_id] = p.nested_in["item_id"]
+    out = {}
+    for p in placements:
+        n = p.nested_in
+        if n is None or n["item_id"] not in ids:
+            continue
+        # Walk up the host chain.  Ending on an id already seen means the chain loops; a
+        # self-reference is just the shortest such loop.
+        seen, cursor = set(), p.item_id
+        while cursor is not None and cursor not in seen:
+            seen.add(cursor)
+            cursor = host.get(cursor)
+        if cursor is None:
+            out[p.item_id] = n["item_id"]
+    return out
+
+
+def nested_overlap_by_host(placements) -> dict:
+    """``{host item_id: m^3 of its guests' bounding boxes lying inside its own}``.
+
+    This is the volume a plain sum of ``dims`` products counts twice.  ``sum(...values())`` is
+    ``PackingPlan.nestedOverlapVolume()`` to the last float; the keys are the *hosts* rather
+    than the guests (which is how the Swift keys the same pairs) because the host is the one
+    whose bounding box over-reserved, which is what ``bounds.gap_report`` has to charge it for.
+
+    Measured against the host's bounding *box*, never the cavity it declared: the double count
+    is however much of the two boxes coincides, whether or not it stays inside the cell the
+    producer named.  Overlap outside that cell is a collision for ``verify`` to report;
+    counting its volume honestly is not endorsing it.
+
+    ponytail: pairwise, which is exact for one guest per host and for a chain whose guests each
+    sit inside their host's box.  A guest poking out of its host and into its host's host would
+    be over-subtracted; the decoder cannot emit that (it nests into a cavity clear of every
+    solid), and full inclusion-exclusion is the fix if some other producer ever does.
+    """
+    boxes = {}
+    for p in placements:
+        boxes.setdefault(p.item_id, (p.position, p.dims))
+    out = {}
+    for guest, host_id in honoured_nesting(placements).items():
+        g, h = boxes[guest], boxes[host_id]   # both are placements: honoured_nesting checked
+        v = 1.0
+        for k in range(3):
+            v *= max(0.0, min(g[0][k] + g[1][k], h[0][k] + h[1][k]) - max(g[0][k], h[0][k]))
+        out[host_id] = out.get(host_id, 0.0) + v
+    return out
+
+
+def packed_bbox_volume(placements) -> float:
+    """Union of the placements' bounding boxes, m^3 -- each cubic metre counted once.
+
+    The numerator of the app's ``PlanStats.fillFraction`` / ``PackingPlan.packedVolumeFraction``
+    (divide by the container's interior volume to get the fraction itself).  Deliberately NOT
+    ``metrics["packed_volume"]``, which sums each item's true solid volume and is smaller: a
+    scanned bowl reserves its whole box here but contributes only its walls and floor there.
+
+    One box overlap this cannot see: footprint packing lets two *prisms* interleave inside each
+    other's bounding boxes (``tests/test_footprint_packing.py``), and the decoder deliberately
+    records no ``nested_in`` for that -- it is two convex cross-sections missing each other, not
+    a cavity, and inventing a cavity would emit a zero-height nest.  Such a pair is still
+    double-counted here, exactly as it is in the app (where ``geometryIssues()`` additionally
+    reports it as an intersection).  Closing that needs the footprint on the wire, not a change
+    to this function.
+    """
+    return (sum(p.dims[0] * p.dims[1] * p.dims[2] for p in placements)
+            - sum(nested_overlap_by_host(placements).values()))
 
 
 @dataclass

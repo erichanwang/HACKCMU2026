@@ -7,6 +7,7 @@ rules and fixed obstacles — and optimises **both** space utilisation **and** c
 Every solution is **feasible by construction** and independently re-checked by `verify()`.
 
 ```bash
+cd packer3d                                                              # everything below runs inside the package
 python3 -m venv .venv && .venv/bin/pip install numpy pytest matplotlib   # numpy is the only hard dependency
 source .venv/bin/activate
 PYTHONPATH=. python -m packer3d.cli examples/dragon_resupply.json --time 6 --compare --gap --out result.json

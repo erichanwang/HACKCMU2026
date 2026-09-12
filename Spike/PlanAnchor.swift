@@ -5,10 +5,18 @@ import simd
 
 /// The bag *interior* given its scanned outer shell: width and depth lose a wall on each side,
 /// the floor rises by one wall thickness (the bag is scanned open, so the lid is not in the box),
-/// which lifts the centre by half a wall.
-func interiorBox(_ outer: BoxFit, wall: Float) -> BoxFit {
-    BoxFit(width: outer.width - 2 * wall, depth: outer.depth - 2 * wall, height: outer.height - wall,
-           center: outer.center + SIMD3<Float>(0, wall / 2, 0), axis: outer.axis)
+/// which lifts the centre by half a wall. `wallHeight`/`wallDepth` default to `wall`, so existing
+/// callers are unaffected; pass them separately once a real bag is measured (see
+/// tests/swift/bag/main.swift) — the floor needs extra clearance for the wheel well, and the back
+/// (and, symmetrically, front) wall needs extra clearance for the telescoping handle's spine.
+// ponytail: BoxFit is symmetric, so wallDepth also shrinks the front (no spine there) — safe but
+// gives up real volume there too. Asymmetric front/back walls or forbidden regions if that margin
+// turns out too aggressive for the demo bag.
+func interiorBox(_ outer: BoxFit, wall: Float, wallHeight: Float? = nil, wallDepth: Float? = nil) -> BoxFit {
+    let wallHeight = wallHeight ?? wall
+    let wallDepth = wallDepth ?? wall
+    return BoxFit(width: outer.width - 2 * wall, depth: outer.depth - 2 * wallDepth, height: outer.height - wallHeight,
+           center: outer.center + SIMD3<Float>(0, wallHeight / 2, 0), axis: outer.axis)
 }
 
 /// Maps a plan's bag-frame coordinates onto AR world space. Bag X = the suitcase's `axis`,

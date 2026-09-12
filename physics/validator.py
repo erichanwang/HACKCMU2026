@@ -1,113 +1,114 @@
 """Top-level physics validation entry point: `validate_layout(scene) -> dict`.
 
-Integrates every sibling module into one call: `containment.check_scene_containment`,
-`collision.check_collision` (all object pairs, pruned by `collision.aabb_overlap`
-broad-phase), `support.check_support`, and `constraints.check_constraints`. This is
-the only function the packing-solver / renderer teammates should call directly.
+One call runs the whole deterministic pipeline on a candidate layout:
+
+    precompute (physics.scene_geometry)    one pass: OBBs, vertices, AABBs
+      -> containment  (vectorized, per-wall depths)
+      -> collision    (AABB broad phase + batched 15-axis SAT)
+      -> support      (exact contact polygons, static stability, chains)
+      -> constraints  (travel metadata, transitive load)
+      -> metrics      (COM, fill, clearances -- solver objective terms)
+
+This is the only function the packing-solver / renderer teammates need to
+call directly. For a solver inner loop ("can I add this one object?") use
+`physics.incremental.PlacementValidator` and call this once at the end.
 
 Malformed-input contract
 -------------------------
-This function never raises. Before running any check it validates scene geometry
-up front (`check_no_duplicate_ids` + `obb_from` on the container and every object).
-If that raises `ValueError` (NaN/non-finite dims or position, bad quaternion,
-duplicate ids), it is caught and a `MALFORMED_GEOMETRY` violation is returned
-immediately with `score=0.0`, `valid=False` -- the rest of the pipeline never
-runs on data it can't trust.
+Never raises. `precompute` validates every object (finite, positive dims;
+finite position; non-zero finite quaternion; unique ids). Any failure returns
+immediately: `{"valid": False, "score": 0.0, "violations": [{"type":
+"MALFORMED_GEOMETRY", "object": <id or None>, "detail": <message>}],
+"warnings": [], "metrics": {}}`.
 
 Output shape
 ------------
     {
       "valid": bool,        # True iff `violations` is empty
       "score": float,       # 1.0 clean -> lower as violations pile up/worsen
-      "violations": [...],  # hard failures, see below
-      "warnings": [...],    # soft/informational, do not affect `valid`/`score`
+      "violations": [...],  # hard failures (physically impossible / forbidden)
+      "warnings": [...],    # soft / informational; never affect `valid` or `score`
+      "metrics": {...},     # physics.metrics.scene_metrics: total_mass_kg,
+                            # center_of_mass, com_offset_m, fill_ratio, per_object{...}
     }
 
 Violation types: OBJECT_COLLISION, CONTAINER_PENETRATION, UNSUPPORTED_OBJECT,
 FRAGILE_OBJECT_OVERLOADED, LIQUID_NOT_UPRIGHT, INVALID_ORIENTATION,
-MALFORMED_GEOMETRY. Warning types: UNSTABLE_STACK, FRAGILE_LOAD, HEAVY_ON_TOP,
-SOFT_COMPRESSION (see compressibility policy below).
+MALFORMED_GEOMETRY. Warning types: UNSTABLE_STACK, UNSTABLE_SUPPORT_CHAIN,
+SOFT_COMPRESSION, FRAGILE_LOAD, HEAVY_ON_TOP.
+
+Every entry carries renderer-ready geometry where it exists: collisions have
+`contact_point` and `axis` (MTV direction), container penetrations have
+`penetrating_vertices` and `per_wall_depth_m`, stability warnings have the
+`contact_polygon` (support hull, [x, z] pairs) and `center_of_mass_projection`.
 
 Hard-fail vs warning policy
 ----------------------------
-- A completely unsupported object (`SupportResult.floating`, i.e.
-  `support_ratio < floating_threshold`) is a hard-fail `UNSUPPORTED_OBJECT`
-  violation -- an item with (near-)zero contact area under gravity is not a
-  packable layout.
-- An object that IS supported (`support_ratio >= floating_threshold`) but whose
-  center of mass falls outside its support footprint (`SupportResult.unstable`)
-  is only a `UNSTABLE_STACK` warning -- it is precariously balanced, not
-  physically impossible, and `valid` can still be True for such a scene. This
-  is a deliberate simplification (no friction/tip-over dynamics modeled here,
-  see support.py) -- treat repeated UNSTABLE_STACK warnings as "worth a second
-  look", not "reject".
-- Collisions and container-wall penetrations are always hard fails (the
-  geometry is physically impossible) -- EXCEPT that raw overlap/penetration is
-  first reduced by a compressibility allowance (`physics.compressibility`,
-  derived from each object's `rigidity`/`compressibility_k`) before that
-  decision is made: if the allowance fully absorbs the raw overlap the pair
-  becomes a `SOFT_COMPRESSION` warning instead of a violation (rigid objects
-  get zero allowance, so this never changes behavior for rigid-only scenes);
-  if some overlap remains past what compression can plausibly absorb, it's
-  still a hard-fail OBJECT_COLLISION/CONTAINER_PENETRATION, but severity and
-  `penetration_depth_m` use only that excess, not the raw depth.
-  LIQUID_NOT_UPRIGHT / INVALID_ORIENTATION / FRAGILE_OBJECT_OVERLOADED
-  passthrough from `check_constraints` stay hard fails (they are already
-  violations there); FRAGILE_LOAD / HEAVY_ON_TOP stay warnings (already
-  warnings there).
+- OBJECT_COLLISION / CONTAINER_PENETRATION are hard fails -- after subtracting
+  the compressibility allowance (`physics.compressibility`, from each object's
+  `rigidity` / `compressibility_k`). Rigid objects have zero allowance, so
+  rigid-only scenes behave exactly as plain geometry. If the allowance fully
+  absorbs the raw overlap, the pair (or wall) becomes a SOFT_COMPRESSION
+  warning; if overlap remains, it is a violation whose depth and severity are
+  the *excess* only. Container walls are handled per wall: each violated
+  wall's depth is reduced by the object's allowance along that wall's axis.
+  Both the warning and the residual violation report `raw_penetration_depth_m`
+  (geometric overlap) and `compressed_depth_m` (the part absorbed as squish;
+  equals the raw depth when fully absorbed) so the renderer can draw the
+  compression and any excess separately.
+- UNSUPPORTED_OBJECT (support_ratio < floating_threshold) is a hard fail.
+- UNSTABLE_STACK (supported, but COM outside the support polygon) is a warning:
+  precarious, not impossible (no friction/dynamics modeled -- see support.py).
+  UNSTABLE_SUPPORT_CHAIN flags an object that is itself fine but rests on
+  something floating/unstable.
+- Constraint passthrough: LIQUID_NOT_UPRIGHT / INVALID_ORIENTATION /
+  FRAGILE_OBJECT_OVERLOADED stay violations; FRAGILE_LOAD / HEAVY_ON_TOP stay
+  warnings. `supported_weight_kg` is the TRANSITIVE load (a shoe on a bag on
+  a laptop loads the laptop); `direct_weight_kg` is also reported.
 
-Severity heuristics (each in [0, 1], documented per type; used only for score)
---------------------------------------------------------------------------------
-- OBJECT_COLLISION: penetration_depth_m / min(smallest full extent of A, smallest
-  full extent of B) -- a penetration comparable to an object's own thinnest
-  dimension is maximally severe.
-- CONTAINER_PENETRATION: penetration_depth_m / smallest container half-extent.
-- UNSUPPORTED_OBJECT: 1 - support_ratio / floating_threshold -- 1.0 for a fully
-  floating object (support_ratio=0), tapering to 0 as support_ratio approaches
-  the floating threshold from below.
-- FRAGILE_OBJECT_OVERLOADED: supported_weight_kg / max(0.1, object's own mass_kg)
-  -- weight piled on a fragile item relative to its own mass.
-- LIQUID_NOT_UPRIGHT / INVALID_ORIENTATION: (tilt_deg - tolerance_deg) / (90 -
-  tolerance_deg) -- 0 right at the tolerance boundary, 1.0 at a full 90 degree
-  tilt (the worst case for these angle metrics).
-- MALFORMED_GEOMETRY: no severity (short-circuits with score=0.0 regardless).
+Severity heuristics (each in [0, 1]; used only for `score`)
+------------------------------------------------------------
+- OBJECT_COLLISION: depth / min(thinnest extent of A, thinnest extent of B).
+- CONTAINER_PENETRATION: depth / smallest container half-extent.
+- UNSUPPORTED_OBJECT: 1 - support_ratio / floating_threshold.
+- FRAGILE_OBJECT_OVERLOADED: supported_weight_kg / max(0.1, own mass_kg).
+- LIQUID_NOT_UPRIGHT / INVALID_ORIENTATION: (tilt - tol) / (90 - tol).
+- MALFORMED_GEOMETRY: none (score forced to 0.0).
 
-Score formula
---------------
-`score = max(0, 1 - sum(min(1, severity) for v in violations) / max(1, n))`
-where `n = len(scene.objects)`. Warnings never affect score. Monotonic:
-adding a violation or increasing any severity can only lower or hold the score.
+Score: `max(0, 1 - sum(min(1, severity)) / max(1, n_objects))`. Warnings never
+affect it. Monotonic in the number and severity of violations.
 
 Determinism
 ------------
-No randomness. `violations` and `warnings` are each sorted by `(type, object_id)`
-(the pair's lexicographically-smaller id for OBJECT_COLLISION) before being
-returned, so `json.dumps(result, sort_keys=False)` is byte-identical across
-repeated calls on the same scene.
+No randomness anywhere. `violations` and `warnings` are each sorted by
+`(type, object_id)` (a collision pair uses its lexicographically smaller id),
+so repeated calls on the same scene are byte-identical under `json.dumps`.
 
-Complexity
------------
-O(n^2) overall, dominated by the all-pairs collision scan (n = object count):
-each pair is pruned first by O(1) `aabb_overlap`, and only surviving pairs run
-full O(1) SAT via `check_collision` -- so the O(n^2) factor is cheap per-pair
-broad-phase work, not O(n^2) SAT. `check_scene_containment` is O(n),
-`check_support` and `check_constraints` are each O(n^2) internally (same scale
-as the collision scan, see their own docstrings) -- fine at hackathon scale
-(5-20 objects); a spatial index would be the upgrade path beyond that.
+Complexity / performance
+------------------------
+O(n) precompute + O(n^2) vectorized broad phase + batched SAT on survivors;
+support and constraints are O(n^2) topology + small Python loops over
+contacts. Measured (tests/benchmark_validator.py, single machine): ~1.1 ms
+for 20 sparse objects, ~2.1 ms for 20 objects with 55 real collisions, ~3 ms
+for a dense 40-object scene; `PlacementValidator.try_place` ~0.2 ms per
+candidate at k=20. v1 took ~11.6 ms for 20 sparse objects. The packing
+solver can call this hundreds of times per second, and the incremental API
+thousands.
 """
 from __future__ import annotations
 
 import numpy as np
 
-from physics.collision import aabb_overlap, check_collision
+from physics.collision import collide_scene
 from physics.compressibility import (
     axis_projected_extent_m,
     combined_collision_allowance_m,
     container_wall_allowance_m,
 )
 from physics.constraints import check_constraints
-from physics.containment import check_no_duplicate_ids, check_scene_containment
-from physics.geometry import obb_from
+from physics.containment import check_scene_containment
+from physics.metrics import scene_metrics
+from physics.scene_geometry import MalformedSceneError, precompute
 from physics.schema import Scene
 from physics.support import check_support
 
@@ -133,169 +134,144 @@ def _sort_key(entry: dict):
     return (entry["type"], oid)
 
 
-def _malformed(object_id, exc: ValueError) -> dict:
+def _malformed(object_id, exc: Exception) -> dict:
     return {
         "valid": False,
         "score": 0.0,
-        "violations": [
-            {"type": "MALFORMED_GEOMETRY", "object": object_id, "detail": str(exc)}
-        ],
+        "violations": [{"type": "MALFORMED_GEOMETRY", "object": object_id, "detail": str(exc)}],
         "warnings": [],
+        "metrics": {},
     }
 
 
-def validate_layout(scene: Scene) -> dict:
+def validate_layout(scene: Scene, *, floating_threshold: float = DEFAULT_FLOATING_THRESHOLD) -> dict:
     """Run the full physics validation pipeline on `scene`. See module docstring."""
-    # Step 1: malformed-input guard -- never let a bad scene raise past here.
     try:
-        check_no_duplicate_ids(scene)
-    except ValueError as e:
+        geom = precompute(scene)
+    except MalformedSceneError as e:
+        return _malformed(e.object_id, e)
+    except ValueError as e:  # defensive: anything geometry.py raises that isn't tagged
         return _malformed(None, e)
 
-    try:
-        container_obb = obb_from(scene.container)
-    except ValueError as e:
-        return _malformed(scene.container.id, e)
-
-    obbs = {}
-    try:
-        for obj in scene.objects:
-            obbs[obj.id] = obb_from(obj)
-    except ValueError as e:
-        return _malformed(obj.id, e)
-
-    n = max(1, len(scene.objects))
+    objs = geom.objects
+    n = max(1, geom.n)
     violations: list[dict] = []
     warnings: list[dict] = []
+    container = geom.container_obb
 
-    # --- Containment ---
-    objs = scene.objects
-    obj_by_id = {o.id: o for o in objs}
-    container_denom = max(1e-9, float(np.min(container_obb.half_extents)))
-    for res in check_scene_containment(scene):
+    # --- Containment (vectorized; per-wall compressibility) ---
+    container_denom = max(1e-9, float(np.min(container.half_extents)))
+    for res in check_scene_containment(scene, geom=geom):
+        i = geom.index[res.object_id]
+        obj = objs[i]
         raw_depth = res.penetration_depth_m
-        allowance = 0.0
-        if res.violated_walls:
-            # check_containment only reports one scalar penetration_depth_m
-            # (already the max across every violated vertex/axis), not a
-            # per-wall breakdown, so there's no way to pick "the wall with
-            # the largest raw penetration" from ContainmentResult alone
-            # without touching containment.py (out of scope for this task).
-            # Resolution: use the axis of the first violated wall in sorted
-            # (deterministic) order as the stand-in axis for the object's
-            # own compressible extent -- simple, deterministic, and the
-            # `raw_depth` used below is still the true overall max.
-            axis_idx = _WALL_AXIS_INDEX[sorted(res.violated_walls)[0][-1]]
-            axis = container_obb.axes[:, axis_idx]
-            obj = obj_by_id[res.object_id]
-            extent = axis_projected_extent_m(obbs[res.object_id], axis)
-            allowance = container_wall_allowance_m(obj, extent)
-        effective_depth = max(0.0, raw_depth - allowance)
+        if obj.rigidity == "rigid":
+            effective = dict(res.per_wall_depth_m)
+        else:
+            effective = {}
+            for wall, depth in res.per_wall_depth_m.items():
+                axis = container.axes[:, _WALL_AXIS_INDEX[wall[-1]]]
+                allowance = container_wall_allowance_m(obj, axis_projected_extent_m(geom.obbs[i], axis))
+                effective[wall] = max(0.0, depth - allowance)
+        effective_depth = max(effective.values(), default=0.0)
         if effective_depth <= 0.0:
             if raw_depth > 0.0:
-                warnings.append(
-                    {
-                        "type": "SOFT_COMPRESSION",
-                        "object": res.object_id,
-                        "raw_penetration_depth_m": raw_depth,
-                        "compressed_depth_m": raw_depth,
-                    }
-                )
+                warnings.append({
+                    "type": "SOFT_COMPRESSION",
+                    "object": res.object_id,
+                    "raw_penetration_depth_m": raw_depth,
+                    "compressed_depth_m": raw_depth,
+                    "walls": sorted(res.per_wall_depth_m),
+                })
             continue
-        severity = _clamp01(effective_depth / container_denom)
-        violations.append(
-            {
-                "type": "CONTAINER_PENETRATION",
-                "object": res.object_id,
-                "penetration_depth_m": effective_depth,
-                "violated_walls": list(res.violated_walls),
-                "severity": severity,
-            }
-        )
+        violations.append({
+            "type": "CONTAINER_PENETRATION",
+            "object": res.object_id,
+            "penetration_depth_m": effective_depth,
+            "raw_penetration_depth_m": raw_depth,
+            "compressed_depth_m": raw_depth - effective_depth,
+            "violated_walls": sorted(w for w, d in effective.items() if d > 0.0),
+            "per_wall_depth_m": {w: d for w, d in sorted(effective.items()) if d > 0.0},
+            "penetrating_vertices": [_vec3(v) for v in res.penetrating_vertices],
+            "severity": _clamp01(effective_depth / container_denom),
+        })
 
-    # --- Collisions: all pairs, aabb_overlap broad-phase first (O(n^2) total). ---
-    for i in range(len(objs)):
-        for j in range(i + 1, len(objs)):
-            a, b = objs[i], objs[j]
-            oa, ob = obbs[a.id], obbs[b.id]
-            if not aabb_overlap(oa, ob):
-                continue
-            result = check_collision(oa, ob)
-            if result.colliding:
-                raw_depth = result.penetration_depth_m
-                allowance = combined_collision_allowance_m(a, b, result.axis, oa, ob)
-                effective_depth = max(0.0, raw_depth - allowance)
-                if effective_depth <= 0.0:
-                    if raw_depth > 0.0:
-                        warnings.append(
-                            {
-                                "type": "SOFT_COMPRESSION",
-                                "objects": sorted([a.id, b.id]),
-                                "raw_penetration_depth_m": raw_depth,
-                                "compressed_depth_m": raw_depth,
-                            }
-                        )
-                    continue
-                denom = max(1e-9, min(min(a.dimensions), min(b.dimensions)))
-                severity = _clamp01(effective_depth / denom)
-                violations.append(
-                    {
-                        "type": "OBJECT_COLLISION",
-                        "objects": sorted([a.id, b.id]),
-                        "penetration_depth_m": effective_depth,
-                        "contact_point": _vec3(result.contact_point),
-                        "severity": severity,
-                    }
-                )
+    # --- Collisions (broad phase + batched SAT; only colliding pairs come back) ---
+    for r in collide_scene(geom):
+        i, j = geom.index[r.a_id], geom.index[r.b_id]
+        a, b = objs[i], objs[j]
+        raw_depth = r.penetration_depth_m
+        if a.rigidity == "rigid" and b.rigidity == "rigid":
+            allowance = 0.0
+        else:
+            allowance = combined_collision_allowance_m(a, b, r.axis, geom.obbs[i], geom.obbs[j])
+        effective_depth = max(0.0, raw_depth - allowance)
+        pair = sorted([a.id, b.id])
+        if effective_depth <= 0.0:
+            if raw_depth > 0.0:
+                warnings.append({
+                    "type": "SOFT_COMPRESSION",
+                    "objects": pair,
+                    "raw_penetration_depth_m": raw_depth,
+                    "compressed_depth_m": raw_depth,
+                    "contact_point": _vec3(r.contact_point),
+                })
+            continue
+        denom = max(1e-9, min(min(a.dimensions), min(b.dimensions)))
+        violations.append({
+            "type": "OBJECT_COLLISION",
+            "objects": pair,
+            "penetration_depth_m": effective_depth,
+            "raw_penetration_depth_m": raw_depth,
+            "compressed_depth_m": raw_depth - effective_depth,
+            "contact_point": _vec3(r.contact_point),
+            "axis": _vec3(r.axis),
+            "severity": _clamp01(effective_depth / denom),
+        })
 
-    # --- Support ---
-    for r in check_support(scene, floating_threshold=DEFAULT_FLOATING_THRESHOLD):
-        if r.floating:
-            severity = _clamp01(1.0 - r.support_ratio / DEFAULT_FLOATING_THRESHOLD)
-            violations.append(
-                {
-                    "type": "UNSUPPORTED_OBJECT",
-                    "object": r.object_id,
-                    "support_ratio": r.support_ratio,
-                    "severity": severity,
-                }
-            )
-        elif r.unstable:
-            center = obbs[r.object_id].center
-            warnings.append(
-                {
-                    "type": "UNSTABLE_STACK",
-                    "object": r.object_id,
-                    "stability_margin_m": r.stability_margin_m,
-                    "center_of_mass_projection": [float(center[0]), float(center[2])],
-                }
-            )
+    # --- Support / static stability ---
+    for s in check_support(scene, floating_threshold=floating_threshold, geom=geom):
+        center = geom.centers[geom.index[s.object_id]]
+        com_xz = [float(center[0]), float(center[2])]
+        if s.floating:
+            violations.append({
+                "type": "UNSUPPORTED_OBJECT",
+                "object": s.object_id,
+                "support_ratio": s.support_ratio,
+                "center_of_mass_projection": com_xz,
+                "severity": _clamp01(1.0 - s.support_ratio / floating_threshold),
+            })
+        elif s.unstable:
+            warnings.append({
+                "type": "UNSTABLE_STACK",
+                "object": s.object_id,
+                "stability_margin_m": s.stability_margin_m,
+                "support_ratio": s.support_ratio,
+                "supporting_objects": list(s.supporting_objects),
+                "center_of_mass_projection": com_xz,
+                "contact_polygon": [list(p) for p in s.contact_polygon],
+            })
+        elif s.supported_by_unstable:
+            warnings.append({
+                "type": "UNSTABLE_SUPPORT_CHAIN",
+                "object": s.object_id,
+                "supporting_objects": list(s.supporting_objects),
+            })
 
-    # --- Constraints (travel semantics) ---
+    # --- Travel constraints (transitive load) ---
     mass_by_id = {o.id: o.mass_kg for o in objs}
-    c_violations, c_warnings = check_constraints(scene)
+    c_violations, c_warnings = check_constraints(scene, geom=geom)
     for v in c_violations:
+        entry = {"type": v.type, "object": v.object_id}
+        entry.update(v.details)
         if v.type == "FRAGILE_OBJECT_OVERLOADED":
             weight = v.details.get("supported_weight_kg", 0.0)
-            denom = max(0.1, mass_by_id.get(v.object_id, 0.1))
-            severity = _clamp01(weight / denom)
-            violations.append(
-                {
-                    "type": v.type,
-                    "object": v.object_id,
-                    "supported_weight_kg": weight,
-                    "severity": severity,
-                }
-            )
+            entry["severity"] = _clamp01(weight / max(0.1, mass_by_id.get(v.object_id, 0.1)))
         else:  # LIQUID_NOT_UPRIGHT / INVALID_ORIENTATION
             tilt = v.details.get("tilt_deg", 0.0)
             tol = v.details.get("tolerance_deg", 15.0)
-            denom = max(1e-9, 90.0 - tol)
-            severity = _clamp01((tilt - tol) / denom)
-            entry = {"type": v.type, "object": v.object_id, "severity": severity}
-            entry.update(v.details)
-            violations.append(entry)
-
+            entry["severity"] = _clamp01((tilt - tol) / max(1e-9, 90.0 - tol))
+        violations.append(entry)
     for w in c_warnings:
         entry = {"type": w.type, "object": w.object_id}
         entry.update(w.details)
@@ -303,13 +279,12 @@ def validate_layout(scene: Scene) -> dict:
 
     violations.sort(key=_sort_key)
     warnings.sort(key=_sort_key)
-
     severity_sum = sum(min(1.0, v.get("severity", 1.0)) for v in violations)
-    score = max(0.0, 1.0 - severity_sum / n)
 
     return {
         "valid": len(violations) == 0,
-        "score": score,
+        "score": max(0.0, 1.0 - severity_sum / n),
         "violations": violations,
         "warnings": warnings,
+        "metrics": scene_metrics(geom),
     }

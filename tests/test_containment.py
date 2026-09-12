@@ -11,6 +11,8 @@ from physics.containment import (
 )
 from physics.geometry import obb_from
 from physics.schema import Constraints, Container, Object, Scene
+from physics.scene_geometry import precompute
+from tests import fixtures
 
 
 def quat(axis, angle_deg):
@@ -77,6 +79,10 @@ class TestCheckContainment(unittest.TestCase):
             math.radians(45)
         ) - 1.0
         self.assertAlmostEqual(result.penetration_depth_m, expected_depth, places=6)
+        # Single wall involved -- per_wall_depth_m must report exactly it,
+        # at the same depth as the overall max.
+        self.assertEqual(set(result.per_wall_depth_m), {"+x"})
+        self.assertAlmostEqual(result.per_wall_depth_m["+x"], expected_depth, places=6)
 
     def test_object_entirely_outside(self):
         container = obb_from(make_container())
@@ -171,6 +177,51 @@ class TestCheckSceneContainment(unittest.TestCase):
         )
         results = check_scene_containment(scene)
         self.assertEqual(results, [])
+
+    def test_zero_objects_returns_empty_list(self):
+        scene = Scene(container=make_container(), objects=[])
+        self.assertEqual(check_scene_containment(scene), [])
+
+    def test_precomputed_geom_matches_default(self):
+        # scene_with_wall_penetration: laptop violates -X by 0.03m, shoe is
+        # fully contained -- so exactly one violation, with a known depth.
+        scene = fixtures.scene_with_wall_penetration()
+        geom = precompute(scene)
+        direct = check_scene_containment(scene)
+        via_geom = check_scene_containment(scene, geom=geom)
+        self.assertEqual(len(direct), len(via_geom))
+        for a, b in zip(direct, via_geom):
+            self.assertEqual(a.object_id, b.object_id)
+            self.assertEqual(a.contained, b.contained)
+            self.assertAlmostEqual(a.penetration_depth_m, b.penetration_depth_m, places=9)
+            self.assertEqual(a.violated_walls, b.violated_walls)
+            self.assertEqual(set(a.per_wall_depth_m), set(b.per_wall_depth_m))
+            for wall, depth in a.per_wall_depth_m.items():
+                self.assertAlmostEqual(depth, b.per_wall_depth_m[wall], places=9)
+            np.testing.assert_allclose(
+                np.array(a.penetrating_vertices), np.array(b.penetrating_vertices)
+            )
+
+
+class TestPerWallDepth(unittest.TestCase):
+    def test_two_walls_violated_by_different_known_amounts(self):
+        # Container half-extents (1,1,1). Object half-extents (0.5,0.5,0.5)
+        # at center (0.53, 0, -0.51):
+        #   x-range = [0.03, 1.03]  -> +x overshoot = 1.03 - 1 = 0.03
+        #   y-range = [-0.5, 0.5]   -> fully inside
+        #   z-range = [-1.01, -0.01] -> -z overshoot = |-1.01| - 1 = 0.01
+        container = obb_from(make_container())
+        obj = obb_from(make_object("a", (1.0, 1.0, 1.0), (0.53, 0.0, -0.51)))
+        result = check_containment(container, obj)
+        self.assertFalse(result.contained)
+        self.assertEqual(result.violated_walls, ["+x", "-z"])
+        self.assertAlmostEqual(result.per_wall_depth_m["+x"], 0.03, places=6)
+        self.assertAlmostEqual(result.per_wall_depth_m["-z"], 0.01, places=6)
+        self.assertEqual(set(result.per_wall_depth_m), {"+x", "-z"})
+        self.assertAlmostEqual(result.penetration_depth_m, 0.03, places=6)
+        self.assertAlmostEqual(
+            result.penetration_depth_m, max(result.per_wall_depth_m.values()), places=9
+        )
 
 
 if __name__ == "__main__":

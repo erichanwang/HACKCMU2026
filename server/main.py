@@ -4,7 +4,9 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-import httpx
+from typing import Literal
+
+import anthropic
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from pymongo import MongoClient
@@ -12,14 +14,13 @@ from pymongo import MongoClient
 RIGIDITIES = ("rigid", "soft", "fragile")
 PROMPT = (
     "Identify the main object in this photo; it is about to be packed in a suitcase. "
-    'Reply with JSON only: {"label": <2-4 word name>, "description": <one sentence: what it is, material, '
-    'anything that matters for packing>, "rigidity": <"rigid"|"soft"|"fragile">, "compressibility": <number>, '
-    '"mass": <estimated kg>, "keepUpright": <true|false>}. '
-    "fragile = breaks if crushed or dropped; soft = compresses (clothes, bags); rigid = everything else. "
+    "label: a 2-4 word name. description: one sentence — what it is, material, anything that matters for packing. "
+    "rigidity: fragile = breaks if crushed or dropped; soft = compresses (clothes, bags); rigid = everything else. "
     "compressibility = the item's loose volume divided by its volume when squeezed hard into a suitcase: "
     "1 for rigid or fragile items; for soft items roughly 1.3 (jeans, towel), 2 (t-shirt, socks), 3 (down jacket, pillow). "
-    "mass = your best estimate in kg. keepUpright = true only if it must stay this side up (liquids, open containers)."
+    "mass: your best estimate in kg. keepUpright: true only if it must stay this side up (liquids, open containers)."
 )
+MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
 UNKNOWN = {"label": "unknown", "description": "", "rigidity": "rigid", "compressibility": 1.0, "mass": 0.0, "keepUpright": False}
 
 
@@ -33,38 +34,47 @@ def compressibility(value, rigidity: str) -> float:
         return 1.0
 
 
+if "<db_password>" in os.environ.get("SUITCASE_MONGODB_URI", ""):
+    raise SystemExit("SUITCASE_MONGODB_URI still contains <db_password> — a stale `export` in this shell? Run: unset SUITCASE_MONGODB_URI")
 db = MongoClient(os.environ.get("SUITCASE_MONGODB_URI", "mongodb://localhost:27017"), serverSelectionTimeoutMS=8000)[os.environ.get("MONGO_DB", "suitcase")]
 db.client.admin.command("ping")  # fail at startup, not on the first request
 app = FastAPI()
 
 
-def detect(jpeg: bytes) -> dict:
-    key = os.environ.get("XAI_API_KEY")
-    if not key:
+class Guess(BaseModel):
+    label: str
+    description: str
+    rigidity: Literal["rigid", "soft", "fragile"]
+    compressibility: float
+    mass: float
+    keepUpright: bool
+
+
+def detect(image: bytes) -> dict:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
         return dict(UNKNOWN)
-    r = httpx.post(
-        "https://api.x.ai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {key}"},
-        json={
-            "model": os.environ.get("GROK_MODEL", "grok-4"),
-            "response_format": {"type": "json_object"},
-            "messages": [{"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()}},
+    media_type = "image/png" if image.startswith(b"\x89PNG") else "image/jpeg"
+    try:
+        r = anthropic.Anthropic().messages.parse(
+            model=MODEL,
+            max_tokens=1024,
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(image).decode()}},
                 {"type": "text", "text": PROMPT},
             ]}],
-        },
-        timeout=30,
-    )
-    r.raise_for_status()
-    out = json.loads(r.json()["choices"][0]["message"]["content"])
-    rigidity = out.get("rigidity") if out.get("rigidity") in RIGIDITIES else "rigid"
-    try:
-        mass = min(50.0, max(0.0, float(out.get("mass", 0))))
-    except (TypeError, ValueError):
-        mass = 0.0
-    return {"label": str(out.get("label", "unknown"))[:60], "description": str(out.get("description", ""))[:200],
-            "rigidity": rigidity, "compressibility": compressibility(out.get("compressibility"), rigidity),
-            "mass": mass, "keepUpright": out.get("keepUpright") is True}
+            output_format=Guess,
+        )
+        out = r.parsed_output
+        if out is None:
+            raise ValueError(f"no parsed output (stop_reason={r.stop_reason})")
+    except (anthropic.APIError, ValueError) as e:
+        # The item is still worth storing; the user can fix the label by hand.
+        print(f"labelling failed ({type(e).__name__}): {str(e)[:200]}", flush=True)
+        return dict(UNKNOWN)
+    return {"label": out.label[:60], "description": out.description[:200], "rigidity": out.rigidity,
+            "compressibility": compressibility(out.compressibility, out.rigidity),
+            "mass": min(50.0, max(0.0, out.mass)), "keepUpright": out.keepUpright}
 
 
 def public(doc: dict) -> dict:
@@ -103,8 +113,14 @@ def get_suitcase(suitcase_id: str):
     return public(doc) | {"items": [public(d) for d in db.items.find({"suitcaseId": suitcase_id})]}
 
 
+@app.post("/label")
+def label_image(image: UploadFile = File(...)):
+    """Identify an object from a photo without storing anything; the app shows this for confirmation first."""
+    return detect(image.file.read())
+
+
 @app.post("/items")
-def create_item(item: str = Form(...), image: UploadFile = File(...)):
+def create_item(item: str = Form(...), image: UploadFile | None = File(None)):
     try:
         doc = json.loads(item)
         item_id, suitcase_id = str(doc["id"]), str(doc["suitcaseId"])
@@ -112,12 +128,28 @@ def create_item(item: str = Form(...), image: UploadFile = File(...)):
         raise HTTPException(400, "item must be JSON with id and suitcaseId")
     if db.suitcases.find_one({"_id": suitcase_id}) is None:
         raise HTTPException(404, "no such suitcase")
-    guess = detect(image.file.read())
-    doc |= guess | {
-        "_id": item_id,
-        "labelSource": "auto", "rigiditySource": "auto", "compressibilitySource": "auto",
-        "createdAt": now(),
-    }
+    guess = detect(image.file.read()) if image is not None else dict(UNKNOWN)
+    sources = {"labelSource": "auto", "rigiditySource": "auto", "compressibilitySource": "auto"}
+    if image is None:  # confirmed or typed-in item: the fields the app sends are authoritative
+        for field in ("label", "description", "rigidity", "compressibility", "mass", "keepUpright"):
+            if doc.get(field) is not None:
+                guess[field] = doc[field]
+        for field in ("label", "rigidity", "compressibility"):
+            if doc.get(field) is not None:
+                sources[field + "Source"] = doc.get(field + "Source") if doc.get(field + "Source") in ("auto", "user") else "user"
+        guess["rigidity"] = guess["rigidity"] if guess["rigidity"] in RIGIDITIES else "rigid"
+        guess["compressibility"] = compressibility(guess["compressibility"], guess["rigidity"])
+        try:
+            guess["mass"] = min(50.0, max(0.0, float(guess["mass"])))
+        except (TypeError, ValueError):
+            guess["mass"] = 0.0
+        guess["keepUpright"] = guess["keepUpright"] is True
+    prev = db.items.find_one({"_id": item_id}) or {}  # a rescan keeps what the user typed
+    for field in ("label", "rigidity", "compressibility"):
+        if prev.get(field + "Source") == "user":
+            guess[field] = prev[field]
+            sources[field + "Source"] = "user"
+    doc |= guess | sources | {"_id": item_id, "createdAt": prev.get("createdAt") or now()}
     db.items.replace_one({"_id": item_id}, doc, upsert=True)
     return public(doc)
 
@@ -149,4 +181,19 @@ def update_item(item_id: str, patch: Patch):
 
 @app.get("/items")
 def list_items(suitcaseId: str | None = None):
-    return [public(d) for d in db.items.find({"suitcaseId": suitcaseId} if suitcaseId else {})]
+    return [public(d) for d in db.items.find({"suitcaseId": suitcaseId} if suitcaseId else {}).sort("createdAt", 1)]
+
+
+@app.delete("/items/{item_id}")
+def delete_item(item_id: str):
+    if db.items.delete_one({"_id": item_id}).deleted_count == 0:
+        raise HTTPException(404, "no such item")
+    return {"deleted": item_id}
+
+
+@app.delete("/suitcases/{suitcase_id}")
+def delete_suitcase(suitcase_id: str):
+    if db.suitcases.delete_one({"_id": suitcase_id}).deleted_count == 0:
+        raise HTTPException(404, "no such suitcase")
+    db.items.delete_many({"suitcaseId": suitcase_id})
+    return {"deleted": suitcase_id}

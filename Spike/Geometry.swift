@@ -1,6 +1,8 @@
 import Foundation
 import simd
 
+let shapeCellMetersDefault: Float = 0.01
+
 struct BoxFit {
     var width: Float   // along `axis`
     var depth: Float   // perpendicular to `axis`, in-plane
@@ -54,16 +56,41 @@ func minAreaRect(_ pts: [SIMD2<Float>]) -> (w: Float, d: Float, center: SIMD2<Fl
     return best.map { ($0.w, $0.d, $0.center, $0.axis) }
 }
 
+func quantile(_ xs: [Float], _ q: Float) -> Float {
+    let sorted = xs.sorted()
+    return sorted[min(sorted.count - 1, max(0, Int(Float(sorted.count - 1) * q)))]
+}
+
 /// Fit a box to world-space points sitting on a horizontal plane at `planeY`.
-func fitBox(points: [SIMD3<Float>], planeY: Float, padding: Float) -> BoxFit? {
+/// `trim` ignores that fraction of outermost points on each side (sensor noise, flying pixels).
+func fitBox(points: [SIMD3<Float>], planeY: Float, padding: Float, trim: Float = 0) -> BoxFit? {
     guard !points.isEmpty else { return nil }
     let flat = points.map { SIMD2<Float>($0.x, $0.z) }
     guard let r = minAreaRect(flat) else { return nil }
-    let height = points.map { $0.y - planeY }.max()! + padding
+    let axis = r.axis.x < 0 ? -r.axis : r.axis, perp = SIMD2<Float>(-axis.y, axis.x)
+    let us = flat.map { simd_dot($0, axis) }, vs = flat.map { simd_dot($0, perp) }, hs = points.map { $0.y - planeY }
+    let (u0, u1) = (quantile(us, trim), quantile(us, 1 - trim))
+    let (v0, v1) = (quantile(vs, trim), quantile(vs, 1 - trim))
+    let height = quantile(hs, 1 - trim) + padding
+    let c = axis * ((u0 + u1) / 2) + perp * ((v0 + v1) / 2)
     return BoxFit(
-        width: r.w + padding, depth: r.d + padding, height: height,
-        center: SIMD3<Float>(r.center.x, planeY + height / 2, r.center.y),
-        axis: r.axis.x < 0 ? SIMD3<Float>(-r.axis.x, 0, -r.axis.y) : SIMD3<Float>(r.axis.x, 0, r.axis.y))
+        width: u1 - u0 + padding, depth: v1 - v0 + padding, height: height,
+        center: SIMD3<Float>(c.x, planeY + height / 2, c.y),
+        axis: SIMD3<Float>(axis.x, 0, axis.y))
+}
+
+/// Height of the surface an object rests on, from the heights of all points around it: the highest 1 cm band
+/// holding a large share of the points that is clearly below the tap (`minBelow`) but not absurdly far (`maxBelow`).
+/// A table or floor fills a band with thousands of points; the object's walls and top don't.
+func supportHeight(ys: [Float], seedY: Float, minBelow: Float = 0.015, maxBelow: Float, bin: Float = 0.01, minFraction: Float = 0.08) -> Float? {
+    guard !ys.isEmpty else { return nil }
+    var bands: [Int: [Float]] = [:]
+    for y in ys { bands[Int((y / bin).rounded(.down)), default: []].append(y) }
+    let needed = max(300, Int(Float(ys.count) * minFraction))
+    let candidates = bands.values.filter { $0.count >= needed }
+        .map { $0.sorted()[$0.count / 2] }
+        .filter { seedY - $0 >= minBelow && seedY - $0 <= maxBelow }
+    return candidates.max()
 }
 
 /// Keep only points connected to the seed through occupied `cell`-sized grid cells (8-neighbourhood).
@@ -81,18 +108,6 @@ func connectedCluster(_ points: [SIMD3<Float>], seed: SIMD3<Float>, cell: Float)
             if grid[n] != nil, !seen.contains(n) { seen.insert(n); frontier.append(n) }
         } }
     }
-    return out
-}
-
-/// Sample a triangle's surface at roughly `spacing` intervals so sparse mesh vertices become a dense cloud.
-func densify(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, spacing: Float) -> [SIMD3<Float>] {
-    let longest = max(simd_length(b - a), simd_length(c - b), simd_length(a - c))
-    let n = max(1, Int((longest / spacing).rounded(.up)))
-    var out: [SIMD3<Float>] = []
-    for i in 0...n { for j in 0...(n - i) {
-        let u = Float(i) / Float(n), v = Float(j) / Float(n)
-        out.append(a + (b - a) * u + (c - a) * v)
-    } }
     return out
 }
 
@@ -124,8 +139,8 @@ struct ScannedItem: Codable, Identifiable {
     var heights: [[Float]]
     var label: String?
     var labelSource: String?
-    var description: String?       // one sentence from Grok
-    var mass: Double?              // estimated kg from Grok, 0 = unknown
+    var description: String?       // one sentence from Claude
+    var mass: Double?              // estimated kg from Claude, 0 = unknown
     var keepUpright: Bool?         // must stay this side up (liquids, open containers)
     var rigidity: String?
     var rigiditySource: String?
@@ -138,6 +153,16 @@ struct ScannedItem: Codable, Identifiable {
         dimensions = [box.width, box.height, box.depth]
         cellSize = cell
         self.heights = heights
+    }
+
+    /// A typed-in box: uniform heightmap over the footprint.
+    init(width: Float, height: Float, depth: Float, suitcaseId: String, label: String, rigidity: String) {
+        self.suitcaseId = suitcaseId
+        dimensions = [width, height, depth]
+        cellSize = shapeCellMetersDefault
+        let ni = max(1, Int((width / cellSize).rounded(.up))), nj = max(1, Int((depth / cellSize).rounded(.up)))
+        heights = Array(repeating: Array(repeating: height, count: nj), count: ni)
+        self.label = label; self.rigidity = rigidity
     }
 
     var width: Float { dimensions[0] }

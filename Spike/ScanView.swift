@@ -1,26 +1,57 @@
 import ARKit
+import CoreImage
 import RealityKit
 import SwiftUI
 
-/// LiDAR reads slightly inside true edges; nudge every dimension outward. Tune against a known box.
-let paddingMeters: Float = 0.005
+/// Added to every dimension. 0 = report the true size; the packing solver applies its own tolerance.
+let paddingMeters: Float = 0.0
 /// Points closer to the table than this are treated as the table itself.
 let minHeightMeters: Float = 0.01
 /// Max horizontal distance from the tap to consider points.
 let searchRadiusMeters: Float = 0.5
 /// Grid cell for separating the tapped object from its neighbours.
 let clusterCellMeters: Float = 0.02
-/// Resolution of the captured shape (heightmap cell). Mesh triangles are sampled at half this spacing.
+/// Resolution of the captured shape (heightmap cell).
 let shapeCellMeters: Float = 0.01
-/// A closed suitcase is scanned from outside; its interior is the exterior minus this much per side.
-let suitcaseShellMeters: Float = 0.02
+/// Fewer depth points than this on the object means it's too small or too far; refuse rather than save junk.
+let minClusterPoints = 400
+/// Depth pixels below this ARConfidenceLevel (0 low, 1 medium, 2 high) are ignored — that's where flying pixels live.
+let minDepthConfidence: UInt8 = 2
+/// Fraction of outermost points ignored on each side when fitting the box.
+let trimFraction: Float = 0.01
+/// A closed suitcase is scanned from outside. Usable interior per axis ≈ exterior × this: shell, wheel wells and
+/// handle housing eat roughly 8% per axis (0.92³ ≈ 78% of the exterior volume). Tune per bag.
+let suitcaseInteriorScale: Float = 0.92
 
 enum ScanMode { case item, suitcase }
+
+/// What the item scanner is doing, so the UI can say so.
+enum ScanPhase {
+    case idle(String)                           // hint to show
+    case measured(ScannedItem)                  // dimensions known, identifying the object
+    case review(ScannedItem, rescanned: Bool)   // guess shown, nothing stored yet — user confirms or edits
+    case saving(ScannedItem)
+    case saved(ScannedItem, rescanned: Bool)
+    case failed(ScannedItem, String)
+
+    var key: String {
+        switch self {
+        case .idle(let h): return "idle-\(h)"
+        case .measured(let i): return "measured-\(i.id)"
+        case .review(let i, _): return "review-\(i.id)"
+        case .saving(let i): return "saving-\(i.id)"
+        case .saved(let i, _): return "saved-\(i.id)-\(i.label ?? "")-\(i.rigidity ?? "")"
+        case .failed(let i, _): return "failed-\(i.id)"
+        }
+    }
+}
 
 struct ScanView: UIViewRepresentable {
     var mode: ScanMode = .item
     var suitcaseId = ""
-    @Binding var item: ScannedItem?
+    /// When set, the next tap re-measures this existing item instead of creating a new one.
+    var rescanId: String? = nil
+    var phase: Binding<ScanPhase> = .constant(.idle(""))
     @Binding var status: String
     /// Interior [width, height, depth] of the last scanned suitcase (suitcase mode only).
     var suitcaseDims: Binding<[Float]?> = .constant(nil)
@@ -29,7 +60,8 @@ struct ScanView: UIViewRepresentable {
         let view = ARView(frame: .zero)
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = .horizontal
-        config.sceneReconstruction = .mesh
+        config.sceneReconstruction = .mesh  // display only; measurement uses the depth map
+        config.frameSemantics = ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) ? .smoothedSceneDepth : .sceneDepth
         view.session.run(config)
         view.debugOptions = [.showSceneUnderstanding]
         view.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap)))
@@ -41,20 +73,28 @@ struct ScanView: UIViewRepresentable {
     func updateUIView(_ uiView: ARView, context: Context) {
         context.coordinator.mode = mode
         context.coordinator.suitcaseId = suitcaseId
+        context.coordinator.rescanId = rescanId
+        context.coordinator.phase = phase
         context.coordinator.suitcaseDims = suitcaseDims
     }
-    func makeCoordinator() -> Coordinator { Coordinator(item: $item, status: $status) }
+    func makeCoordinator() -> Coordinator { Coordinator(status: $status) }
 
     final class Coordinator: NSObject {
-        @Binding var item: ScannedItem?
         @Binding var status: String
         weak var view: ARView?
         var overlay: AnchorEntity?
         var mode = ScanMode.item
         var suitcaseId = ""
+        var rescanId: String?
+        var phase: Binding<ScanPhase> = .constant(.idle(""))
         var suitcaseDims: Binding<[Float]?> = .constant(nil)
 
-        init(item: Binding<ScannedItem?>, status: Binding<String>) { _item = item; _status = status }
+        init(status: Binding<String>) { _status = status }
+
+        /// A problem with the tap itself: shown as the hint in item mode, as status in suitcase mode.
+        func hint(_ text: String) {
+            if mode == .item { phase.wrappedValue = .idle(text) } else { status = text }
+        }
 
         @objc func tap(_ g: UITapGestureRecognizer) {
             guard let view, let frame = view.session.currentFrame else { return }
@@ -62,71 +102,123 @@ struct ScanView: UIViewRepresentable {
 
             // Seed: whatever surface the ray hits (object top, most likely).
             guard let hit = view.raycast(from: point, allowing: .estimatedPlane, alignment: .any).first else {
-                status = "No surface under tap"; return
+                hint("No surface under tap"); return
             }
             let seed = SIMD3<Float>(hit.worldTransform.columns.3.x, hit.worldTransform.columns.3.y, hit.worldTransform.columns.3.z)
 
-            // Table: the horizontal plane just below the seed. Largest such plane wins.
-            let planes = frame.anchors.compactMap { $0 as? ARPlaneAnchor }
-                .filter { $0.alignment == .horizontal && $0.transform.columns.3.y < seed.y }
-            guard let table = planes.max(by: { $0.planeExtent.width * $0.planeExtent.height < $1.planeExtent.width * $1.planeExtent.height }) else {
-                status = "No table plane yet — pan around"; return
-            }
-            let planeY = table.transform.columns.3.y
-
-            // Mesh surface above the table near the tap, sampled densely across each triangle.
-            var pts: [SIMD3<Float>] = []
+            guard let depth = frame.smoothedSceneDepth ?? frame.sceneDepth else { hint("No depth data yet — hold still a moment"); return }
             let radius = mode == .suitcase ? searchRadiusMeters * 2 : searchRadiusMeters
-            let r2 = radius * radius
-            for mesh in frame.anchors.compactMap({ $0 as? ARMeshAnchor }) {
-                let v = mesh.geometry.vertices, f = mesh.geometry.faces
-                func vertex(_ i: UInt32) -> SIMD3<Float> {
-                    let raw = v.buffer.contents().advanced(by: v.offset + v.stride * Int(i)).assumingMemoryBound(to: SIMD3<Float>.self).pointee
-                    let w = mesh.transform * SIMD4<Float>(raw, 1)
-                    return SIMD3<Float>(w.x, w.y, w.z)
+            let maxHeight: Float = mode == .suitcase ? 1.0 : 0.6
+            let all = depthPoints(frame: frame, depth: depth, near: seed, radius: radius)
+
+            // The surface the object sits on: from the depth points (a lid or box top can be an ARKit plane
+            // too, so plane anchors are only the fallback when the surface around the object isn't in view).
+            let planes = frame.anchors.compactMap { $0 as? ARPlaneAnchor }
+                .filter { $0.alignment == .horizontal }.map { $0.transform.columns.3.y }
+                .filter { seed.y - $0 >= 0.015 && seed.y - $0 <= maxHeight }
+            guard let planeY = supportHeight(ys: all.map(\.y), seedY: seed.y, maxBelow: maxHeight) ?? planes.max() else {
+                if mode == .item, all.contains(where: { abs($0.y - seed.y) < 0.015 }) {
+                    hint("Too thin to measure — LiDAR needs about 2 cm. Add it by hand from the items list."); return
                 }
-                let idx = f.buffer.contents().assumingMemoryBound(to: UInt32.self)
-                for t in 0..<f.count {
-                    let a = vertex(idx[t * 3]), b = vertex(idx[t * 3 + 1]), c = vertex(idx[t * 3 + 2])
-                    let m = (a + b + c) / 3
-                    let dx = m.x - seed.x, dz = m.z - seed.z
-                    guard dx * dx + dz * dz < r2, max(a.y, b.y, c.y) - planeY > minHeightMeters else { continue }
-                    pts += densify(a, b, c, spacing: shapeCellMeters / 2).filter { $0.y - planeY > minHeightMeters }
-                }
+                hint("Can't see the surface it's on — step back so the floor/table around it is in view"); return
             }
+            let pts = all.filter { $0.y - planeY > minHeightMeters }
 
             let cluster = connectedCluster(pts, seed: seed, cell: clusterCellMeters)
-            guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
-                status = "Nothing above the table here (\(pts.count) pts)"; return
+            if mode == .item, cluster.count < minClusterPoints {
+                hint("Not enough detail (\(cluster.count) pts) — move closer, pan slowly over it, tap again"); return
+            }
+            guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters, trim: trimFraction) else {
+                hint("Nothing above the surface here — tap the object itself"); return
             }
             if mode == .suitcase {
-                let t = suitcaseShellMeters * 2
-                suitcaseDims.wrappedValue = [box.width - t, box.height - t, box.depth - t]
-                status = String(format: "interior %.0f × %.0f × %.0f cm", (box.width - t) * 100, (box.height - t) * 100, (box.depth - t) * 100)
+                let k = suitcaseInteriorScale
+                suitcaseDims.wrappedValue = [box.width * k, box.height * k, box.depth * k]
+                status = String(format: "outside %.0f × %.0f × %.0f cm → usable %.0f × %.0f × %.0f cm",
+                                box.width * 100, box.height * 100, box.depth * 100, box.width * k * 100, box.height * k * 100, box.depth * k * 100)
                 show(box, in: view)
                 return
             }
             let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
-            let scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters, suitcaseId: suitcaseId)
-            item = scanned
-            status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
+            var scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters, suitcaseId: suitcaseId)
+            let rescanned = rescanId != nil
+            if let rescanId { scanned.id = rescanId }
+            phase.wrappedValue = .measured(scanned)
             print(scanned.asciiMap)
             print(String(data: try! JSONEncoder().encode(scanned), encoding: .utf8)!)
 
-            // Photograph the object before the overlay covers it, then ask the server for label + rigidity.
-            let crop = screenRect(of: box, in: view)
-            view.snapshot(saveToHDR: false) { [weak self] shot in
-                guard let self, let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else { return }
-                Task { @MainActor in
-                    do {
-                        self.item = try await API.upload(scanned, image: UIImage(cgImage: cg))
-                        self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
-                    } catch {
-                        self.status = "server: \(error.localizedDescription)"
-                    }
+            // Crop the object out of the raw camera frame (no mesh overlay) and ask the server for label + rigidity.
+            var crop = screenRect(of: box, in: view)
+            if crop.width < 100 || crop.height < 100 { crop = view.bounds }  // vision models reject tiny images
+            guard let photo = cameraCrop(frame, viewRect: crop, viewSize: view.bounds.size) else {
+                phase.wrappedValue = .failed(scanned, "couldn't capture a photo"); return
+            }
+            Task { @MainActor in
+                var item = scanned
+                do {
+                    let g = try await API.label(photo)
+                    item.label = g.label; item.labelSource = "auto"; item.description = g.description
+                    item.rigidity = g.rigidity; item.rigiditySource = "auto"
+                    item.compressibility = g.compressibility; item.compressibilitySource = "auto"
+                    item.mass = g.mass; item.keepUpright = g.keepUpright
+                } catch {
+                    item.label = ""; item.rigidity = "rigid"  // user fills it in
+                    item.description = "Couldn't identify: \(error.localizedDescription)"
                 }
+                self.phase.wrappedValue = .review(item, rescanned: rescanned)
             }
             show(box, in: view)
+        }
+
+        /// World-space points from the depth map: confident pixels within `radius` (horizontally) of the seed.
+        func depthPoints(frame: ARFrame, depth: ARDepthData, near seed: SIMD3<Float>, radius: Float) -> [SIMD3<Float>] {
+            let map = depth.depthMap
+            CVPixelBufferLockBaseAddress(map, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
+            let w = CVPixelBufferGetWidth(map), h = CVPixelBufferGetHeight(map), rowBytes = CVPixelBufferGetBytesPerRow(map)
+            guard let base = CVPixelBufferGetBaseAddress(map) else { return [] }
+            var confBase: UnsafeMutableRawPointer?, confRow = 0
+            if let c = depth.confidenceMap {
+                CVPixelBufferLockBaseAddress(c, .readOnly)
+                confBase = CVPixelBufferGetBaseAddress(c); confRow = CVPixelBufferGetBytesPerRow(c)
+            }
+            defer { if let c = depth.confidenceMap { CVPixelBufferUnlockBaseAddress(c, .readOnly) } }
+
+            // Intrinsics are for the full camera image; scale them to the depth map.
+            let K = frame.camera.intrinsics, res = frame.camera.imageResolution
+            let sx = Float(w) / Float(res.width), sy = Float(h) / Float(res.height)
+            let fx = K[0][0] * sx, fy = K[1][1] * sy, cx = K[2][0] * sx, cy = K[2][1] * sy
+            let cam = frame.camera.transform, r2 = radius * radius
+            var out: [SIMD3<Float>] = []
+            for v in 0..<h {
+                let row = base.advanced(by: v * rowBytes).assumingMemoryBound(to: Float32.self)
+                for u in 0..<w {
+                    if let confBase, confBase.advanced(by: v * confRow + u).assumingMemoryBound(to: UInt8.self).pointee < minDepthConfidence { continue }
+                    let d = row[u]
+                    guard d > 0, d.isFinite else { continue }
+                    let local = SIMD4<Float>((Float(u) - cx) * d / fx, -(Float(v) - cy) * d / fy, -d, 1)
+                    let p4 = cam * local
+                    let p = SIMD3<Float>(p4.x, p4.y, p4.z)
+                    let dx = p.x - seed.x, dz = p.z - seed.z
+                    if dx * dx + dz * dz < r2 { out.append(p) }
+                }
+            }
+            return out
+        }
+
+        /// The camera image under a screen rectangle. The view shows the camera aspect-filled, so
+        /// view points map to camera pixels by one scale and offset once the frame is rotated upright.
+        func cameraCrop(_ frame: ARFrame, viewRect: CGRect, viewSize: CGSize) -> UIImage? {
+            let image = CIImage(cvPixelBuffer: frame.capturedImage).oriented(.right)  // portrait
+            let iw = image.extent.width, ih = image.extent.height
+            let scale = max(viewSize.width / iw, viewSize.height / ih)
+            let ox = (viewSize.width - iw * scale) / 2, oy = (viewSize.height - ih * scale) / 2
+            var r = CGRect(x: (viewRect.minX - ox) / scale, y: (viewRect.minY - oy) / scale,
+                           width: viewRect.width / scale, height: viewRect.height / scale)
+            r.origin.y = ih - r.maxY  // Core Image's origin is bottom-left
+            r = r.intersection(image.extent)
+            guard !r.isEmpty, let cg = CIContext().createCGImage(image.cropped(to: r), from: r) else { return nil }
+            return UIImage(cgImage: cg)
         }
 
         /// Screen-space rectangle around the box's projected corners, padded 15%, clamped to the view.

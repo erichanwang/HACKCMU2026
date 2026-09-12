@@ -37,5 +37,28 @@ assert c.get("/items", params={"suitcaseId": "ghost"}).json() == []
 full = c.get(f"/suitcases/{sc['id']}").json()
 assert full["name"] == "carry-on" and [i["id"] for i in full["items"]] == ["t1"], full
 assert c.get("/suitcases/ghost").status_code == 404
+# Rescanning (re-POST with the same id) keeps user-set label/rigidity but refreshes geometry.
+r = c.post("/items", data={"item": item.replace('"heights": [[0.1]]', '"heights": [[0.2]]')}, files=img).json()
+assert r["label"] == "hair dryer" and r["labelSource"] == "user" and r["rigidity"] == "fragile" and r["heights"] == [[0.2]], r
+assert len(c.get("/items").json()) == 1
+# /label identifies without storing (no key here → unknown).
+g = c.post("/label", files=img).json()
+assert g["label"] == "unknown" and g["rigidity"] in main.RIGIDITIES and len(c.get("/items").json()) == 1, g
+# Confirmed item: no image, app passes the guess through with its sources.
+conf = '{"id": "t3", "suitcaseId": "%s", "dimensions": [0.1, 0.1, 0.1], "cellSize": 0.01, "heights": [[0.1]], "label": "mug", "labelSource": "auto", "rigidity": "fragile", "rigiditySource": "auto", "mass": 0.3, "keepUpright": true}' % sc["id"]
+r = c.post("/items", data={"item": conf}).json()
+assert r["label"] == "mug" and r["labelSource"] == "auto" and r["rigiditySource"] == "auto" and r["mass"] == 0.3 and r["keepUpright"] is True, r
+assert c.delete("/items/t3").status_code == 200
+# Typed-in item: no image, label and rigidity from the user are kept as user-sourced.
+typed = '{"id": "t2", "suitcaseId": "%s", "dimensions": [0.28, 0.005, 0.22], "cellSize": 0.01, "heights": [[0.005]], "label": "iPad", "rigidity": "fragile"}' % sc["id"]
+r = c.post("/items", data={"item": typed}).json()
+assert r["label"] == "iPad" and r["labelSource"] == "user" and r["rigidity"] == "fragile" and r["rigiditySource"] == "user", r
+assert c.delete("/items/t2").status_code == 200
+assert c.delete("/items/nope").status_code == 404
+assert c.delete("/items/t1").json() == {"deleted": "t1"} and c.get("/items").json() == []
+r = c.post("/items", data={"item": item}, files=img); assert r.status_code == 200
+assert c.delete(f"/suitcases/{sc['id']}").status_code == 200
+assert c.get("/suitcases").json() == [] and c.get("/items").json() == [], "cascade delete"
+assert c.delete(f"/suitcases/{sc['id']}").status_code == 404
 main.db.items.drop(); main.db.suitcases.drop()
 print("server ok")

@@ -4,7 +4,7 @@ Scan objects with iPhone LiDAR, store them in MongoDB, pack them optimally, guid
 
 ```
 Spike/     iOS app — LiDAR scan → ScannedItem → POST to server
-server/    FastAPI + MongoDB — stores items, labels them with Grok
+server/    FastAPI + MongoDB — stores items, labels them with Claude
 Tests/     self-check for the geometry code
 physics/   deterministic physics validation (Python; Swift port in swift/PackPhysics)
 pan/       IFM PAN world-model layer (counterfactual packing rollouts)
@@ -15,12 +15,14 @@ packer3d/  3D packing solver with centre-of-mass optimisation
 
 Needs [uv](https://docs.astral.sh/uv/) (`brew install uv`). Everything else installs itself.
 
-Copy `.env.example` to `.env` at the repo root and fill in `SUITCASE_MONGODB_URI` (Atlas connection string) and `XAI_API_KEY` (Grok) — ask Helen for both. `.env` is git-ignored.
+Copy `.env.example` to `.env` at the repo root and fill in `SUITCASE_MONGODB_URI` (Atlas connection string) and `ANTHROPIC_API_KEY` — ask Helen for both. `.env` is git-ignored.
 
 ```bash
 cd server
-uv run --env-file ../.env uvicorn main:app --host 0.0.0.0
+uv run --env-file ../.env uvicorn main:app --host 0.0.0.0 --reload
 ```
+
+`--reload` restarts the server whenever `main.py` changes, so you never run stale code.
 
 Runs on port 8000. Endpoints:
 
@@ -29,11 +31,14 @@ Runs on port 8000. Endpoints:
 | `POST /suitcases` | JSON `{"name": …, "dimensions": [w, h, d]}` in metres. Returns the suitcase with its `id`. |
 | `GET /suitcases` | All suitcases, newest first. |
 | `GET /suitcases/{id}` | One suitcase **with its `items`** — the solver's input. |
-| `POST /items` | multipart: `item` (ScannedItem JSON) + `image` (JPEG). Labels via Grok, stores, returns the item. |
+| `POST /label` | multipart: `image` (JPEG). Identifies the object via Claude and returns the guess; stores nothing. |
+| `POST /items` | multipart: `item` (ScannedItem JSON) + optional `image` (JPEG). With an image, labels via Claude (vision); without, the item's own `label`/`rigidity` are kept as user-set. Stores and returns the item. |
 | `PATCH /items/{id}` | JSON `{"label": …, "rigidity": "rigid"\|"soft"\|"fragile"}` — user override. |
 | `GET /items?suitcaseId=…` | Scanned items, optionally filtered by suitcase. |
+| `DELETE /items/{id}` | Remove one item. |
+| `DELETE /suitcases/{id}` | Remove a suitcase and everything scanned into it. |
 
-Optional env: `MONGO_DB` (default `suitcase`), `GROK_MODEL` (default `grok-4`). Without `SUITCASE_MONGODB_URI` it uses a local `mongodb://localhost:27017`.
+Optional env: `MONGO_DB` (default `suitcase`), `ANTHROPIC_MODEL` (default `claude-opus-5`). Without `SUITCASE_MONGODB_URI` it uses a local `mongodb://localhost:27017`.
 
 Smoke test (needs a reachable Mongo): `uv run python check.py` → prints `server ok`.
 
@@ -54,7 +59,31 @@ Gotchas:
 - If Xcode says the bundle identifier is not available, change `bundleIdPrefix` in `project.yml` to something unique to you and re-run `xcodegen generate`.
 - First run on a phone: enable **Settings → Privacy & Security → Developer Mode**, then trust your certificate under **Settings → General → VPN & Device Management**.
 
-Using it: create or pick a suitcase (interior dimensions in cm), then point at an object on a table, pan for a couple of seconds until the mesh overlay covers it, tap the object. The Xcode console prints an ASCII heightmap and the JSON; the screen shows dimensions and the label/rigidity guess, both editable.
+## Using the app
+
+1. **Suitcase screen** — scan a suitcase (close it, put it on the floor, tap the middle of the lid, **Use this suitcase**), type its interior dimensions, or pick an existing one. Swipe left to delete one.
+2. **Scanner** — tap an object. The panel shows the dimensions, then *Identifying…*, then the guessed label and rigidity — **nothing is stored yet**. Edit if needed, then **Add to suitcase** (or **Discard**). **✓ Added** confirms it's in the database; **Next item** clears the panel. The camera is live the whole time.
+3. **N items** (header) — everything in this suitcase. Tap one to edit, **Rescan to re-measure**, or delete. **Add → Add by hand** types in an item LiDAR can't measure (thin, shiny, transparent). Rescan keeps the item and anything you typed; only the measurement changes.
+
+The Xcode console prints an ASCII heightmap and the JSON for every scan.
+
+### Getting a good scan
+
+LiDAR is about ±1 cm at best. These make the difference between that and a wild number:
+
+- **One object on a clear surface**, at least 5 cm from anything else — neighbours get merged into the box.
+- **Get close: 30–50 cm.** Accuracy drops fast with distance. Fill a good part of the screen with the object.
+- **Hold still for a second before tapping** so the depth settles. The app refuses the tap if too few depth points land on the object (*Not enough detail*) — usually too far away or too small.
+- **Tap the top face, near the centre.** Tapping an edge can seed the measurement on the table.
+- **Matte, light-coloured objects scan well.** Black, glossy, or transparent things are what LiDAR can't see — measure those with a tape and type them.
+- **Nothing smaller than ~5 cm, and nothing thinner than ~2 cm.** A flat iPad, book, or folded shirt can't be separated from the table it lies on — the app says so and you add it by hand (**N items → Add → Add by hand**).
+- Measurements come straight from the LiDAR depth map (not the smoothed mesh you see on screen), using only high-confidence pixels, with the outermost 1% of points trimmed. The coloured mesh overlay is just a visual cue.
+- **Keep some of the floor/table around the object in view.** The height of the surface it sits on is found from the depth points around it (the biggest band of points clearly below the tap), so the app needs to see that surface. If it can't, it says so — step back.
+- If a number looks off, **Rescan** from the item's page — it's cheap.
+
+Suitcase scans: same rules, plus stand back enough that the whole bag is on screen with margin. Usable interior = exterior × 0.92 per axis (about 78% of the volume — shell, wheels and handle housing); `suitcaseInteriorScale` in `Spike/ScanView.swift`.
+
+Tuning knobs at the top of `Spike/ScanView.swift`: `paddingMeters`, `minHeightMeters`, `searchRadiusMeters`, `clusterCellMeters`, `shapeCellMeters`, `minClusterPoints`, `minDepthConfidence`, `trimFraction`, `suitcaseInteriorScale`.
 
 ## Geometry self-check
 

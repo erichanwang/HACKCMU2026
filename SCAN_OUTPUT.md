@@ -37,12 +37,12 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 | `dimensions` | `[width, height, depth]` of the minimum-area bounding box. Width and depth are the footprint on the table; height is the tallest point above it. Includes a small padding (default 0.5 cm) because LiDAR reads slightly inside true edges. |
 | `cellSize` | Side length of one heightmap cell (default 0.01 m). |
 | `heights` | 2D grid, `ceil(width / cellSize)` rows × `ceil(depth / cellSize)` columns. `heights[i][j]` is the height of the object's surface above the table at that cell. `0` means nothing is there. |
-| `label` | Short name of the object. Guessed from the photo by Grok (`labelSource: "auto"`) or typed by the user (`"user"`). |
-| `description` | One sentence from Grok: what the object is, its material, anything that matters for packing. Display only. |
-| `mass` | Grok's estimated mass in kg, clamped to `[0, 50]`; `0` = unknown. The solver uses it for centre-of-mass balancing. |
+| `label` | Short name of the object. Guessed from the photo by Claude (`labelSource: "auto"`) or typed by the user (`"user"`). |
+| `description` | One sentence from Claude: what the object is, its material, anything that matters for packing. Display only. |
+| `mass` | Claude's estimated mass in kg, clamped to `[0, 50]`; `0` = unknown. The solver uses it for centre-of-mass balancing. |
 | `keepUpright` | `true` if the object must stay this side up (liquids, open containers). The solver then never lays it on its side. |
-| `rigidity` | `rigid`, `soft` (compressible — clothes, bags) or `fragile` (breaks if crushed/dropped; the solver stacks nothing on it). Guessed by Grok or chosen by the user; `rigiditySource` says which. A user choice is never overwritten by detection. |
-| `compressibility` | `k` ≥ 1: the item's loose volume divided by its volume when squeezed hard (1 = doesn't compress; a t-shirt ≈ 2, a down jacket ≈ 3). Guessed per item by Grok, clamped to `[1, 10]`, always `1` unless `rigidity` is `soft`; `compressibilitySource` says whether it was `auto` or `user`. The solver packs a soft item at `height / k` (`packer3d.Item.compressed`). |
+| `rigidity` | `rigid`, `soft` (compressible — clothes, bags) or `fragile` (breaks if crushed/dropped; the solver stacks nothing on it). Guessed by Claude or chosen by the user; `rigiditySource` says which. A user choice is never overwritten by detection. |
+| `compressibility` | `k` ≥ 1: the item's loose volume divided by its volume when squeezed hard (1 = doesn't compress; a t-shirt ≈ 2, a down jacket ≈ 3). Guessed per item by Claude, clamped to `[1, 10]`, always `1` unless `rigidity` is `soft`; `compressibilitySource` says whether it was `auto` or `user`. The solver packs a soft item at `height / k` (`packer3d.Item.compressed`). |
 | `createdAt` | ISO-8601 UTC timestamp, set by the server. |
 
 ### Coordinate convention
@@ -84,13 +84,13 @@ Tuning constants live at the top of `Spike/ScanView.swift`: `paddingMeters`, `mi
 
 ## How it is produced
 
-1. ARKit reconstructs a live mesh from LiDAR and detects the table as a horizontal plane.
-2. The tap raycasts onto the object to get a seed point.
-3. Mesh triangles near the seed and above the table are sampled densely into a point cloud.
+1. The tap raycasts onto the object to get a seed point. (ARKit's mesh is shown on screen as a coverage cue only.)
+2. The frame's LiDAR depth map (256×192, with per-pixel confidence) is back-projected to world points near the seed; low-confidence pixels are dropped.
+3. The support surface is the highest 1 cm band of heights holding a large share of those points and clearly below the seed (a lid or box top is often an ARKit plane, so plane anchors are only a fallback). Points above that surface are the object.
 4. Points are flood-filled from the seed through a 2 cm grid so neighbouring objects are excluded.
-5. A minimum-area rectangle is fitted to the footprint → `width`, `depth`; the tallest point → `height`.
+5. A minimum-area rectangle is fitted to the footprint → `width`, `depth`; height from the top of the points. The outermost 1% of points on each side are ignored.
 6. Each point is dropped into its cell and the maximum height per cell is kept → `heights`.
-7. The camera view is cropped to the object and sent with the JSON to `POST /items`; the server asks Grok for `label`, `description`, `rigidity`, `compressibility`, `mass` and `keepUpright`, stores the document, and returns it. Edits in the app go to `PATCH /items/{id}`.
+7. The camera view is cropped to the object and sent with the JSON to `POST /items`; the server asks Claude for `label`, `description`, `rigidity`, `compressibility`, `mass` and `keepUpright`, stores the document, and returns it. Edits in the app go to `PATCH /items/{id}`.
 
 ## Suitcases
 
@@ -104,4 +104,4 @@ Items belong to a suitcase. A suitcase is typed in by the user (interior dimensi
 
 ## Server
 
-`server/main.py` — FastAPI + pymongo. Run with `cd server && uv run uvicorn main:app --host 0.0.0.0`. Environment: `SUITCASE_MONGODB_URI` (default `mongodb://localhost:27017`), `MONGO_DB` (default `suitcase`), `XAI_API_KEY` (no key → label `unknown`, rigidity `rigid`, compressibility `1`, mass `0`), `GROK_MODEL` (default `grok-4`). The phone's server address is `API.base` in `Spike/API.swift`.
+`server/main.py` — FastAPI + pymongo. Run with `cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0 --reload`. Environment: `SUITCASE_MONGODB_URI` (default `mongodb://localhost:27017`), `MONGO_DB` (default `suitcase`), `ANTHROPIC_API_KEY` (no key → label `unknown`, rigidity `rigid`, compressibility `1`, mass `0`), `ANTHROPIC_MODEL` (default `claude-opus-5`). The phone's server address is `API.base` in `Spike/API.swift`.

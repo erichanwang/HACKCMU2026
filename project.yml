@@ -29,3 +29,4 @@ targets:
       base:
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: S5M24TW223  # Helen's personal team; change to yours to run on your own phone

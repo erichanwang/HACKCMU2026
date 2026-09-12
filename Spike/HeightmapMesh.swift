@@ -4,9 +4,20 @@ import RealityKit
 /// Turns a `ScannedItem`'s heightmap into a RealityKit mesh, so a packed item is
 /// drawn as the shape the LiDAR actually saw instead of its bounding box.
 ///
-/// The grid is `heights[i][j]`, `i` along the item's width (local X), `j` along
-/// its depth (local Z), each value the surface height above the table (local Y).
-/// Zero means nothing was there — see SCAN_OUTPUT.md.
+/// The grid is `heights[i][j]`: `i` along the item's width (local X), `j` along
+/// its depth (local Z), each value the surface height above the base (local Y).
+/// Zero means nothing is there. The solid is the volume under the heightmap, so
+/// each non-zero cell becomes a column: a quad on top at its own height, a quad
+/// on the base at y = 0, and walls wherever it is taller than what is beside it.
+///
+/// Walls are emitted on three occasions, not two:
+/// - against an **empty** neighbour, dropping the full height to y = 0;
+/// - around the grid **perimeter**, likewise to y = 0;
+/// - against a **shorter filled** neighbour, dropping only the step between them.
+///
+/// That third case is not decorative. Without it, two neighbouring columns of
+/// different heights leave a vertical slot between their top quads and the solid
+/// is not closed — you would see straight through the side of the object.
 enum HeightmapMesh {
 
     /// Builds a mesh for `item`, expressed in `placement`'s box.
@@ -45,10 +56,10 @@ enum HeightmapMesh {
     /// `place` maps a vertex from local scan space into the placement's box.
     static func surface(
         heights grid: [[Float]],
-        cellSize: Float,
+        cellSize cell: Float,
         place: (SIMD3<Float>) -> SIMD3<Float>
     ) -> (positions: [SIMD3<Float>], normals: [SIMD3<Float>])? {
-        guard cellSize > 0,
+        guard cell > 0,
               let firstRow = grid.first,
               !firstRow.isEmpty,
               grid.allSatisfy({ $0.count == firstRow.count })
@@ -56,32 +67,13 @@ enum HeightmapMesh {
 
         let rows = grid.count
         let cols = firstRow.count
-        let cell = cellSize
-
-        // One vertex per filled cell, at the cell's centre and its own height.
-        var vertexIndex = Array(repeating: Array(repeating: -1, count: cols), count: rows)
-        var top: [SIMD3<Float>] = []
-        for i in 0..<rows {
-            for j in 0..<cols where grid[i][j] > 0 {
-                vertexIndex[i][j] = top.count
-                top.append(SIMD3(
-                    (Float(i) + 0.5) * cell,
-                    grid[i][j],
-                    (Float(j) + 0.5) * cell
-                ))
-            }
-        }
-        guard top.count >= 3 else { return nil }
-
-        let surface = triangulate(vertexIndex: vertexIndex, rows: rows, cols: cols)
-        guard !surface.isEmpty else { return nil }
 
         var positions: [SIMD3<Float>] = []
         var normals: [SIMD3<Float>] = []
 
-        /// Flat-shaded: each triangle gets its own three vertices and one normal,
-        /// which keeps the skirt from smearing into the top surface.
-        func emit(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>) {
+        /// Flat-shaded: each triangle carries its own three vertices and one
+        /// normal, so a wall never smears into the top it meets.
+        func triangle(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>) {
             let pa = place(a), pb = place(b), pc = place(c)
             let normal = simd_cross(pb - pa, pc - pa)
             guard simd_length(normal) > 0 else { return }
@@ -90,96 +82,76 @@ enum HeightmapMesh {
             normals += [unit, unit, unit]
         }
 
-        // Top surface.
-        for triangle in surface {
-            emit(top[triangle.0], top[triangle.1], top[triangle.2])
+        func quad(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ d: SIMD3<Float>) {
+            triangle(a, b, c)
+            triangle(a, c, d)
         }
 
-        // Base cap: the same triangles flattened to y = 0, wound the other way.
-        func floored(_ v: SIMD3<Float>) -> SIMD3<Float> { SIMD3(v.x, 0, v.z) }
-        for triangle in surface {
-            emit(floored(top[triangle.2]), floored(top[triangle.1]), floored(top[triangle.0]))
+        /// Height beside cell (i, j); 0 off the grid or on an empty cell, which is
+        /// what makes the perimeter and the filled/empty boundary the same case.
+        func neighbour(_ i: Int, _ j: Int) -> Float {
+            guard i >= 0, i < rows, j >= 0, j < cols else { return 0 }
+            return max(0, grid[i][j])
         }
 
-        // Skirt walls: every edge used by exactly one triangle is a silhouette
-        // edge — the rim of the object or the lip of a hole — so drop a wall from
-        // it to the base and the solid closes up.
-        for (a, b) in boundaryEdges(of: surface) {
-            emit(top[a], floored(top[b]), top[b])
-            emit(top[a], floored(top[a]), floored(top[b]))
-        }
+        var drawn = 0
+        for i in 0..<rows {
+            for j in 0..<cols {
+                let top = grid[i][j]
+                guard top > 0 else { continue }
+                drawn += 1
 
-        return (positions, normals)
-    }
+                let x0 = Float(i) * cell, x1 = x0 + cell
+                let z0 = Float(j) * cell, z1 = z0 + cell
 
-    // MARK: - Topology
+                // Top face, wound counter-clockwise seen from above (+Y).
+                quad(
+                    SIMD3(x0, top, z0), SIMD3(x0, top, z1),
+                    SIMD3(x1, top, z1), SIMD3(x1, top, z0)
+                )
+                // Base face at y = 0, facing down.
+                quad(
+                    SIMD3(x1, 0, z0), SIMD3(x1, 0, z1),
+                    SIMD3(x0, 0, z1), SIMD3(x0, 0, z0)
+                )
 
-    private typealias Triangle = (Int, Int, Int)
-
-    /// Triangulates the filled cells, walking each 2×2 block of the grid.
-    ///
-    /// A block with all four corners filled becomes two triangles; three filled
-    /// becomes one, which is what lets a diagonal edge stay diagonal instead of
-    /// going blocky. Every triangle is wound counter-clockwise seen from above,
-    /// so its normal points along +Y.
-    private static func triangulate(
-        vertexIndex: [[Int]],
-        rows: Int,
-        cols: Int
-    ) -> [Triangle] {
-        var triangles: [Triangle] = []
-        guard rows > 1, cols > 1 else { return triangles }
-
-        for i in 0..<(rows - 1) {
-            for j in 0..<(cols - 1) {
-                let v00 = vertexIndex[i][j]
-                let v10 = vertexIndex[i + 1][j]
-                let v01 = vertexIndex[i][j + 1]
-                let v11 = vertexIndex[i + 1][j + 1]
-
-                switch (v00 >= 0, v10 >= 0, v01 >= 0, v11 >= 0) {
-                case (true, true, true, true):
-                    triangles.append((v00, v01, v10))
-                    triangles.append((v10, v01, v11))
-                case (true, true, true, false):
-                    triangles.append((v00, v01, v10))
-                case (true, true, false, true):
-                    triangles.append((v00, v11, v10))
-                case (true, false, true, true):
-                    triangles.append((v00, v01, v11))
-                case (false, true, true, true):
-                    triangles.append((v10, v01, v11))
-                default:
-                    break  // two or fewer corners: nothing to draw
+                // +X wall.
+                let east = neighbour(i + 1, j)
+                if top > east {
+                    quad(
+                        SIMD3(x1, top, z0), SIMD3(x1, top, z1),
+                        SIMD3(x1, east, z1), SIMD3(x1, east, z0)
+                    )
+                }
+                // −X wall.
+                let west = neighbour(i - 1, j)
+                if top > west {
+                    quad(
+                        SIMD3(x0, top, z1), SIMD3(x0, top, z0),
+                        SIMD3(x0, west, z0), SIMD3(x0, west, z1)
+                    )
+                }
+                // +Z wall.
+                let south = neighbour(i, j + 1)
+                if top > south {
+                    quad(
+                        SIMD3(x1, top, z1), SIMD3(x0, top, z1),
+                        SIMD3(x0, south, z1), SIMD3(x1, south, z1)
+                    )
+                }
+                // −Z wall.
+                let north = neighbour(i, j - 1)
+                if top > north {
+                    quad(
+                        SIMD3(x0, top, z0), SIMD3(x1, top, z0),
+                        SIMD3(x1, north, z0), SIMD3(x0, north, z0)
+                    )
                 }
             }
         }
-        return triangles
-    }
 
-    /// Edges belonging to exactly one triangle, returned in that triangle's own
-    /// winding so a wall hung from them faces outward.
-    private static func boundaryEdges(of triangles: [Triangle]) -> [(Int, Int)] {
-        struct Edge: Hashable { let low: Int, high: Int }
-
-        var uses: [Edge: Int] = [:]
-        var firstDirection: [Edge: (Int, Int)] = [:]
-
-        for triangle in triangles {
-            for (u, v) in [
-                (triangle.0, triangle.1),
-                (triangle.1, triangle.2),
-                (triangle.2, triangle.0),
-            ] {
-                let edge = Edge(low: min(u, v), high: max(u, v))
-                uses[edge, default: 0] += 1
-                if firstDirection[edge] == nil { firstDirection[edge] = (u, v) }
-            }
-        }
-
-        return uses.compactMap { edge, count in
-            count == 1 ? firstDirection[edge] : nil
-        }
+        guard drawn > 0 else { return nil }
+        return (positions, normals)
     }
 
     // MARK: - Placing the scan inside the packed box

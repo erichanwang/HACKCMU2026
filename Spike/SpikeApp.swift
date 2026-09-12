@@ -12,6 +12,7 @@ struct ContentView: View {
                 NavigationLink("Scan a box") { ScanScreen() }
                 NavigationLink("Plan AR frame") { PlanARView() }
                 NavigationLink("Plan 3D scene") { PlanSceneScreen() }
+                NavigationLink("Scanned item") { ScannedItemScreen() }
             }
             .navigationTitle("Spike")
         }

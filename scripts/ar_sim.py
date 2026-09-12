@@ -41,10 +41,10 @@ partly occluded by a neighbour, a cluster that bleeds into the table, and a suit
 open with its lid in frame. A short report of the dimensional error each induces prints every
 run, and every run also checks the solved plan against the *true* (undegraded) suitcase
 interior -- this is report-only (never fails the gate) and is where a real limitation, e.g. the
-open lid, shows up. `--adversarial` additionally runs two sweeps that print, but never fail on,
-known limitations: whether two items 3cm apart get merged by `connectedCluster`'s world-fixed
-grid, and whether the AR overlay still lands in the real bag under `tests/swift/drift`'s own
-mid/worst-realistic world-origin-drift + plane-error combos.
+open lid, shows up. `--adversarial` additionally runs two sweeps that print, but never fail the
+gate: a regression check that two items 3cm apart (now past `connectedCluster`'s cluster
+radius) still separate at every grid phase, and whether the AR overlay still lands in the real
+bag under `tests/swift/drift`'s own mid/worst-realistic world-origin-drift + plane-error combos.
 """
 from __future__ import annotations
 
@@ -267,9 +267,9 @@ def occlude_edge(points: np.ndarray, cx: float, cz: float, angle: float, d: floa
 
 def table_bleed(rng, points: np.ndarray, cx: float, cz: float, w: float, angle: float, table_y: float,
                  extra: float, n: int = 10) -> np.ndarray:
-    """`connectedCluster`'s grid is world-fixed (Geometry.swift's own ponytail note); with no
-    empty cell gap between the object and the table's edge, a sliver of table rides along in the
-    same tap's cluster, extending the measured footprint."""
+    """`connectedCluster` floods anything within its cluster radius of a kept point; with no gap
+    at all between the object and the table's edge, a sliver of table rides along in the same
+    tap's cluster, extending the measured footprint."""
     local = np.stack([np.linspace(-w / 2, w / 2 + extra, n), np.zeros(n)], axis=1)
     world_xz = local @ _rot(angle).T + np.array([cx, cz])
     strip = np.stack([world_xz[:, 0], np.full(n, table_y), world_xz[:, 1]], axis=1)
@@ -969,14 +969,16 @@ def worst_case_containment(placements, drawn_axis, drawn_perp, drawn_origin, tru
 
 
 def clutter_check(driver: Path) -> None:
-    """Two boxes 3cm apart (surface to surface): does `connectedCluster`'s world-fixed grid keep
-    them separate, or ship a single fused box to the server? Per Geometry.swift's own ponytail
-    comment this depends on grid phase, so try two phases rather than asserting one outcome."""
+    """Two boxes 3cm apart (surface to surface): does `connectedCluster` keep them separate, or
+    ship a single fused box to the server? `connectedCluster` now floods by point-to-point
+    distance (still bucketed through a `cell`-sized spatial hash for speed, not O(n^2)), so a
+    gap wider than `cell` (2cm) separates at every grid phase -- there is no longer a phase to
+    depend on. Sweep phases anyway, as a regression check on that guarantee."""
     w, d, h, cell, gap = BOX_ARGS["w"], BOX_ARGS["d"], BOX_ARGS["h"], 0.02, 0.03
     print("== clutter: two boxes 3cm apart, one tap on the first ==")
     print(f"{'grid phase':<12} {'cluster pts':<14} {'of total':<10} {'resulting box (m)':<20} verdict")
     merged_phases = 0
-    phases = (0.0, cell / 2)
+    phases = (0.0, cell / 4, cell / 2, 3 * cell / 4)
     for phase in phases:
         cx, cz = 2.0 + phase, 2.0
         a = box_points(np.random.default_rng(RNG_SEED + 100), w=w, d=d, h=h, cx=cx, cz=cz, angle=0.0, table_y=TABLE_Y)
@@ -989,7 +991,7 @@ def clutter_check(driver: Path) -> None:
         merged = out["clusterCount"] > 1.3 * len(a)
         box_str = "x".join(f"{v:.3f}" for v in out["box"])
         print(f"{phase * 100:5.1f} cm     {out['clusterCount']:<14} {out['clusterCount']}/{out['totalCount']:<8} "
-              f"{box_str:<20} {'MERGED (known limitation)' if merged else 'separated'}")
+              f"{box_str:<20} {'MERGED' if merged else 'separated'}")
         merged_phases += bool(merged)
     print("")
     if merged_phases:

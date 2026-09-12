@@ -197,22 +197,37 @@ func decimateHull(_ hull: [SIMD2<Float>]) -> [SIMD2<Float>] {
     return kept.map { centroid + ($0 - centroid) * scale }
 }
 
-/// Keep only points connected to the seed through occupied `cell`-sized grid cells (8-neighbourhood).
-/// Separates the tapped object from neighbours that are at least one empty cell away.
-/// ponytail: the grid is fixed to the world, so separation is only guaranteed for gaps wider
-/// than two cells (4 cm at ScanView's 0.02) — a 3 cm gap that straddles one cell boundary
-/// leaves no empty cell and merges. Flood by point distance instead if that ever bites.
-func connectedCluster(_ points: [SIMD3<Float>], seed: SIMD3<Float>, cell: Float) -> [SIMD3<Float>] {
+/// Keep only points within `cell` (in the x-z plane) of another kept point, starting from the
+/// seed. Bucketing points into `cell`-sized grid cells still gives O(1)-ish neighbour lookup
+/// (a spike from tens of thousands of points to a few hundred occupied cells), but two cells
+/// are only linked when a real point pair between them is within `cell` -- so unlike bucket
+/// occupancy alone, that link (and so the resulting cluster) does not depend on where the grid
+/// happens to fall. Same-bucket points are taken as connected without a pairwise check (a
+/// bucket's diagonal is `cell`*sqrt(2)); two different objects can only share a bucket when
+/// they are already closer than `cell`, so this never joins objects a real `cell`-radius flood
+/// would keep apart.
+/// ponytail: `cell` must clear same-object sample spacing (~5 mm after `densify`) or a sparse
+/// object fragments; retune both together if `densify`'s spacing changes.
+func connectedCluster(_ points: [SIMD3<Float>], seed: SIMD3<Float>, cell radius: Float) -> [SIMD3<Float>] {
     struct Key: Hashable { let x: Int, z: Int }
-    func key(_ p: SIMD3<Float>) -> Key { Key(x: Int((p.x / cell).rounded(.down)), z: Int((p.z / cell).rounded(.down))) }
+    func key(_ p: SIMD3<Float>) -> Key { Key(x: Int((p.x / radius).rounded(.down)), z: Int((p.z / radius).rounded(.down))) }
     var grid: [Key: [SIMD3<Float>]] = [:]
     for p in points { grid[key(p), default: []].append(p) }
+    let r2 = radius * radius
+    func within(_ a: [SIMD3<Float>], _ b: [SIMD3<Float>]) -> Bool {
+        for p in a { for q in b {
+            let dx = p.x - q.x, dz = p.z - q.z
+            if dx * dx + dz * dz <= r2 { return true }
+        } }
+        return false
+    }
     var frontier = [key(seed)], seen = Set(frontier), out: [SIMD3<Float>] = []
     while let k = frontier.popLast() {
-        out += grid[k] ?? []
-        for dx in -1...1 { for dz in -1...1 {
-            let n = Key(x: k.x + dx, z: k.z + dz)
-            if grid[n] != nil, !seen.contains(n) { seen.insert(n); frontier.append(n) }
+        guard let here = grid[k] else { continue }
+        out += here
+        for ci in -1...1 { for cj in -1...1 {
+            let n = Key(x: k.x + ci, z: k.z + cj)
+            if let there = grid[n], !seen.contains(n), within(here, there) { seen.insert(n); frontier.append(n) }
         } }
     }
     return out

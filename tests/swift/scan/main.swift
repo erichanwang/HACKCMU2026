@@ -94,9 +94,11 @@ check(exactOK,
 check(exact.hm.allSatisfy { $0.allSatisfy { abs($0 - 0.05) < 0.005 } }, "clean box heightmap not flat")
 
 // --- 2. neighbours ------------------------------------------------------------------------
-// Swept over sub-cell phases: the flood fill works on a fixed world grid, so whether a gap
-// leaves a whole empty cell depends on where the objects sit inside it.
-for gap in [Float(0.03), 0.01] {
+// Swept over sub-cell phases: connectedCluster now floods by point distance, so whether a
+// gap wider than `clusterCellMeters` separates no longer depends on where the objects sit —
+// unlike the old world-fixed grid, every phase must agree. 0.03 (3 cm) is the case the gate's
+// own WARN row used to call out as a known limitation.
+for gap in [Float(0.10), 0.04, 0.03, 0.02, 0.01] {
     var merged = 0
     for phase in [Float(0), 0.005, 0.01, 0.015] {
         let c = SIMD2<Float>(1.0 + phase, 2.0)
@@ -109,10 +111,20 @@ for gap in [Float(0.03), 0.01] {
     }
     record("neighbour \(cm(gap)) cm away", gap > clusterCellMeters ? "excluded" : "merged",
            "\(4 - merged)/4 phases excluded", merged == 0 ? "-" : "\(merged)/4 merged")
-    // A gap wider than 2 cells always leaves a whole empty cell; 0.03 is 1.5 cells, so it is
-    // phase-dependent, and 0.01 is always swallowed (documented ceiling in connectedCluster).
-    check(gap > 0.02 ? merged < 4 : merged == 4, "gap \(cm(gap)) cm: \(merged)/4 phases merged")
+    // A gap wider than the cluster radius must separate at every phase now (that is exactly
+    // the bug this fixes); a gap narrower than it must still merge at every phase, same as before.
+    check(gap > clusterCellMeters ? merged == 0 : merged == 4, "gap \(cm(gap)) cm: \(merged)/4 phases merged")
 }
+
+// A single long object, spanning many multiples of `clusterCellMeters`, must not fragment:
+// its own densified samples are always <= `shapeCellMeters / 2` apart, well inside
+// `clusterCellMeters`, so one tap must recover the whole object end to end, not a piece of it.
+let long = boxTris(0.50, 0.06, 0.05, at: SIMD2(1.0, 2.0), yaw: 0, planeY: planeY)
+let longPts = scan(long, planeY: planeY)
+let longCluster = connectedCluster(longPts, seed: SIMD3(1.0, planeY + 0.05, 2.0), cell: clusterCellMeters)
+record("long object (50 cm, one tap)", "\(longPts.count) pts kept",
+       "\(longCluster.count) pts kept", longCluster.count == longPts.count ? "-" : "fragmented")
+check(longCluster.count == longPts.count, "long object fragmented: \(longCluster.count)/\(longPts.count)")
 
 // --- 3. L-shape and an open-top box --------------------------------------------------------
 let ell = tap(boxTris(0.20, 0.10, 0.05, at: SIMD2(1.0, 1.95), yaw: 0, planeY: planeY)

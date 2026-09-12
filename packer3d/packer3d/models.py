@@ -404,8 +404,20 @@ class Item:
         return out
 
     def fits_in(self, container: "Container") -> bool:
-        """Static check: some legal orientation fits inside the empty container."""
-        return any(container.fits_dims(o.dims) for o in self.orientations())
+        """Static check: some legal orientation fits inside the empty container.
+
+        An upright cylinder in a cylindrical container only has to clear the bore
+        (2r <= 2R); ``fits_dims`` would make it clear the diagonal of its bounding
+        square instead, which rejects anything wider than R * sqrt(2). A cylinder
+        laid on its side really does sweep a rectangle, so it keeps that test.
+        """
+        for o in self.orientations():
+            if container.fits_dims(o.dims):
+                return True
+            if (container.shape == "cylinder" and o.axis == "z"
+                    and all(o.dims[k] <= container.dims[k] + EPS for k in range(3))):
+                return True
+        return False
 
 
 def oriented_solid_boxes(item: Item, position, dims, orientation_name: str) -> list:

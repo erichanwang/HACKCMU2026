@@ -21,7 +21,7 @@ Nothing here is inferred. No endpoint, SDK name, parameter, or auth scheme was i
 |---|---|---|
 | `env` var names matching pan/ifm/hackcmu/world/model | No PAN/IFM vars. 3 substring false positives only: `HERDR_PANE_ID`, `CODEX_COMPANION_SESSION_ID`, `CODEX_COMPANION_TRANSCRIPT_PATH` | [VERIFIED: `env \| sed 's/=.*//' \| grep -i`] |
 | `python3 -m pip list` (147 pkgs) | Zero matches for pan/ifm/world/model/cosmos/genesis | [VERIFIED: pip list] |
-| `HACKCMU2026` + `HACKCMU2026-pan` trees | Only file mentioning PAN/IFM is `PAN.md` itself. No `.env*` in either tree | [VERIFIED: find + grep -ril] |
+| `HACKCMU2026` + `HACKCMU2026-pan` trees | *(stale as of later 2026-09-12 — see below)* At recon time, only `PAN.md` mentioned PAN/IFM and no `.env*` existed. Since then a `pan/` package, `physics/pan.py`, and their tests now exist; `.env.example` is checked in (still gitignored: `.env` itself is not in this tree) | [VERIFIED: find + grep -ril, originally; updated by re-running the same grep] |
 | `~/Downloads/hackcmu26{,.zip}` | Unrelated project ("CT Proximity Risk Viewer"). Zero PAN/IFM references, no `.env` | [VERIFIED: grep -rilE over tree] |
 | `~/Downloads`, `~/Documents`, `~/Desktop`, `~/.config`, `~/.local/share` | No sponsor starter kit, notebook, or PDF mentioning PAN/IFM | [VERIFIED: find -iregex] |
 | Discord / Slack export | None present (only `~/.config/discord` app config, not an export) | [VERIFIED: find -itype d] |
@@ -79,16 +79,36 @@ All items `[VERIFIED: arxiv.org/html/2511.09057v1]` unless noted.
 
 ## (d) Configuration contract — OUR convention, not IFM's
 
-**These four variable names are our own invention for this repo.** IFM publishes no
-configuration contract, no auth scheme, and no base URL. Nothing below is an IFM standard;
-expect to renegotiate all of it once real access exists.
+**As implemented today, two separate seams exist, with two separate variable sets — do not
+conflate them.**
+
+**`pan/world_model.py`'s `RealPanBackend`** is a generic, still-unconfigured HTTP seam for a
+hypothetical future visual-PAN endpoint (may be removed by another agent concurrently —
+check whether `pan/world_model.py` still exists before relying on this). These five variable
+names are our own invention for this repo; IFM publishes no configuration contract, no auth
+scheme, and no base URL for this seam. Nothing below is an IFM standard:
 
 | Var | Role |
 |---|---|
 | `PAN_API_KEY` | **Secret.** Never logged, printed, or committed. Absent ⇒ fall back to the mock backend. |
 | `PAN_BASE_URL` | Base URL of whatever endpoint we are eventually given. No default — we have no verified endpoint. |
 | `PAN_MODEL` | Model/deployment identifier string, if the real interface takes one. |
-| `PAN_TIMEOUT_S` | Per-request timeout in seconds, so PAN latency can never block the solver. |
+| `PAN_ENDPOINT_PATH` | e.g. `/v1/simulate`. Absent ⇒ `available()` stays `False` — nobody has confirmed a real route, so this seam refuses to guess a URL and never fires. |
+| `PAN_TIMEOUT_S` | Per-request timeout in seconds, so PAN latency can never block the solver. Default 60. |
+
+Since `PAN_ENDPOINT_PATH` has never been set, this backend is dead: every call falls through
+to the mock.
+
+**`physics/pan.py`'s `RealPanBackend`** is the actually-live seam (see the K2-Horizon
+investigation below) — it hardcodes `IFM_BASE_URL = "https://api.ifm.ai/v1"` and
+`IFM_MODEL = "IFM/K2-Horizon-375B-A23B"` (no base-URL/model env vars) and reads one secret:
+
+| Var | Role |
+|---|---|
+| `IFM_API_KEY` | **Secret.** Read from the `IFM_API_KEY` env var, else a bare-token or `IFM_API_KEY=` line in a root `.env`. Absent ⇒ falls back to the mock backend. |
+
+This is the one real, working credential in the repo, and it authenticates a text-only LLM
+(K2-Horizon), not the visual PAN world model — see the investigation below.
 
 ## (e) Next steps for whoever obtains real access
 
@@ -104,8 +124,10 @@ expect to renegotiate all of it once real access exists.
    the `WorldModel` protocol in `pan/types.py`.
 4. If the real interface accepts the previous prediction as the next input, enable multi-step
    chaining; the paper says PAN supports it, but our client must not assume it until tested.
-5. `pan/world_model.py` did not exist at recon time — the orchestrator is building this seam
-   concurrently. Confirm the two function names before wiring.
+5. `pan/world_model.py` now exists with both function names in place, but still unwired
+   (`PAN_ENDPOINT_PATH` unset, see (d)) — it is the dead seam this whole section describes.
+   Another agent may delete it entirely; if it's gone, these steps are moot and the real
+   integration lives in `physics/pan.py` instead (text-only, per the investigation below).
 
 ## (f) Rate limits and latency expectations
 

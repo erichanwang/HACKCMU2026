@@ -15,7 +15,7 @@ This document combines the spatial-packing demo requirements and the traveler-fo
 - Demo one rectangular suitcase or travel container with 4–6 rigid travel items. Start with synthetic cuboids, then replace them with measured oriented bounding boxes (OBBs).
 - Capture with Swift and ARKit on a LiDAR-capable iPhone/iPad. Manual dimensions and corrections provide a fallback. Keep metric scale and a stable container anchor throughout the flow.
 - Show a rotatable digital twin, compute collision-free placements, validate containment and support, animate the packing result, and guide at least one real placement with an AR ghost and manual **Placed** confirmation.
-- Include a labeled layer view as a practical alternative to holding a phone during packing. AR is part of the HackCMU demo even though the longer-term validation roadmap below stages it after capture.
+- Include a labeled layer view as a practical alternative to holding a phone during packing. AR is part of the HackCMU demo even though the longer-term validation roadmap below stages it after capture. As of this writing the iOS app (`Spike/`) has never been compiled or run on a device — see `docs/AR_BUILD.md` — so the layer view is the fallback if AR isn't working live.
 - Use a configurable measurement margin (initially 3–5%, to be calibrated), honor allowed orientations, and clearly report items that do not fit. Do not present a rejected or incomplete layout as a complete solution.
 - The demo uses rigid objects and a rectangular interior. Voxel interiors, soft-item compression, nesting, multiple compartments, and production libraries are later work. No cloth simulation is required.
 - Python/NumPy with optional PyBullet/Open3D can support prototype solving and physics validation. Fully offline, on-device solving is a later product target, not a claim about the demo.
@@ -400,5 +400,5 @@ A complete loop with rough geometry is more valuable than perfect reconstruction
 2. Explain the travel problem: knowing what to bring does not tell you how it fits.
 3. Scan the suitcase and items, then inspect the metric digital twin.
 4. Tap **Pack** and show the validated layout animate into the suitcase. Surface any leftovers explicitly.
-5. Inspect the layer view, switch to AR, and place the first item using its ghost and orientation guide.
+5. Inspect the layer view, switch to AR, and place the first item using its ghost and orientation guide (AR is unverified on a physical device as of this writing — fall back to the layer view if it doesn't come up live).
 6. Close with the travel benefit: a packing plan the traveler can actually follow before leaving for a trip.

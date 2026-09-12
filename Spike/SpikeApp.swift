@@ -22,7 +22,6 @@ struct ContentView: View {
             List {
                 Section {
                     NavigationLink("Scan a box") { ScanScreen() }
-                    NavigationLink("Plan AR frame") { PlanARView() }
                     NavigationLink("Plan views (mock)") { MockPlanScreen() }
                     NavigationLink("Scanned item") { ScannedItemScreen() }
                 }
@@ -73,7 +72,6 @@ struct ScanScreen: View {
     /// The plan the solver actually produced. Outlives the sheet: closing the diagram is how the
     /// user gets back to the AR overlay, so dismissing it must not throw the plan away.
     @State private var plan: PackingPlan?
-    @State private var showingDiagram = false
     /// A POST /plan is in flight; a second one would race the first and last write would win.
     @State private var packing = false
     /// Everything scanned into this suitcase, as of the last time the Items sheet was opened.
@@ -90,8 +88,9 @@ struct ScanScreen: View {
     @State private var showSettings = false
     /// Set when `plan` is the bundled mock rather than the server's, and why.
     @State private var planNotice: String?
-    /// Our own plan viewer — 2D/3D flip and the AR overlay — alongside main's
-    /// `PlanViewer`. Both are kept for now, so each gets its own flag.
+    /// The one plan viewer the app presents — 2D/3D flip and the AR overlay.
+    /// Both routes to it, packing and the cube button, set this same flag.
+    /// `PackingPlanUI.PlanViewer` still exists but is no longer presented here.
     @State private var showingPlanSheet = false
     /// True while that sheet's AR overlay owns the camera; ScanView stands down
     /// so two ARSessions never compete for it.
@@ -126,9 +125,6 @@ struct ScanScreen: View {
         .animation(.easeOut(duration: 0.2), value: showingInventory)
         .sheet(isPresented: $showingItems) { itemList }
         .sheet(isPresented: $showSettings) { SettingsSheet(serverURL: $serverURL, authToken: $authToken) }
-        .sheet(isPresented: $showingDiagram) {
-            if let plan { PlanViewer(plan: plan).presentationDragIndicator(.visible) }
-        }
         .sheet(isPresented: $showingPlanSheet) {
             if let plan { PlanSheet(plan: plan, notice: planNotice, arActive: $planARActive) }
         }
@@ -335,7 +331,7 @@ struct ScanScreen: View {
                 let (fetchedPlan, unpacked, pendingLabels) = try await API.plan(suitcaseId: suitcaseId)
                 plan = fetchedPlan
                 planNotice = nil
-                showingDiagram = true
+                showingPlanSheet = true
                 status = unpacked.isEmpty
                     ? "Packed \(fetchedPlan.placements.count) items"
                     : "Packed \(fetchedPlan.placements.count), didn't fit: \(unpacked.map(\.label).joined(separator: ", "))"

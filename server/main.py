@@ -177,8 +177,12 @@ def detect(jpeg: bytes) -> dict:
 
 
 def identify_hint(dims: list[float], heights: list[list[float]]) -> str:
-    """Best guess at why identification failed, from the scan geometry alone — the crop is only as
-    good as the scan, so a degenerate scan gets "rescan" advice rather than the misleading "rotate it"."""
+    """Best guess at why identification failed. Nothing was even tried if no model is configured —
+    that reads as a broken demo, not scan advice, so it gets its own honest message. Otherwise, the
+    crop is only as good as the scan, so a degenerate scan gets "rescan" advice rather than the
+    misleading "rotate it"."""
+    if not (os.environ.get("XAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
+        return "labelling is off — type it in"
     flat = [h for row in heights for h in row]
     if min(dims) < 0.03 or max(flat) - min(flat) < 0.01:
         return "the scan looks too flat or small to show the object clearly — try rescanning it"

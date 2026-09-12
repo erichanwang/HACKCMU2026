@@ -46,7 +46,7 @@ assert r.json()["labelSource"] == "auto" and r.json()["rigidity"] in main.RIGIDI
 assert r.json()["compressibility"] >= 1 and r.json()["compressibilitySource"] == "auto", r.json()
 assert r.json()["mass"] >= 0 and isinstance(r.json()["keepUpright"], bool) and "description" in r.json(), r.json()
 assert r.json()["labelStatus"] == "unidentified", "no labelling model configured means nothing to retry, but nothing was identified either"
-assert "identifyHint" in r.json(), r.json()
+assert r.json()["identifyHint"] == "labelling is off — type it in", "unconfigured must read as off, not as a failed scan"
 
 r = c.patch("/items/t1", json={"label": "hair dryer", "rigidity": "fragile", "compressibility": 2.5})
 assert r.json()["label"] == "hair dryer" and r.json()["rigiditySource"] == "user", r.json()
@@ -145,7 +145,7 @@ assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["
 with patch.dict(os.environ, {"XAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}), patch.object(main.httpx, "post", route(grok_says("unknown"), claude_says("unknown"))):
     r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1k"})}, files=img)
 assert r.status_code == 200 and r.json()["labelStatus"] == "unidentified" and r.json()["label"] == "unknown", r.text
-assert r.json().get("identifyHint"), "the app needs visible text, not a bare 'unknown'"
+assert r.json().get("identifyHint") and r.json()["identifyHint"] != "labelling is off — type it in", "a real attempt must not read as unconfigured"
 assert main.relabel_pending() == 0, "unidentified is terminal: a retry on the same photo cannot change a model's mind"
 
 for i in ("t1h", "t1i", "t1j", "t1k"):

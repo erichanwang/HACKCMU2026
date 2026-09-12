@@ -108,11 +108,6 @@ struct ScanScreen: View {
             } else {
                 ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
             }
-            if showingInventory {
-                InventoryRings(items: inventory, select: { item = $0 }, dismiss: { showingInventory = false },
-                               menu: { itemMenu($0) })
-                    .transition(.opacity)
-            }
             VStack(spacing: 0) {
                 topBar
                 Spacer()
@@ -120,6 +115,13 @@ struct ScanScreen: View {
                 HStack { Spacer(); backpack }
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
+                if showingInventory {
+                    InventoryStrip(items: inventory, select: { item = $0 },
+                                   dismiss: { showingInventory = false }, menu: { itemMenu($0) })
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 panel
             }
             // Light chrome over the live feed, matching every other screen.

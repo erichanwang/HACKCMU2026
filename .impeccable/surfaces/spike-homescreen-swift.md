@@ -7,31 +7,31 @@ related_targets: []
 
 ## Direction contract
 
-THESIS: The home screen is the load sheet for your bag. Aircraft have solved this exact
-problem with paperwork for seventy years: what is aboard, where, how heavy, how close to the
-limit. It refuses the category default — a hero card with a giant percentage, pastel glyph
-chips and a saturated pill button — because that arrangement says nothing a form does not say
-better, and says it in the house style of every AI-built app.
+THESIS: The landing page is a gesture, not a dashboard. Every readout it could show —
+bags, load, manifest — lives one tab away on Items and Pack, so repeating them on the way
+in only makes the first screen a dashboard nobody asked for. This screen starts the two
+things you open the app to do and starts them with a drag across the whole surface. It
+refuses the category default twice over: the hero card with a giant percentage and pastel
+glyph chips, and the load-sheet form it briefly became, which read as rigid and printed
+where the rest of the app is white and soft.
 
-OWN-WORLD: Warm paper ground (#F4F2EC), aviation blue-black ink (#1A1F2B), signal orange
-(#D6541F) as the only accent, hazard amber reserved for over-limit. Hairline ruled fields,
-small tracked uppercase field labels, tabular mono for every figure and position code,
-stencil-weight bag names. No rounded cards, no drop shadows, no tinted glyph squares, no
-filled pills. Rules and whitespace do the separating that cards were doing.
+OWN-WORLD: White ground throughout, every screen the same white — no warm paper, no dark
+chrome, camera tabs included. Ink #1A1F2B, one signal orange #D6541F, hairlines at 10%
+ink, soft cards at 22pt continuous radius with no drop shadows. Figures are always
+tabular; measurements are mono. SF throughout, sentence case, no tracked caps.
 
-STORY: The traveller sees, in one glance, which bag is closest to full, what is aboard it by
-name and size, and what has not been assigned to any bag yet. They believe the numbers because
-the numbers are presented the way weights and balances always are. They tap SCAN ITEM.
+STORY: The traveller opens the app, sees it is connected, and drags up to scan or left
+to see the plan. They never read anything on the way in.
 
-FIRST VIEWPORT: Sheet header — LOAD SHEET left, revision time right, hairline under. The bag
-name set large in uppercase, its dimensions and volume in mono beneath. A ruled LOAD bar with
-tick marks at 0/50/100 and a limit line, the fill reading set in mono at the bar's right. Then
-MANIFEST: a ruled table, position number, item name, dimensions, one row each. SCAN ITEM sits
-as a bordered rectangular action beneath the last sheet, and the server link is a form field at
-the foot, not a status pill.
+FIRST VIEWPORT: Connection dot and gear on one quiet line at the top. Centred, a lens —
+two orange haloes breathing out of phase around a viewfinder glyph — with a chevron above
+it and "Swipe up to scan" beneath. A quiet "Swipe left for your packing plan" at the foot.
+Nothing else. Under a pull the lens follows the finger, brightens and turns; on release it
+expands past the edges of the screen and hands over to the tab underneath.
 
-FORM: Load Sheet — aircraft ULD load plans and weight-and-balance sheets. Ranked 1 of 7 on my
-grounded list; taken as IMPECCABLE'S PICK over the dealt assignment (Foam Insert, index 5).
-Seed key cdaa30dd.
+FORM: Load Sheet's substance (honest figures, load against a limit, named contents) moved
+into the Items and Pack tabs, which is where it belongs; the landing page took its
+restraint and dropped its print vocabulary. Chosen by the user from the direction round;
+seed key cdaa30dd.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance

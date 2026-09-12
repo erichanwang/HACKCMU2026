@@ -38,13 +38,13 @@ struct HomeScreen: View {
     var body: some View {
         ZStack {
             Sheet.paper.ignoresSafeArea()
+            ambientWash.ignoresSafeArea().allowsHitTesting(false)
 
             VStack {
                 statusRow
                 Spacer()
                 lens
                 Spacer()
-                planHint
             }
             .padding(.horizontal, 22)
             .padding(.bottom, 18)
@@ -194,17 +194,32 @@ struct HomeScreen: View {
         .onTapGesture { enter(.scan) }
     }
 
-    private var planHint: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "chevron.left")
-                .font(.caption2.weight(.semibold))
-            Text("Swipe left for your packing plan")
-                .font(.footnote)
+    /// A slow wash of warm light behind everything: two soft fields drifting on long,
+    /// mismatched cycles so the page is never quite static and never busy either. No
+    /// marks, no geometry — just the ground breathing. Reduce Motion holds it still.
+    private var ambientWash: some View {
+        TimelineView(.animation(paused: reduceMotion)) { context in
+            let t = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
+            GeometryReader { geo in
+                let w = geo.size.width, h = geo.size.height
+                ZStack {
+                    wash(tint: Sheet.accent.opacity(0.16), diameter: w * 1.25)
+                        .position(x: w * (0.5 + 0.16 * cos(t / 11)),
+                                  y: h * (0.40 + 0.10 * sin(t / 9)))
+                    wash(tint: Sheet.accent.opacity(0.09), diameter: w * 1.05)
+                        .position(x: w * (0.5 - 0.20 * sin(t / 14)),
+                                  y: h * (0.58 + 0.12 * cos(t / 12)))
+                }
+                .blur(radius: 50)
+            }
         }
-        .foregroundStyle(Sheet.ink.opacity(0.3 + 0.5 * leftProgress))
-        .frame(maxWidth: .infinity)
-        .offset(x: drag.width * 0.25)
-        .padding(.bottom, 6)
+    }
+
+    private func wash(tint: Color, diameter: CGFloat) -> some View {
+        Circle()
+            .fill(RadialGradient(colors: [tint, tint.opacity(0)], center: .center,
+                                 startRadius: 0, endRadius: diameter / 2))
+            .frame(width: diameter, height: diameter)
     }
 
     private var linkState: String {

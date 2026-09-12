@@ -430,7 +430,7 @@ class RealBackendTests(unittest.TestCase):
         backend = RealPanBackend()
         backend.client.api_key = "fake-key"
         with mock.patch("physics.pan.urllib.request.urlopen", side_effect=TimeoutError("timed out")), \
-                mock.patch("physics.pan.logger"):  # the retry warning is expected here, not a live call
+                mock.patch("physics.pan._LOG"):  # the retry warning is expected here, not a live call
             result = backend.simulate(SimulationRequest(observation=_make_observation(), action=_make_action()))
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.frames, [])

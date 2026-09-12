@@ -320,7 +320,11 @@ struct ScanView: UIViewRepresentable {
 }
 
 extension ScanView.Coordinator: ARSessionDelegate {
-    func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        refreshPlaneY()
+    /// `nonisolated` + `assumeIsolated`, not a plain `@MainActor` method: `ARSessionDelegate`'s
+    /// requirement is nonisolated, and under Swift 6 a main-actor method cannot satisfy it.
+    /// ARKit calls the delegate on the main queue, so the assumption holds — it traps loudly
+    /// if that ever stops being true, which beats a data race that doesn't.
+    nonisolated func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        MainActor.assumeIsolated { refreshPlaneY() }
     }
 }

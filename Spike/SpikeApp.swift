@@ -7,64 +7,41 @@ struct SpikeApp: App {
     var body: some Scene { WindowGroup { ContentView() } }
 }
 
+/// The app's four screens. `ContentView` owns the selection because two of them care
+/// about it: iOS runs one ARSession at a time, so the Scan tab must not hold the camera
+/// while another tab is showing, and the Pack tab's AR overlay needs it released outright.
+enum AppTab: Hashable { case home, scan, items, pack }
+
 struct ContentView: View {
-    @AppStorage(ServerSettings.baseURLKey) private var serverURLText =
-        ServerSettings.defaultBaseURL.absoluteString
-
-    /// What `API` will actually use, which is the default whenever the typed text
-    /// cannot address a host.
-    private var effectiveURL: URL { ServerSettings.url(from: serverURLText) ?? ServerSettings.defaultBaseURL }
-
-    private var typedTextIsUsable: Bool { ServerSettings.url(from: serverURLText) != nil }
+    @State private var tab = AppTab.home
+    /// True while the Pack tab's AR overlay owns the camera.
+    @State private var arActive = false
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    NavigationLink("Scan a box") { ScanScreen() }
-                    NavigationLink("Plan views (mock)") { MockPlanScreen() }
-                    NavigationLink("Scanned item") { ScannedItemScreen() }
-                }
-
-                Section {
-                    TextField("http://host:port", text: $serverURLText)
-                        .font(.system(.body, design: .monospaced))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .submitLabel(.done)
-
-                    if !typedTextIsUsable {
-                        Label(
-                            "Not a usable address — using \(ServerSettings.defaultBaseURL.absoluteString)",
-                            systemImage: "exclamationmark.triangle.fill"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                    }
-
-                    Button("Reset to default") {
-                        serverURLText = ServerSettings.defaultBaseURL.absoluteString
-                    }
-                    .disabled(serverURLText == ServerSettings.defaultBaseURL.absoluteString)
-                } header: {
-                    Text("Server")
-                } footer: {
-                    // The address the app is actually talking to, spelled out: a
-                    // stale IP here is otherwise invisible until requests fail.
-                    Text("Talking to \(effectiveURL.absoluteString)")
-                        .font(.footnote.monospaced())
-                        .textSelection(.enabled)
-                }
-            }
-            .navigationTitle("Spike")
+        TabView(selection: $tab) {
+            HomeScreen(go: { tab = $0 })
+                .tabItem { Label("Home", systemImage: "house.fill") }
+                .tag(AppTab.home)
+            ScanScreen(cameraLive: tab == .scan && !arActive)
+                .tabItem { Label("Scan", systemImage: "viewfinder") }
+                .tag(AppTab.scan)
+            ItemsScreen()
+                .tabItem { Label("Items", systemImage: "list.bullet") }
+                .tag(AppTab.items)
+            PackScreen(arActive: $arActive)
+                .tabItem { Label("Pack", systemImage: "cube.transparent") }
+                .tag(AppTab.pack)
         }
+        .tint(.indigo)
     }
 }
 
 /// The original scan screen, unchanged apart from moving off the app's root so
 /// only one ARSession is ever live.
 struct ScanScreen: View {
+    /// False while another tab is showing: a ScanView left alive off-screen keeps the
+    /// ARSession, and the Pack tab's AR overlay would then never get the camera.
+    var cameraLive = true
     @State private var item: ScannedItem?
     @State private var status = "Point at your open suitcase on the floor, then tap it"
     @State private var suitcaseId: String?
@@ -102,9 +79,10 @@ struct ScanScreen: View {
 
     var body: some View {
         ZStack {
-            if planARActive {
-                // The plan's AR overlay has the camera. Anything here would be
-                // hidden behind it anyway, and a live ScanView would fight it.
+            if planARActive || !cameraLive {
+                // Someone else has the camera — the plan's AR overlay, or another tab.
+                // Anything here would be hidden behind it anyway, and a live ScanView
+                // would fight it.
                 Color.black.ignoresSafeArea()
             } else {
                 ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
@@ -347,8 +325,7 @@ struct ScanScreen: View {
 
     /// Every bag is created as "scanned suitcase", so the size is what tells them apart.
     private func bagName(_ bag: API.Suitcase) -> String {
-        guard bag.dimensions.count == 3 else { return bag.name }
-        let size = String(format: "%.0f × %.0f × %.0f cm", bag.dimensions[0] * 100, bag.dimensions[2] * 100, bag.dimensions[1] * 100)
+        guard let size = bag.sizeText else { return bag.name }
         return "\(bag.id == suitcaseId ? "This suitcase" : bag.name) · \(size)"
     }
 
@@ -508,6 +485,10 @@ struct SettingsSheet: View {
                 Section("Bearer token") {
                     TextField("Optional", text: $authToken)
                 }
+                Section("Developer") {
+                    NavigationLink("Plan views (mock)") { MockPlanScreen() }
+                    NavigationLink("Scanned item") { ScannedItemScreen() }
+                }
             }
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
@@ -515,6 +496,6 @@ struct SettingsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Done") { dismiss() } }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 }

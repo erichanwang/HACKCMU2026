@@ -261,7 +261,7 @@ final class PackingPlanGeometryTests: XCTestCase {
     /// 0.34 × 0.20 × 0.50 = 0.034 m³ interior — 12.14%, not the 13.46% the plain
     /// sum claims.
     func testNestedFixtureCountsTheSharedVolumeOnce() throws {
-        let plan = try PlanLoader.plan(resourceNamed: "nested-plan", in: .module)
+        let plan = try PlanLoader.plan(resourceNamed: "nested-plan", in: PlanResources.bundle)
 
         XCTAssertEqual(plan.nestedOverlapVolume(), 0.000448, accuracy: 1e-9)
         XCTAssertEqual(plan.packedVolumeFraction, 0.1214118, accuracy: 1e-6)
@@ -277,7 +277,7 @@ final class PackingPlanGeometryTests: XCTestCase {
     /// drops a host that is not in the plan, so the shared volume is counted twice
     /// again — deliberately, because a producer bug must not read as a fuller bag.
     func testDanglingNestingHostDiscountsNothing() throws {
-        let plan = try PlanLoader.plan(resourceNamed: "nested-plan", in: .module)
+        let plan = try PlanLoader.plan(resourceNamed: "nested-plan", in: PlanResources.bundle)
         var placements = plan.orderedPlacements
         let cup = placements[1]
         placements[1] = Placement(

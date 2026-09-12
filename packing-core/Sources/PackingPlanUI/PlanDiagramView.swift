@@ -366,7 +366,7 @@ private struct PlacementRectangle: View {
     let hostLabel: String?
 
     /// Below this the text is unreadable and the legend carries the label instead.
-    private var showsLabel: Bool { rect.width >= 54 && rect.height >= 28 }
+    private var showsLabel: Bool { planDiagramShowsLabel(rect.size) }
     private var showsSize: Bool { rect.width >= 74 && rect.height >= 44 }
 
     var body: some View {
@@ -395,12 +395,12 @@ private struct PlacementRectangle: View {
                         Text("\(placement.step). \(placement.label)")
                             .font(.caption2.weight(.semibold))
                             .lineLimit(2)
-                            .minimumScaleFactor(0.75)
+                            .minimumScaleFactor(planDiagramLabelFloorSize / 11)
                         if let hostLabel {
                             Text("in \(hostLabel)")
                                 .font(.system(size: 9).italic())
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.7)
+                                .minimumScaleFactor(planDiagramLabelFloorSize / 9)
                                 .foregroundStyle(.secondary)
                         }
                         if showsSize {
@@ -414,8 +414,16 @@ private struct PlacementRectangle: View {
                     }
                     .padding(4)
                 } else {
+                    // Explicitly `.primary`, not the ambient style: this number is
+                    // the only thing left in the smallest boxes, and it sits on a
+                    // 25%-opacity wash of the item's own palette colour. Drawn in
+                    // that palette colour it is a pink 8 on pink — plan3d's SVG
+                    // does exactly that and it nearly vanishes. Pinning it here
+                    // keeps the fallback legible even if a future container tints
+                    // the diagram.
                     Text("\(placement.step)")
                         .font(.system(size: 9).weight(.bold))
+                        .foregroundStyle(.primary)
                         .padding(2)
                 }
             }
@@ -550,6 +558,43 @@ let planDiagramPadding: CGFloat = 16
 func planDiagramHeight(footprint: Vector3, width: CGFloat) -> CGFloat {
     guard footprint.x > 0, footprint.z > 0, width > 0 else { return 0 }
     return width * CGFloat(footprint.z / footprint.x)
+}
+
+/// The smallest point size an item's name is drawn at inside its rectangle.
+///
+/// Fed to `minimumScaleFactor` as a fraction of each label's own font size, so it
+/// is really "shrink to 7 pt" — and it scales with Dynamic Type rather than
+/// pinning a user who enlarged their text back down to 7 pt.
+///
+/// **Why 7.** An iPhone point is about 0.156 mm, so a 7 pt semibold face has a cap
+/// height near 0.79 mm; held at 35 cm that subtends about 7.7 arcmin. A 20/20 eye
+/// resolves a Snellen letter at 5 arcmin by definition, so 7 pt is roughly 1.5×
+/// threshold: legible at a glance for a two-word item name you are matching to a
+/// legend, too small for prose. 6 pt is 6.6 arcmin and 5 pt is 5.5 — at the acuity
+/// limit, where a name stops being a name and becomes texture. 7 pt is the last
+/// size where it is still worth drawing, which makes it the honest floor.
+let planDiagramLabelFloorSize: CGFloat = 7
+
+/// Whether an item's rectangle is big enough to attempt its name at all.
+///
+/// This is the point where the view stops *trying*, which is much lower than the
+/// point where a full-size label fits: `lineLimit(2)` plus a
+/// `planDiagramLabelFloorSize` `minimumScaleFactor` means SwiftUI wraps and shrinks
+/// on its own, so a label a little too big for its box comes out smaller rather
+/// than not at all. The gate this replaced was 54 × 28 — the size a *two-line 11 pt*
+/// label needs — and it was a cliff: the demo plan's 6 × 8 cm charger pouch lands
+/// at 52.9 pt wide on a 390 pt phone and lost its name outright over 1.1 pt, while
+/// an item a millimetre wider kept it.
+///
+/// Both numbers are the floor size laid out: two 7 pt lines (≈8.4 pt each, 1 pt
+/// apart) inside the label's 4 pt padding need ≈26 pt of height, and ≈6 characters
+/// per line at the ≈0.55 em advance of this face need ≈32 pt of width. Six per line
+/// is two lines of about twelve characters — the `"N. "` prefix and enough of the
+/// name to tell it from its neighbours. Under that SwiftUI can only ellipsise, and
+/// a bare step number is better: the legend lists every item by number with its
+/// full name, so the number is a reference, not a dead end.
+func planDiagramShowsLabel(_ size: CGSize) -> Bool {
+    size.width >= 32 && size.height >= 26
 }
 
 // MARK: - Nesting

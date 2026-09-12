@@ -1,3 +1,12 @@
+// Linux has no CoreGraphics, but its Foundation provides CGFloat with the same
+// API — the same fallback FootprintProjection uses, and for the same reason:
+// `planDiagramHeight` at the bottom of this file is deliberately outside the
+// SwiftUI guard so the layout claim it encodes can be asserted on Linux.
+#if canImport(CoreGraphics)
+import CoreGraphics
+#else
+import Foundation
+#endif
 import PackingPlan
 
 #if canImport(SwiftUI)
@@ -15,6 +24,7 @@ public struct PlanDiagramView: View {
     private let issues: [GeometryIssue]
     private let stability: [GeometryIssue]
     private let stats: PlanStats
+    private let nesting: PlanNesting
 
     @State private var selection: Int = 0
 
@@ -29,47 +39,79 @@ public struct PlanDiagramView: View {
         self.issues = plan.geometryIssues()
         self.stability = plan.stabilityIssues()
         self.stats = PlanStats(plan: plan)
+        self.nesting = PlanNesting(plan: plan, layers: self.layers)
     }
 
     private var currentLayer: PlanLayer? {
         layers.indices.contains(selection) ? layers[selection] : layers.first
     }
 
+    /// Header, layer picker and layer caption stay put; everything below them
+    /// scrolls.
+    ///
+    /// The footprint is drawn to scale, so the diagram's height follows from the
+    /// screen's width: 537 pt for the demo carry-on's portrait footprint at the
+    /// 358 pt of content width a 390 pt phone leaves. Add the header, the picker,
+    /// the caption, a legend line per item and a banner and the content is taller
+    /// than the safe area — which a plain `VStack` resolves by compressing
+    /// whatever gives most, i.e. the diagram, the one thing a person holding the
+    /// phone over an open bag is actually reading. So the diagram is given a
+    /// height that cannot see how much room is left (`planDiagramHeight`, a
+    /// function of width alone) and the overflow goes into a `ScrollView`.
+    ///
+    /// The picker sits *above* that scroll view rather than inside it: choosing a
+    /// layer is the other thing you do while packing, and it must not be possible
+    /// to scroll it out of reach. The banners, the legend and the details
+    /// disclosure are reference material, and are exactly what should scroll.
     public var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
+        GeometryReader { screen in
+            VStack(alignment: .leading, spacing: 14) {
+                header
 
-            if !issues.isEmpty {
-                PlanIssueBanner(kind: .geometry, issues: issues)
-            }
-
-            if !stability.isEmpty {
-                PlanIssueBanner(kind: .stability, issues: stability)
-            }
-
-            if layers.count > 1 {
-                Picker("Layer", selection: $selection) {
-                    ForEach(layers) { layer in
-                        Text("Layer \(layer.index + 1)").tag(layer.index)
+                if layers.count > 1 {
+                    Picker("Layer", selection: $selection) {
+                        ForEach(layers) { layer in
+                            Text("Layer \(layer.index + 1)").tag(layer.index)
+                        }
                     }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
+
+                if let layer = currentLayer {
+                    layerCaption(for: layer)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if !issues.isEmpty {
+                            PlanIssueBanner(kind: .geometry, issues: issues)
+                        }
+
+                        if !stability.isEmpty {
+                            PlanIssueBanner(kind: .stability, issues: stability)
+                        }
+
+                        if let layer = currentLayer {
+                            diagram(
+                                for: layer,
+                                height: planDiagramHeight(
+                                    footprint: plan.container.dimensions,
+                                    width: screen.size.width - 2 * planDiagramPadding
+                                )
+                            )
+                            legend(for: layer)
+                        } else {
+                            Text("This plan has no placements.")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        details
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-
-            if let layer = currentLayer {
-                layerCaption(for: layer)
-                diagram(for: layer)
-                legend(for: layer)
-            } else {
-                Text("This plan has no placements.")
-                    .foregroundStyle(.secondary)
-            }
-
-            details
-
-            Spacer(minLength: 0)
+            .padding(planDiagramPadding)
         }
-        .padding()
     }
 
     // MARK: - Header
@@ -127,7 +169,7 @@ public struct PlanDiagramView: View {
 
     // MARK: - Diagram
 
-    private func diagram(for layer: PlanLayer) -> some View {
+    private func diagram(for layer: PlanLayer, height: CGFloat) -> some View {
         GeometryReader { proxy in
             let projection = FootprintProjection(
                 footprint: plan.container.dimensions,
@@ -160,16 +202,26 @@ public struct PlanDiagramView: View {
                 ForEach(layer.placements) { placement in
                     PlacementRectangle(
                         placement: placement,
-                        rect: projection.rect(for: placement)
+                        rect: projection.rect(for: placement),
+                        hostLabel: nesting.nest(of: placement.itemID)?.host.label
+                    )
+                }
+
+                // Nests hosted in this layer whose guest is drawn in another one.
+                // Last, so the outline lands on top of the host it sits inside.
+                ForEach(nesting.guests(hostedIn: layer)) { nest in
+                    NestedGuestOutline(
+                        placement: nest.item,
+                        rect: projection.rect(for: nest.item)
                     )
                 }
             }
         }
-        .aspectRatio(
-            CGFloat(plan.container.dimensions.x / plan.container.dimensions.z),
-            contentMode: .fit
-        )
         .frame(maxWidth: .infinity)
+        // Not `.aspectRatio(.fit)`: that is flexible, and a flexible height is
+        // exactly what an over-full VStack — or a ScrollView proposing no height
+        // at all — takes back out of the diagram.
+        .frame(height: height)
     }
 
     private func legend(for layer: PlanLayer) -> some View {
@@ -186,8 +238,27 @@ public struct PlanDiagramView: View {
                         Text(placement.note)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                        if let nest = nesting.nest(of: placement.itemID) {
+                            Text(
+                                "Nested inside \(nest.host.label)"
+                                    + (nest.isSplit ? " · host drawn on layer \(nest.hostLayer + 1)" : "")
+                            )
+                            .font(.caption2.italic())
+                            .foregroundStyle(.secondary)
+                        }
                     }
                 }
+            }
+
+            // The other half of a split nest. Without this the host's layer gives
+            // no sign that something goes inside the item you are looking at.
+            ForEach(nesting.guests(hostedIn: layer)) { nest in
+                Text(
+                    "Dotted: \(nest.item.label) goes inside \(nest.host.label) here, "
+                        + "and is drawn on layer \(nest.itemLayer + 1)."
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
 
             let protrusions = plan.protrusions(into: layer)
@@ -282,6 +353,12 @@ private struct PlacementRectangle: View {
     let placement: Placement
     let rect: CGRect
 
+    /// Label of the item whose scanned cavity holds this one, when the plan says
+    /// so and `honouredNesting()` believed it. A small rectangle drawn inside a
+    /// bigger one is otherwise indistinguishable from two items sharing volume —
+    /// that is, from a bug — so a nested item names its host.
+    let hostLabel: String?
+
     /// Below this the text is unreadable and the legend carries the label instead.
     private var showsLabel: Bool { rect.width >= 54 && rect.height >= 28 }
     private var showsSize: Bool { rect.width >= 74 && rect.height >= 44 }
@@ -293,6 +370,19 @@ private struct PlacementRectangle: View {
                 RoundedRectangle(cornerRadius: 4)
                     .strokeBorder(placement.diagramColor, lineWidth: 1.5)
             )
+            .overlay {
+                // Inner dotted border: this box is in someone's cavity, not on top
+                // of them. It reads at any size, including the sizes too small for
+                // the "in <host>" line below.
+                if hostLabel != nil {
+                    RoundedRectangle(cornerRadius: 2)
+                        .strokeBorder(
+                            placement.diagramColor,
+                            style: StrokeStyle(lineWidth: 1, dash: [2, 2])
+                        )
+                        .padding(3)
+                }
+            }
             .overlay(alignment: .topLeading) {
                 if showsLabel {
                     VStack(alignment: .leading, spacing: 1) {
@@ -300,6 +390,13 @@ private struct PlacementRectangle: View {
                             .font(.caption2.weight(.semibold))
                             .lineLimit(2)
                             .minimumScaleFactor(0.75)
+                        if let hostLabel {
+                            Text("in \(hostLabel)")
+                                .font(.system(size: 9).italic())
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .foregroundStyle(.secondary)
+                        }
                         if showsSize {
                             Text(
                                 "\(centimetres(placement.size.x, decimals: 0)) × "
@@ -323,6 +420,7 @@ private struct PlacementRectangle: View {
                 "Step \(placement.step), \(placement.label), "
                     + "\(centimetres(placement.size.x, decimals: 0)) by "
                     + "\(centimetres(placement.size.z, decimals: 0))"
+                    + (hostLabel.map { ", nested inside \($0)" } ?? "")
             )
     }
 }
@@ -339,6 +437,36 @@ private struct ProtrusionRectangle: View {
             )
             .frame(width: rect.width, height: rect.height)
             .offset(x: rect.minX, y: rect.minY)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A nested item whose host is in this layer but whose own floor is a layer up:
+/// its footprint, dotted, inside the host it goes into.
+///
+/// Layers group by floor height, so the socks stuffed into a shoe sit 3.5 cm up
+/// and land in the layer above the shoe. Without this the two halves of a nest
+/// appear in two separate pictures with nothing tying them together: the host's
+/// layer shows no sign anything goes inside it, and the guest's layer shows an
+/// item apparently alone in mid-air.
+///
+/// Dotted and in the item's own colour, against the protrusion outline's grey
+/// dash — one means "comes up through this floor from below", the other "drops
+/// into the item under it". The legend sentence says which either way.
+private struct NestedGuestOutline: View {
+    let placement: Placement
+    let rect: CGRect
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 3)
+            .strokeBorder(
+                placement.diagramColor,
+                style: StrokeStyle(lineWidth: 1.5, dash: [2, 3])
+            )
+            .frame(width: rect.width, height: rect.height)
+            .offset(x: rect.minX, y: rect.minY)
+            // Hidden for the same reason the protrusion outline is: the legend
+            // sentence under the diagram is the accessible version of it.
             .accessibilityHidden(true)
     }
 }
@@ -368,7 +496,120 @@ private struct ProtrusionRectangle: View {
 #Preview("Unstable plan — stability banner") {
     PlanDiagramView(plan: unstableDemoPlan())
 }
+
+/// **The nesting affordance, host side.** The socks are drawn a layer up, and this
+/// layer shows their footprint dotted inside the shoes with a legend line naming
+/// where they went. The passport pouch names a host the plan does not contain, so
+/// it gets the geometry banner and no affordance at all — deliberately.
+#Preview("Nested plan — host layer") {
+    PlanDiagramView(plan: nestedDemoPlan())
+}
+
+/// **The nesting affordance, guest side.** The socks' own layer: solid rectangle
+/// with an inner dotted border and "in Running shoes", rather than a small box
+/// alone in the corner of an otherwise empty layer.
+#Preview("Nested plan — guest layer") {
+    PlanDiagramView(plan: nestedDemoPlan(), initialLayer: 1)
+}
 #endif
+
+// MARK: - Layout
+
+// Outside the SwiftUI guard: on Linux the view cannot be built at all, and these
+// two numbers are the whole of the claim that the diagram survives a phone
+// screen. Argued layout is layout nobody can check.
+
+/// Side and top padding around the whole diagram screen. Explicit rather than
+/// `.padding()`'s platform default because `planDiagramHeight` is fed
+/// `width - 2 * this`, and a guessed inset would be a guessed diagram.
+let planDiagramPadding: CGFloat = 16
+
+/// Height the top-down diagram needs at a given content width, in points.
+///
+/// The footprint is drawn to scale, so its height is its width times the bag's
+/// depth-over-width ratio: the demo carry-on (0.4064 × 0.6096 m) wants 537 pt at
+/// the 358 pt a 390 pt phone leaves after padding, which is most of a safe area
+/// on its own.
+///
+/// **A function of width alone, on purpose.** The bug this fixes was SwiftUI
+/// resolving an over-full `VStack` by squeezing the most compressible child, and
+/// the diagram was it. A height that cannot see how much room is left cannot be
+/// negotiated down.
+///
+/// The cost of that is a wide screen: at 900 pt of width this asks for 1350 pt of
+/// height and the picture has to be scrolled to be seen whole. Worth it on the
+/// phone the demo runs on, where the alternative was a squashed bag — if an iPad
+/// layout ever matters, cap the width fed in here rather than the height out of it,
+/// so the footprint stays to scale.
+func planDiagramHeight(footprint: Vector3, width: CGFloat) -> CGFloat {
+    guard footprint.x > 0, footprint.z > 0, width > 0 else { return 0 }
+    return width * CGFloat(footprint.z / footprint.x)
+}
+
+// MARK: - Nesting
+
+/// Where the two halves of a nest are drawn, for the 2D layer diagram.
+///
+/// `PackingPlan.honouredNesting()` is the authority on *whether* a `nestedIn`
+/// claim counts — it drops dangling hosts, self-references and cycles, and none
+/// of that is re-derived here. This only answers *where*: which layer picture
+/// holds the nested item and which holds its host, because layers group by floor
+/// height and a nested item's floor is usually not its host's.
+///
+/// Outside the SwiftUI guard so `swift test` can check it on Linux.
+struct PlanNesting {
+    /// One honoured nest, with the layer each half is drawn in.
+    struct Nest: Identifiable {
+        /// The nested item — the one inside the cavity.
+        let item: Placement
+
+        /// The item whose cavity holds it.
+        let host: Placement
+
+        /// Layer `item` is drawn in.
+        let itemLayer: Int
+
+        /// Layer `host` is drawn in.
+        let hostLayer: Int
+
+        var id: String { item.itemID }
+
+        /// True when the pair lands in two different layer pictures — the case
+        /// that needs the two halves cross-referenced.
+        var isSplit: Bool { itemLayer != hostLayer }
+    }
+
+    /// Keyed by the nested item's ID, the same key `honouredNesting()` uses.
+    private let nests: [String: Nest]
+
+    init(plan: PackingPlan, layers: [PlanLayer]) {
+        let byID = Dictionary(plan.placements.map { ($0.itemID, $0) }, uniquingKeysWith: { a, _ in a })
+        let layerOf = Dictionary(
+            layers.flatMap { layer in layer.placements.map { ($0.itemID, layer.index) } },
+            uniquingKeysWith: { a, _ in a }
+        )
+
+        nests = plan.honouredNesting().reduce(into: [:]) { out, entry in
+            guard let item = byID[entry.key],
+                  let host = byID[entry.value.itemID],
+                  let itemLayer = layerOf[entry.key],
+                  let hostLayer = layerOf[entry.value.itemID]
+            else { return }
+            out[entry.key] = Nest(item: item, host: host, itemLayer: itemLayer, hostLayer: hostLayer)
+        }
+    }
+
+    /// The nest this item is the guest of, or `nil` if it is not nested.
+    func nest(of itemID: String) -> Nest? { nests[itemID] }
+
+    /// Nests whose **host** is in this layer but whose guest is drawn elsewhere —
+    /// the halves this layer's picture would otherwise say nothing about.
+    func guests(hostedIn layer: PlanLayer) -> [Nest] {
+        nests.values
+            .filter { $0.hostLayer == layer.index && $0.isSplit }
+            .sorted { $0.item.step < $1.item.step }
+    }
+}
 
 // MARK: - Preview fixture
 
@@ -415,6 +656,79 @@ func unstableDemoPlan() -> PackingPlan {
             item(3, "toiletry-kit", "Toiletry kit",
                  at: Vector3(0.25, 0.05, 0.20), size: Vector3(0.10, 0.06, 0.15),
                  note: "Nothing under it: 5 cm of air down to the bag floor."),
+        ]
+    )
+}
+
+/// A plan with a **split nest**: the socks sit in the shoes' cavity 3 cm off the
+/// bag floor, so `layers()` draws them one layer above the shoes they are inside.
+/// That is the case the 2D diagram used to lose — two pictures, no connection —
+/// and the case the dotted outline and its legend line exist for.
+///
+/// It also carries a dangling nest: the passport pouch claims a host the plan does
+/// not contain. `honouredNesting()` drops it, so the view must give it no nesting
+/// affordance at all; `geometryIssues()` still reports it, so the preview shows the
+/// geometry banner. Both halves of that are the point — a bad claim must look like
+/// a bug, not like a feature.
+///
+/// Outside the SwiftUI guard, like `unstableDemoPlan()` above, so `swift test` can
+/// assert what it contains.
+func nestedDemoPlan() -> PackingPlan {
+    let interior = Vector3(0.4064, 0.1524, 0.6096)
+    func item(
+        _ step: Int, _ id: String, _ label: String,
+        at position: Vector3, size: Vector3, note: String, nestedIn: Nesting? = nil
+    ) -> Placement {
+        Placement(
+            step: step,
+            itemID: id,
+            label: label,
+            zone: "interior",
+            position: position,
+            size: size,
+            rotation: .xyz,
+            note: note,
+            nestedIn: nestedIn
+        )
+    }
+    return PackingPlan(
+        version: 1,
+        units: .meters,
+        container: Container(
+            id: "nested-carry-on",
+            label: "Nested carry-on (16 x 6 x 24 in)",
+            dimensions: interior,
+            zones: [Zone(id: "interior", label: "Interior", origin: .zero, size: interior)]
+        ),
+        placements: [
+            item(1, "shoes-pair", "Running shoes",
+                 at: Vector3(0, 0, 0), size: Vector3(0.30, 0.115, 0.15),
+                 note: "Soles down in the end well. Stuff the socks inside."),
+            item(2, "sweater-roll", "Rolled sweater",
+                 at: Vector3(0.02, 0, 0.20), size: Vector3(0.36, 0.07, 0.115),
+                 note: "Rolled along the width, flat on the bag floor."),
+            // Floor at 3 cm — the cavity's own floor, so it is supported rather
+            // than floating, and a layer above the shoes it is inside.
+            item(3, "socks-pair", "Socks",
+                 at: Vector3(0.03, 0.03, 0.03), size: Vector3(0.08, 0.05, 0.08),
+                 note: "Balled up and pushed into the left shoe.",
+                 nestedIn: Nesting(
+                     itemID: "shoes-pair",
+                     cavity: Nesting.Cavity(
+                         position: Vector3(0.02, 0.03, 0.02),
+                         size: Vector3(0.10, 0.06, 0.10)
+                     )
+                 )),
+            item(4, "passport-pouch", "Passport pouch",
+                 at: Vector3(0.05, 0.07, 0.21), size: Vector3(0.12, 0.02, 0.08),
+                 note: "Flat on the sweater; its nestedIn names an item that is not here.",
+                 nestedIn: Nesting(
+                     itemID: "ghost-liner",
+                     cavity: Nesting.Cavity(
+                         position: Vector3(0.05, 0.07, 0.21),
+                         size: Vector3(0.12, 0.02, 0.08)
+                     )
+                 )),
         ]
     )
 }

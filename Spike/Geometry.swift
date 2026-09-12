@@ -85,6 +85,25 @@ func connectedCluster(_ points: [SIMD3<Float>], seed: SIMD3<Float>, cell: Float)
 }
 
 /// Sample a triangle's surface at roughly `spacing` intervals so sparse mesh vertices become a dense cloud.
+/// Allocation-free `densify`: hands each sample to `body` instead of building an array.
+///
+/// The scanner calls this for every triangle of every mesh update, so the array `densify`
+/// returns was the single largest source of churn during a capture -- thousands of small
+/// heap allocations per frame, all discarded immediately.
+@inline(__always)
+func forEachSample(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>,
+                   spacing: Float, _ body: (SIMD3<Float>) -> Void) {
+    let longest = max(simd_length(b - a), simd_length(c - b), simd_length(a - c))
+    let n = max(1, Int((longest / spacing).rounded(.up)))
+    let ab = b - a, ac = c - a, inv = 1 / Float(n)
+    for i in 0...n {
+        let u = Float(i) * inv
+        for j in 0...(n - i) {
+            body(a + ab * u + ac * (Float(j) * inv))
+        }
+    }
+}
+
 func densify(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, spacing: Float) -> [SIMD3<Float>] {
     let longest = max(simd_length(b - a), simd_length(c - b), simd_length(a - c))
     let n = max(1, Int((longest / spacing).rounded(.up)))
@@ -127,6 +146,13 @@ struct ScannedItem: Codable, Identifiable {
     var rigidity: String?
     var rigiditySource: String?
     var createdAt: String?
+    /// Full 3D occupancy with colour, fused from every viewpoint in the scan. Optional
+    /// because the heightmap above is still the packer's input and must keep working on
+    /// its own; this is the richer representation for rendering.
+    var voxels: VoxelPayload?
+    /// 0...1 share of viewing directions the object was seen from. A low number means the
+    /// far side was never observed, so the voxels there are missing rather than empty.
+    var viewCoverage: Float?
 
     init(_ box: BoxFit, heights: [[Float]], cell: Float, suitcaseId: String) {
         self.suitcaseId = suitcaseId

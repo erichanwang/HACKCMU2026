@@ -49,3 +49,6 @@ print(ScannedItem(lFit, heights: lhm, cell: 0.01, suitcaseId: "s1").asciiMap)
 let encoded = String(data: try! JSONEncoder().encode(ScannedItem(fit, heights: hm, cell: 0.01, suitcaseId: "s1")), encoding: .utf8)!
 assert(encoded.contains("\"dimensions\"") && !encoded.contains("\"label\""), encoded)
 print("geometry ok: \(dims.map { $0 * 100 }) cm footprint, \(fit.height * 100) cm tall")
+
+// Voxel accumulation, pruning, 3D components, colour payload and capture guidance.
+runVoxelTests()

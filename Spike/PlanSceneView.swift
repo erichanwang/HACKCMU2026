@@ -32,7 +32,7 @@ final class PlanSceneController: ObservableObject {
     private var pitch: Float = .pi / 7
     private var distance: Float
 
-    init(plan: PackingPlan) {
+    init(plan: PackingPlan, scans: [String: ScannedItem]) {
         let dimensions = plan.container.dimensions
         target = (dimensions / 2).simd
         distance = simd_length(dimensions.simd) * startDistanceFactor
@@ -48,7 +48,7 @@ final class PlanSceneController: ObservableObject {
         for layer in layers {
             var entities: [Entity] = []
             for placement in layer.placements {
-                let box = itemBox(placement)
+                let box = itemEntity(placement, scan: scans[placement.itemID])
                 root.addChild(box)
                 entities.append(box)
 
@@ -108,17 +108,27 @@ final class PlanSceneController: ObservableObject {
 
     // MARK: - Scene building
 
-    private func itemBox(_ placement: Placement) -> ModelEntity {
-        let size = placement.size
+    /// The scanned surface when we have one, the bounding box otherwise.
+    ///
+    /// The two meshes are anchored differently and that is easy to get wrong:
+    /// `generateBox` is built around its centre, so it wants `renderCenter`, while
+    /// the heightmap is authored from its min corner and wants `position`.
+    private func itemEntity(_ placement: Placement, scan: ScannedItem?) -> ModelEntity {
+        let material = SimpleMaterial(
+            color: color(for: placement).withAlphaComponent(0.45),
+            roughness: 0.6,
+            isMetallic: false
+        )
+
+        if let scan, let mesh = HeightmapMesh.generate(from: scan, fitting: placement) {
+            let entity = ModelEntity(mesh: mesh, materials: [material])
+            entity.position = placement.position.simd
+            return entity
+        }
+
         let entity = ModelEntity(
-            mesh: .generateBox(size: size.simd, cornerRadius: 0.002),
-            materials: [
-                SimpleMaterial(
-                    color: color(for: placement).withAlphaComponent(0.45),
-                    roughness: 0.6,
-                    isMetallic: false
-                )
-            ]
+            mesh: .generateBox(size: placement.size.simd, cornerRadius: 0.002),
+            materials: [material]
         )
         // `renderCenter` is the shared min-corner → centre helper; never inline the
         // `size / 2` here.
@@ -200,9 +210,13 @@ struct PlanSceneView: View {
 
     private let plan: PackingPlan
 
-    init(plan: PackingPlan) {
+    /// - Parameter scans: LiDAR scans by item id. A placement whose id matches one
+    ///   is drawn as the scanned surface; everything else falls back to its box.
+    ///   This assumes the solver's `item_id` is the scanner's `id`, which is what
+    ///   the server contract in SCAN_OUTPUT.md produces.
+    init(plan: PackingPlan, scans: [String: ScannedItem] = [:]) {
         self.plan = plan
-        let controller = PlanSceneController(plan: plan)
+        let controller = PlanSceneController(plan: plan, scans: scans)
         _controller = StateObject(wrappedValue: controller)
         _topLayer = State(initialValue: Double(controller.layerCount - 1))
     }
@@ -239,6 +253,9 @@ struct PlanSceneView: View {
 
     private var controls: some View {
         VStack(spacing: 6) {
+            Text(containerCaption)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             Text(layerCaption)
                 .font(.system(.footnote, design: .monospaced))
             if controller.layerCount > 1 {
@@ -260,6 +277,14 @@ struct PlanSceneView: View {
         .padding()
     }
 
+    private var containerCaption: String {
+        let size = plan.container.dimensions
+        return String(
+            format: "%@ · %.0f × %.0f × %.0f cm",
+            plan.container.label, size.x * 100, size.y * 100, size.z * 100
+        )
+    }
+
     private var layerCaption: String {
         let shown = Int(topLayer) + 1
         let items = plan.layers().prefix(shown).reduce(0) { $0 + $1.placements.count }
@@ -270,11 +295,53 @@ struct PlanSceneView: View {
 /// Entry point from the app's root: the bundled mock plan.
 struct PlanSceneScreen: View {
     var body: some View {
-        if let plan = try? PlanLoader.mockPlan() {
+        if let plan = Self.plan() {
             PlanSceneView(plan: plan)
         } else {
             ContentUnavailableView("No plan", systemImage: "shippingbox", description: Text("The bundled mock plan could not be loaded."))
         }
+    }
+
+    /// The mock plan in the scanned bag when one is available, otherwise in its
+    /// own mock container. The placements are the mock's either way — only the
+    /// shell around them changes.
+    private static func plan() -> PackingPlan? {
+        guard let mock = try? PlanLoader.mockPlan() else { return nil }
+        guard let scanned = try? ScannedContainerLoader.bundled(),
+              let rehomed = mock.replacingContainer(with: scanned)
+        else { return mock }
+        return rehomed
+    }
+}
+
+#if DEBUG
+extension ScannedItem {
+    /// A stand-in scan for previews: the bundled mock plan has no LiDAR data, so
+    /// without this the heightmap path is invisible. Shoe-shaped on purpose —
+    /// a heel-to-toe ramp, a collar dip, and a missing corner — so a wrong
+    /// winding, a dropped hole or a missing skirt shows up at a glance.
+    static func previewShoe(rows: Int = 30, cols: Int = 15, cell: Float = 0.01) -> ScannedItem {
+        var heights = Array(repeating: Array(repeating: Float(0), count: cols), count: rows)
+        for i in 0..<rows {
+            for j in 0..<cols {
+                heights[i][j] = 0.03 + 0.07 * Float(i) / Float(rows - 1)
+            }
+        }
+        for i in (rows * 3 / 5)..<(rows - 2) {
+            for j in (cols / 4)..<(cols * 3 / 4) { heights[i][j] = 0.02 }
+        }
+        for i in 0..<3 {
+            for j in 0..<3 { heights[i][j] = 0 }
+        }
+        // ScannedItem only builds from a BoxFit, the way a real scan does.
+        let box = BoxFit(
+            width: Float(rows) * cell,
+            depth: Float(cols) * cell,
+            height: 0.10,
+            center: .zero,
+            axis: SIMD3(1, 0, 0)
+        )
+        return ScannedItem(box, heights: heights, cell: cell)
     }
 }
 
@@ -287,3 +354,14 @@ struct PlanSceneScreen: View {
         }
     }
 }
+
+#Preview("Mock plan with a scanned item") {
+    NavigationStack {
+        if let plan = try? PlanLoader.mockPlan() {
+            PlanSceneView(plan: plan, scans: ["shoes-pair": .previewShoe()])
+        } else {
+            Text("Could not load the bundled mock plan.")
+        }
+    }
+}
+#endif

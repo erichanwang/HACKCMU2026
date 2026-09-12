@@ -9,6 +9,7 @@ struct BoxFit {
     var height: Float
     var center: SIMD3<Float>  // world-space center of the box
     var axis: SIMD3<Float>    // world-space unit vector of the width edge
+    var hull: [SIMD2<Float>] = []  // world-space (x, z) convex hull of the fitted points
 }
 
 /// Convex hull of 2D points (monotone chain), counter-clockwise, no duplicates.
@@ -139,7 +140,61 @@ func fitBox(points: [SIMD3<Float>], planeY: Float, padding: Float, trimAboveRim:
     return BoxFit(
         width: uHi - uLo + padding, depth: vHi - vLo + padding, height: height,
         center: SIMD3<Float>(c.x, planeY + height / 2, c.y),
-        axis: r.axis.x < 0 ? SIMD3<Float>(-r.axis.x, 0, -r.axis.y) : SIMD3<Float>(r.axis.x, 0, r.axis.y))
+        axis: r.axis.x < 0 ? SIMD3<Float>(-r.axis.x, 0, -r.axis.y) : SIMD3<Float>(r.axis.x, 0, r.axis.y),
+        hull: convexHull(flat))
+}
+
+/// Vertices kept in a footprint sent to the server: enough for an L-shape or oval to read
+/// as non-rectangular, small next to a raw scan's hull (which can run to hundreds of points
+/// on a curved item) so the JSON payload stays tiny. "a dozen or two" per the task -- 16 splits
+/// the difference.
+let maxFootprintVertices = 16
+
+/// Reduce a convex polygon (CCW, from `convexHull`) to at most `maxFootprintVertices` points
+/// while staying CONSERVATIVE -- the result must still contain every point `hull` had. Dropping
+/// a hull vertex and connecting its neighbours with a straight chord cuts area *out* of the
+/// polygon (that's the whole point of hull simplification elsewhere), which is backwards here: a
+/// footprint that no longer contains a real corner of the scanned object is worse than no
+/// footprint at all (the solver would pack against a shape rotated/shrunk away from reality). So
+/// after picking which vertices to drop (least-area-contribution first -- i.e. near-collinear
+/// points go first), the whole polygon is scaled outward from its centroid by just enough to
+/// swallow every point the original hull had, including the ones just dropped.
+/// ponytail: picks vertices to drop by repeated least-area scan (O(n^2) over hull vertices, at
+/// most a few hundred here); a proper Douglas-Peucker/Visvalingam-Whyatt run if that ever bites.
+func decimateHull(_ hull: [SIMD2<Float>]) -> [SIMD2<Float>] {
+    guard hull.count > maxFootprintVertices else { return hull }
+    var kept = hull
+    while kept.count > maxFootprintVertices {
+        var worstI = 0, worstArea = Float.greatestFiniteMagnitude
+        for i in 0..<kept.count {
+            let a = kept[(i - 1 + kept.count) % kept.count], b = kept[i], c = kept[(i + 1) % kept.count]
+            let area = abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x))
+            if area < worstArea { worstArea = area; worstI = i }
+        }
+        kept.remove(at: worstI)
+    }
+    let centroid = hull.reduce(SIMD2<Float>(0, 0), +) / Float(hull.count)
+    var scale: Float = 1.0
+    for p in hull {
+        let d = p - centroid
+        let r = simd_length(d)
+        guard r > 1e-6 else { continue }
+        let dir = d / r
+        // Distance from the centroid to `kept`'s boundary along `dir`: intersect the ray
+        // centroid + t*dir (t >= 0) against each edge `a -> b` (a, b relative to centroid).
+        var boundaryR = Float.greatestFiniteMagnitude
+        for i in 0..<kept.count {
+            let a = kept[i] - centroid, edge = kept[(i + 1) % kept.count] - centroid - a
+            let denom = edge.x * dir.y - edge.y * dir.x
+            guard abs(denom) > 1e-9 else { continue }
+            let t = (edge.x * a.y - edge.y * a.x) / denom
+            let s = (dir.x * a.y - dir.y * a.x) / denom
+            if t >= 0, s >= 0, s <= 1 { boundaryR = min(boundaryR, t) }
+        }
+        if boundaryR.isFinite, boundaryR > 1e-6 { scale = max(scale, r / boundaryR) }
+    }
+    scale *= 1.001  // float-error safety margin
+    return kept.map { centroid + ($0 - centroid) * scale }
 }
 
 /// Keep only points connected to the seed through occupied `cell`-sized grid cells (8-neighbourhood).
@@ -210,6 +265,12 @@ struct ScannedItem: Codable, Identifiable {
     var dimensions: [Float]
     var cellSize: Float
     var heights: [[Float]]
+    // Convex local (x, z) polygon, METRES (this struct's team contract -- see `dimensions`
+    // above -- docs/LIDAR_HULLS.md's own snippet is written against the older cm-valued
+    // ScannedItem and would double-convert against today's struct), relative to the box
+    // centre (width +x, depth +z) -- same frame/sign convention as physics/io.py's
+    // `object_from_box_fit` local frame. nil for a plain box (degenerate or unavailable hull).
+    var footprint: [[Float]]?
     var label: String?
     var labelSource: String?
     var labelStatus: String?       // "done", or "pending" while the server retries Grok in the background
@@ -226,6 +287,27 @@ struct ScannedItem: Codable, Identifiable {
         dimensions = [box.width, box.height, box.depth]
         cellSize = cell
         self.heights = heights
+        footprint = ScannedItem.footprint(from: box)
+    }
+
+    /// Local-frame footprint (metres, matching `dimensions`) from a `BoxFit`'s world-space
+    /// hull: decimated (see `decimateHull`), then projected onto the box's own axes and
+    /// clamped to its half-dimensions -- physics/geometry.py's `footprint_local` rejects
+    /// (>1e-6) anything past that boundary, and the box itself is already the accepted outer
+    /// envelope (its own `padding`/`trimmedRange` is where jitter tolerance lives, not here).
+    /// nil when the hull has no real footprint (fewer than 3 points).
+    static func footprint(from box: BoxFit) -> [[Float]]? {
+        guard box.hull.count >= 3 else { return nil }
+        let decimated = decimateHull(box.hull)
+        let u = SIMD2(box.axis.x, box.axis.z), v = SIMD2(-u.y, u.x)
+        let c = SIMD2(box.center.x, box.center.z)
+        let hx = box.width / 2, hz = box.depth / 2
+        return decimated.map { p in
+            let d = p - c
+            let x = min(hx, max(-hx, simd_dot(d, u)))
+            let z = min(hz, max(-hz, simd_dot(d, v)))
+            return [x, z]
+        }
     }
 
     var width: Float { dimensions[0] }

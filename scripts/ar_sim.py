@@ -344,7 +344,10 @@ import simd
 #endif
 
 struct ScanIn: Codable { let points: [[Float]]; let planeY: Float; let cell: Float; let padding: Float }
-struct ScanOut: Codable { let width: Float; let height: Float; let depth: Float; let axis: [Float]; let heights: [[Float]] }
+struct ScanOut: Codable {
+    let width: Float; let height: Float; let depth: Float; let axis: [Float]; let heights: [[Float]]
+    let footprint: [[Float]]?  // ScannedItem.footprint(from:) -- same code Spike/ScanView.swift will call
+}
 
 struct PlacementIn: Codable { let position: [Float]; let size: [Float] }
 struct TransformIn: Codable { let suitcasePoints: [[Float]]; let planeY: Float; let wall: Float; let placements: [PlacementIn] }
@@ -367,7 +370,8 @@ func runScan(_ items: [ScanIn]) -> [ScanOut] {
         }
         let hm = heightMap(points: pts, box: fit, planeY: inp.planeY, cell: inp.cell)
         return ScanOut(width: fit.width, height: fit.height, depth: fit.depth,
-                        axis: [fit.axis.x, fit.axis.y, fit.axis.z], heights: hm)
+                        axis: [fit.axis.x, fit.axis.y, fit.axis.z], heights: hm,
+                        footprint: ScannedItem.footprint(from: fit))
     }
 }
 
@@ -530,7 +534,62 @@ def post_item(url: str, item: dict) -> dict:
     return call(url, data=body, content_type=f"multipart/form-data; boundary={boundary}", method="POST")
 
 
-def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item_fits: list[dict]) -> list[dict]:
+def item_doc(it: dict, fit: dict, *, with_footprint: bool) -> dict:
+    """The `POST /items` body for one scanned item (SCAN_OUTPUT.md), optionally carrying the
+    footprint the real Swift path now computes (`ScannedItem.footprint`, docs/LIDAR_HULLS.md)."""
+    doc = {"id": f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": None,
+           "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
+           "heights": fit["heights"]}
+    if with_footprint and fit.get("footprint") is not None:
+        doc["footprint"] = fit["footprint"]
+    return doc
+
+
+def assert_footprint_in_box(name: str, fit: dict) -> None:
+    """Item 3's consistency check: every footprint vertex must fit inside the SAME box
+    (width/depth) this scan produced -- physics/geometry.py's `footprint_local` enforces this
+    server-side with 1e-6 m slack; assert it here too since prepack.py never hands the footprint
+    to that check on the live `/plan` path (see the wiring finding this script prints)."""
+    fp = fit.get("footprint")
+    if fp is None:
+        return
+    hx, hz = fit["width"] / 2, fit["depth"] / 2
+    for x, z in fp:
+        if abs(x) > hx + 1e-6 or abs(z) > hz + 1e-6:
+            fail(f"{name}: footprint point ({x:.4f}, {z:.4f}) exceeds box half-dimensions "
+                 f"({hx:.4f}, {hz:.4f})")
+
+
+def footprint_wiring_check(base: str, dims, items: list[dict], item_fits: list[dict]) -> None:
+    """Does sending `footprint` change the solver's plan at all? POST the same items/suitcase
+    twice -- once with `footprint`, once without -- and diff the placements. `prepack.py`
+    (`physics_object`) and packer3d's own Item builder never read `doc["footprint"]"`, so this is
+    expected to come back IDENTICAL; that is the real finding item 4 of the task asks for, not a
+    bug in this script."""
+    with_fp = post_suitcase_items_plan(base, "wiring check (with footprint)", dims, items, item_fits,
+                                        with_footprint=True)
+    without_fp = post_suitcase_items_plan(base, "wiring check (without footprint)", dims, items, item_fits,
+                                           with_footprint=False)
+    # Drop itemId/label: item_doc mints a fresh uuid per call, so those differ between the two
+    # runs even when the packed geometry is byte-identical -- compare on geometry/order only.
+    strip = lambda ps: [{k: v for k, v in p.items() if k not in ("itemId", "label")} for p in ps]
+    same = strip(with_fp) == strip(without_fp)
+    print(f"[wiring] POST /items with vs without `footprint`: plans are "
+          f"{'IDENTICAL' if same else 'DIFFERENT'} "
+          f"({len(with_fp)} vs {len(without_fp)} placements)")
+    if same:
+        print("[wiring] footprint is accepted by the server (Scan model has extra=\"allow\") but "
+              "never reaches a packing decision: physics/prepack.py's physics_object() and "
+              "packer3d's own Item builder both read only dimensions/heights/rigidity/etc., "
+              "never doc[\"footprint\"] -- the field is stored on the item doc and otherwise inert.")
+    else:
+        for i, (a, b) in enumerate(zip(with_fp, without_fp)):
+            if a != b:
+                print(f"[wiring]   placement {i} differs: with={a} without={b}")
+
+
+def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item_fits: list[dict],
+                              *, with_footprint: bool = False) -> list[dict]:
     """POST /suitcases, POST every item's scan under it, POST /plan; returns the placements.
     Used to solve a plan against a specific (e.g. ground-truth) suitcase, distinct from -- and not
     printed alongside -- the main pipeline's own suitcase/items/plan."""
@@ -538,9 +597,8 @@ def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item
     if status != 200:
         fail(f"POST /suitcases ({name}) -> {status}: {suitcase_doc}")
     for it, fit in zip(items, item_fits):
-        doc = {"id": f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": suitcase_doc["id"],
-               "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
-               "heights": fit["heights"]}
+        doc = item_doc(it, fit, with_footprint=with_footprint)
+        doc["suitcaseId"] = suitcase_doc["id"]
         status, resp = post_item(f"{base}/items", doc)
         if status != 200:
             fail(f"POST /items ({name}/{it['name']}) -> {status}: {resp}")
@@ -862,18 +920,19 @@ def main() -> int:
             fail(f"POST /suitcases -> {status}: {suitcase_doc}")
         print(f"[2/5] suitcase {suitcase_doc['id']} interior {interior[0]:.3f}x{interior[1]:.3f}x{interior[2]:.3f} m")
 
-        # 3) POST every item
+        # 3) POST every item, footprint included when the scan produced one
         item_ids = []
         for it, fit in zip(items, item_fits):
-            doc = {"id": f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": suitcase_doc["id"],
-                   "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
-                   "heights": fit["heights"]}
+            assert_footprint_in_box(it["name"], fit)
+            doc = item_doc(it, fit, with_footprint=True)
+            doc["suitcaseId"] = suitcase_doc["id"]
             status, resp = post_item(f"{base}/items", doc)
             if status != 200:
                 fail(f"POST /items ({it['name']}) -> {status}: {resp}")
             item_ids.append(resp["id"])
+            fp_note = f"footprint {len(fit['footprint'])}v" if fit.get("footprint") is not None else "footprint none"
             print(f"      + {it['name']:<12} {doc['dimensions'][0]:.3f}x{doc['dimensions'][1]:.3f}x"
-                  f"{doc['dimensions'][2]:.3f} m  label={resp['label']}")
+                  f"{doc['dimensions'][2]:.3f} m  label={resp['label']}  {fp_note}")
 
         # 4) POST /plan
         status, plan_doc = post_json(f"{base}/suitcases/{suitcase_doc['id']}/plan", {})
@@ -885,6 +944,8 @@ def main() -> int:
               f"physics valid={plan_doc['validation']['valid']}")
         if not placements:
             fail("solver packed zero items; nothing to check the transform/containment against")
+
+        footprint_wiring_check(base, interior, items, item_fits)
 
         # 5) push placements through the real bag->world transform and check them
         transform_req = {"cmd": "transform", "transform": {

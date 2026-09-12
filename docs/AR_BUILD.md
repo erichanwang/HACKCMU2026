@@ -36,11 +36,13 @@ are all unverified.
   as an Xcode scheme variable — Product → Scheme → Edit Scheme → Run → Arguments →
   Environment Variables) and falls back to the literal `"http://172.26.48.172:8000"` if unset.
 - `API.base` (`Spike/API.swift:25-31`) reads a `serverURL` string typed into the in-app Settings
-  sheet (tap the URL button at the bottom of the screen, see `Spike/SpikeApp.swift:44` and
-  `:52-59`), stored in `UserDefaults`/`@AppStorage`. If nothing has been typed or it doesn't
-  parse to a URL with a host, it falls back to `defaultBase` above.
-- An optional bearer token can also be typed in that same sheet (`authToken`,
-  `Spike/SpikeApp.swift:23`); it's sent as `Authorization: Bearer ...` only when non-empty
+  sheet — **the gear button at the top right, next to the Suitcase | Item picker**
+  (`Spike/SpikeApp.swift:92-93`, sheet at `:56`, fields at `:309`). Stored in
+  `UserDefaults`/`@AppStorage`. If nothing has been typed or it doesn't parse to a URL with a
+  host, it falls back to `defaultBase` above. (The old URL caption button at the bottom of the
+  screen is gone as of `25c62a0`.)
+- An optional bearer token can also be typed in that same sheet ("Bearer token"); it's sent as
+  `Authorization: Bearer ...` only when non-empty
   (`Spike/API.swift:37-38`) — needed because `server/auth.py` now gates mutating routes with
   Auth0 JWT auth.
 
@@ -103,7 +105,7 @@ can prove:
 
 ## 5. The demo loop
 
-Scan suitcase → scan items → Pack → plan diagram → AR overlay. For each step, what "working"
+Scan suitcase → scan items → Pack → plan sheet → AR overlay. For each step, what "working"
 looks like and its most likely failure — the failure modes below are `FIXES.md` section 3
 ("Risks that will bite in a real demo"), not re-derived here:
 
@@ -123,7 +125,9 @@ looks like and its most likely failure — the failure modes below are `FIXES.md
    `POST /plan` itself is CPU-bound for ~3s under one uvicorn worker (FIXES.md 3, fourth
    bullet), so a second Pack tap while one is running would race it if the button weren't
    disabled.
-4. **Plan diagram.** A sheet shows the 2D packing diagram; closing it returns to the AR view.
+4. **Plan sheet.** A sheet presents `PlanViewer` with a Layers | 3D picker — the 2D layer
+   diagram and a 3D view of the packed bag. Closing it returns to the AR view. (Was
+   `PlanDiagramView`, 2D only, until `25c62a0`.)
    Most likely failure: only the winning solver candidate's placements are stored, not the
    runner-up's, so there's no "here's the alternative" to fall back to if the top plan looks
    wrong (FIXES.md 3, sixth bullet).

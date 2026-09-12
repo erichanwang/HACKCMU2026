@@ -159,7 +159,7 @@ enum API {
     }
 
     /// One of the caller's suitcases, as `GET /suitcases` lists them (newest first).
-    struct Suitcase: Decodable, Identifiable, Equatable {
+    struct Suitcase: Decodable, Identifiable, Equatable, Hashable {
         let id: String
         let name: String
         let dimensions: [Float]  // [width, height, depth] in metres

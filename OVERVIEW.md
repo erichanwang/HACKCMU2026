@@ -1,4 +1,4 @@
-# AR Packing Assistant — Project Overview
+# PackAR — Project Overview
 
 An iPhone app that measures your suitcase and the things going into it with the depth camera, solves the 3D packing problem on device, and guides the pack step by step with an AR overlay inside the actual bag.
 

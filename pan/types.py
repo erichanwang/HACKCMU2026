@@ -135,6 +135,27 @@ class SimulationResult:
         return self.frames[-1] if self.frames else None
 
 
+_BACKEND_NOTES = {
+    "mock": "synthetic frames drawn by the mock, not a world-model prediction",
+    "pan": "PAN HTTP seam; its request/response contract is unverified (docs/PAN_ACCESS.md)",
+}
+
+
+def honesty_note(backend: str, metadata: Optional[dict] = None) -> str:
+    """What a result actually IS, so no display can pass it off as a visual PAN
+    prediction it isn't (see the scientific boundary at the top of this module).
+
+    Derived from the backend name plus whatever the backend already said about
+    itself in `metadata["note"]` -- never a claim invented here.
+    """
+    inner = backend[6:-1] if backend.startswith("cache(") and backend.endswith(")") else backend
+    parts = [_BACKEND_NOTES.get(inner, f"unlabelled backend {inner!r}")]
+    said = (metadata or {}).get("note")
+    if said:
+        parts.append(str(said))
+    return "; ".join(parts)
+
+
 @runtime_checkable
 class WorldModel(Protocol):
     """The only interface the rest of the app depends on."""
@@ -197,6 +218,10 @@ class CandidateReport:
     action_text: str
     pan_preview_video: Optional[str] = None
     pan_final_frame: Optional[str] = None
+    # Which world model produced the rollout, and `honesty_note` for it. None
+    # when no rollout ran. Never display the assets above without these.
+    backend: Optional[str] = None
+    backend_note: Optional[str] = None
     risk_metadata: Optional[dict] = None
     # Every component logged separately (PAN.md §19) -- never one opaque score.
     score_components: dict[str, float] = field(default_factory=dict)
@@ -211,6 +236,8 @@ class CandidateReport:
             "action_text": self.action_text,
             "pan_preview_video": self.pan_preview_video,
             "pan_final_frame": self.pan_final_frame,
+            "backend": self.backend,
+            "backend_note": self.backend_note,
             "risk_metadata": self.risk_metadata,
             "score_components": dict(self.score_components),
         }

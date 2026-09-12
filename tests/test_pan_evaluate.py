@@ -242,6 +242,10 @@ class TestGuardsAndOutput(unittest.TestCase):
         self.assertTrue(np.array_equal(grid[pad + caption_h : pad + caption_h + cell, pad : pad + cell], frames[0]))
         # no expected column -> one column fewer
         self.assertEqual(compose_side_by_side([("a", frames)]).shape[1], pad + 2 * (cell + pad))
+        # a banner (used to name the world model) adds a 26px strip and shifts the grid down
+        banded = compose_side_by_side([("a", frames)], banner="world model: mock -- synthetic")
+        self.assertEqual(banded.shape[0], 26 + pad + (cell + caption_h + pad))
+        self.assertTrue(np.array_equal(banded[26 + pad + caption_h : 26 + pad + caption_h + cell, pad : pad + cell], frames[0]))
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "grid.png"
             self.assertEqual(save_png(grid, path), str(path))

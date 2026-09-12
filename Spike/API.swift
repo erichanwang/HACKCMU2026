@@ -1,9 +1,42 @@
 import Foundation
+import PackingPlan
 import UIKit
+
+private struct NewSuitcase: Encodable {
+    let name: String
+    let dimensions: [Float]  // [width, height, depth] in metres
+}
+
+private struct SuitcaseResponse: Decodable {
+    let id: String
+}
+
+/// FastAPI reports every error as `{"detail": ...}`.
+private struct ServerError: Decodable {
+    let detail: String
+}
 
 /// The FastAPI server in server/. Set to this Mac's LAN IP; phone and Mac must share a Wi-Fi network.
 enum API {
     static let base = URL(string: "http://172.26.48.172:8000")!
+
+    static func createSuitcase(name: String, dimensions: [Float]) async throws -> String {
+        var req = URLRequest(url: base.appending(path: "suitcases"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(NewSuitcase(name: name, dimensions: dimensions))
+        let data = try await body(of: req)
+        return try JSONDecoder().decode(SuitcaseResponse.self, from: data).id
+    }
+
+    /// Runs the solver server-side and returns what it actually produced. Throws with the
+    /// server's message ("suitcase has no scanned items to pack") when there is nothing to pack.
+    static func plan(suitcaseId: String) async throws -> PackingPlan {
+        var req = URLRequest(url: base.appending(path: "suitcases/\(suitcaseId)/plan"))
+        req.httpMethod = "POST"
+        let data = try await body(of: req)
+        return try PlanLoader.plan(fromServerDocument: data)
+    }
 
     static func upload(_ item: ScannedItem, image: UIImage) async throws -> ScannedItem {
         let boundary = "suitcase-\(UUID().uuidString)"
@@ -32,10 +65,17 @@ enum API {
     }
 
     private static func send(_ req: URLRequest) async throws -> ScannedItem {
+        let data = try await body(of: req)
+        return try JSONDecoder().decode(ScannedItem.self, from: data)
+    }
+
+    private static func body(of req: URLRequest) async throws -> Data {
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
-            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "server error"])
+            let message = (try? JSONDecoder().decode(ServerError.self, from: data))?.detail
+                ?? String(data: data, encoding: .utf8) ?? "server error"
+            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: message])
         }
-        return try JSONDecoder().decode(ScannedItem.self, from: data)
+        return data
     }
 }

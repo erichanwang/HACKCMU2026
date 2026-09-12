@@ -20,7 +20,7 @@ from PIL import Image
 
 from pan.demo import build_demo_state, run_demo
 from pan.rollouts import RolloutBatch, packing_subset
-from pan.types import PackingAction, RiskSignals, RolloutRecord, SimulationResult, apply_action
+from pan.types import PackingAction, RiskSignals, RolloutRecord, SimulationResult, apply_action, honesty_note
 from physics.validator import validate_layout
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -79,6 +79,31 @@ class RunDemoTests(unittest.TestCase):
 
         summary = (self.out_dir / "summary.txt").read_text()
         self.assertIn("Candidate A", summary)
+
+    def test_every_displayed_rollout_is_labelled_with_its_backend(self):
+        """Nothing may present a mock rollout as a PAN prediction: the payload,
+        summary.txt and each persisted asset dir all name the backend + note."""
+        payload = run_demo(self.out_dir, backend="mock", steps=1, num_frames=3, timeout_s=30)
+        note = "synthetic frames drawn by the mock, not a world-model prediction"
+
+        self.assertEqual(payload["backend"], "cache(mock)")
+        self.assertEqual(payload["backend_note"], note)
+
+        candidates = {c["candidate_id"]: c for c in payload["candidates"]}
+        for cid in ("A", "B"):  # the two that actually produced a rollout
+            self.assertEqual(candidates[cid]["backend"], "mock", cid)
+            self.assertEqual(candidates[cid]["backend_note"], note, cid)
+            step_dir = self.out_dir / "candidates" / cid / "step_0"
+            self.assertEqual((step_dir / "backend.txt").read_text(), f"world model: mock -- {note}\n")
+        # C was gated by physics: no rollout, so no backend to label
+        self.assertIsNone(candidates["C"]["backend"])
+        for step in payload["steps"]:
+            if step["simulation_status"] == "complete":
+                self.assertEqual(step["backend_note"], note, step["candidate_id"])
+
+        summary = (self.out_dir / "summary.txt").read_text()
+        self.assertEqual(summary.splitlines()[0], f"world model: cache(mock) -- {note}")
+        self.assertIn(f"  world model: mock -- {note}", summary)
 
     def test_candidate_c_first_step_is_physics_invalid_fragile_overloaded(self):
         state, candidates, _labels = build_demo_state()
@@ -183,6 +208,21 @@ class CandidateReportsRollupTests(unittest.TestCase):
         self.assertEqual(rollup.physics_status, "valid")
         self.assertEqual(rollup.simulation_status, "complete")
         self.assertIsNone(rollup.execution_risk)
+
+
+# ------------------------------------------------------------------ honesty_note
+class HonestyNoteTests(unittest.TestCase):
+    def test_note_names_what_each_backend_is_and_keeps_the_backends_own_note(self):
+        self.assertIn("not a world-model prediction", honesty_note("mock"))
+        self.assertIn("not a world-model prediction", honesty_note("cache(mock)"))
+        self.assertIn("unverified", honesty_note("pan"))
+        # a backend that labels itself keeps that label, appended -- never instead
+        line = honesty_note("mock", {"mode": "static", "note": "held the scene still"})
+        self.assertIn("not a world-model prediction", line)
+        self.assertIn("held the scene still", line)
+
+    def test_unknown_backend_is_flagged_rather_than_silently_blank(self):
+        self.assertIn("unlabelled", honesty_note("something-new"))
 
 
 # --------------------------------------------------------------------------- CLI

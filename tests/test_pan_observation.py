@@ -69,6 +69,40 @@ class TestRenderDeterminism(unittest.TestCase):
         self.assertEqual(img.shape, (vp.height, vp.width, 3))
         self.assertEqual(img.dtype, np.uint8)
 
+    def test_render_is_fast(self):
+        """Loose bound (the renderer sits at ~4 ms/frame): catches a per-pixel
+        Python loop or per-object re-projection creeping back in."""
+        import time
+
+        scene = _scene_with_item_on_the_table(-0.7)
+        vp = viewpoint_for_scene(scene, "overhead_45")
+        render_scene(scene, vp)  # warm caches (fonts, label sprites)
+        times = []
+        for _ in range(3):
+            t0 = time.perf_counter()
+            render_scene(scene, vp)
+            times.append(time.perf_counter() - t0)
+        self.assertLess(min(times), 0.05, f"{min(times) * 1000:.1f} ms per 512x512 frame")
+
+    def test_segmented_pixels_stay_inside_the_projected_bbox(self):
+        """No face of an object may leak outside its own projected bbox, and
+        no other pixel (labels, edges, shading of a neighbour) may read as that
+        object to the evaluator's colour segmentation: the mock world model
+        drags every such pixel along when it moves the object. Checked for the
+        objects the demo acts on; `toiletry_bag`'s teal is a known palette
+        collision with `headphones_case`'s shaded blue."""
+        for scene in (valid_packed_scene(), _scene_with_item_on_the_table(-0.7)):
+            for name in ("overhead_45", "front_high"):
+                obs = observation_from_scene(scene, name)
+                masks = segment_by_color(obs.image, obs.metadata["object_colors"])
+                for oid in ("shoe", "camera", "laptop"):
+                    ys, xs = np.nonzero(masks[oid])
+                    x0, y0, x1, y1 = obs.metadata["object_bboxes"][oid]
+                    self.assertTrue(
+                        xs.min() >= x0 - 1 and xs.max() <= x1 + 1 and ys.min() >= y0 - 1 and ys.max() <= y1 + 1,
+                        f"{name}/{oid}: mask [{xs.min()},{ys.min()},{xs.max()},{ys.max()}] leaks out of bbox {[x0, y0, x1, y1]}",
+                    )
+
 
 class TestSceneFraming(unittest.TestCase):
     """`frame="scene"` (the default) must keep unpacked items on the table in

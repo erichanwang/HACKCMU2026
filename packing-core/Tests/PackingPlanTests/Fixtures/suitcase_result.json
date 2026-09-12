@@ -1,0 +1,739 @@
+{
+  "naive": {
+    "strategy": "naive",
+    "container": {
+      "id": "suitcase",
+      "shape": "box",
+      "dims": [
+        0.75,
+        0.5,
+        0.28
+      ],
+      "gravity": true,
+      "max_mass": 23.0,
+      "min_support": 0.6,
+      "obstacles": [],
+      "com_target": [
+        0.375,
+        0.25,
+        0.0
+      ],
+      "com_axis_weights": [
+        1.0,
+        1.0,
+        0.5
+      ]
+    },
+    "placements": [
+      {
+        "item_id": "shoes_1",
+        "shape": "box",
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dims": [
+          0.32,
+          0.2,
+          0.12
+        ],
+        "center": [
+          0.16,
+          0.1,
+          0.06
+        ],
+        "orientation": "xyz",
+        "mass": 1.2,
+        "fragile": false
+      },
+      {
+        "item_id": "shoes_2",
+        "shape": "box",
+        "position": [
+          0.32,
+          0.0,
+          0.0
+        ],
+        "dims": [
+          0.32,
+          0.2,
+          0.12
+        ],
+        "center": [
+          0.48,
+          0.1,
+          0.06
+        ],
+        "orientation": "xyz",
+        "mass": 1.2,
+        "fragile": false
+      },
+      {
+        "item_id": "jeans_1",
+        "shape": "box",
+        "position": [
+          0.0,
+          0.2,
+          0.0
+        ],
+        "dims": [
+          0.35,
+          0.28,
+          0.06
+        ],
+        "center": [
+          0.175,
+          0.33999999999999997,
+          0.03
+        ],
+        "orientation": "xyz",
+        "mass": 0.7,
+        "fragile": false
+      },
+      {
+        "item_id": "jeans_2",
+        "shape": "box",
+        "position": [
+          0.35,
+          0.2,
+          0.0
+        ],
+        "dims": [
+          0.35,
+          0.28,
+          0.06
+        ],
+        "center": [
+          0.5249999999999999,
+          0.33999999999999997,
+          0.03
+        ],
+        "orientation": "xyz",
+        "mass": 0.7,
+        "fragile": false
+      },
+      {
+        "item_id": "shirts_1",
+        "shape": "box",
+        "position": [
+          0.0,
+          0.2,
+          0.06
+        ],
+        "dims": [
+          0.35,
+          0.25,
+          0.08
+        ],
+        "center": [
+          0.175,
+          0.325,
+          0.1
+        ],
+        "orientation": "xyz",
+        "mass": 0.9,
+        "fragile": false
+      },
+      {
+        "item_id": "shirts_2",
+        "shape": "box",
+        "position": [
+          0.35,
+          0.2,
+          0.06
+        ],
+        "dims": [
+          0.35,
+          0.25,
+          0.08
+        ],
+        "center": [
+          0.5249999999999999,
+          0.325,
+          0.1
+        ],
+        "orientation": "xyz",
+        "mass": 0.9,
+        "fragile": false
+      },
+      {
+        "item_id": "laptop",
+        "shape": "box",
+        "position": [
+          0.0,
+          0.2,
+          0.14
+        ],
+        "dims": [
+          0.36,
+          0.25,
+          0.03
+        ],
+        "center": [
+          0.18,
+          0.325,
+          0.15500000000000003
+        ],
+        "orientation": "xyz",
+        "mass": 1.8,
+        "fragile": true
+      },
+      {
+        "item_id": "camera",
+        "shape": "box",
+        "position": [
+          0.0,
+          0.0,
+          0.12
+        ],
+        "dims": [
+          0.25,
+          0.18,
+          0.14
+        ],
+        "center": [
+          0.125,
+          0.09,
+          0.19
+        ],
+        "orientation": "xyz",
+        "mass": 2.2,
+        "fragile": true
+      },
+      {
+        "item_id": "toiletries",
+        "shape": "box",
+        "position": [
+          0.25,
+          0.0,
+          0.12
+        ],
+        "dims": [
+          0.28,
+          0.15,
+          0.12
+        ],
+        "center": [
+          0.39,
+          0.075,
+          0.18
+        ],
+        "orientation": "xyz",
+        "mass": 1.5,
+        "fragile": false
+      },
+      {
+        "item_id": "water_bottle",
+        "shape": "cylinder",
+        "position": [
+          0.64,
+          0.0,
+          0.0
+        ],
+        "dims": [
+          0.08,
+          0.08,
+          0.26
+        ],
+        "center": [
+          0.6799999999999999,
+          0.04,
+          0.13
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 0.9,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.04,
+        "height": 0.26
+      },
+      {
+        "item_id": "wine",
+        "shape": "cylinder",
+        "position": [
+          0.36,
+          0.2,
+          0.14
+        ],
+        "dims": [
+          0.32,
+          0.08,
+          0.08
+        ],
+        "center": [
+          0.52,
+          0.24000000000000002,
+          0.18
+        ],
+        "orientation": "cyl_axis_x",
+        "mass": 1.4,
+        "fragile": true,
+        "axis": "x",
+        "radius": 0.04,
+        "height": 0.32
+      },
+      {
+        "item_id": "books_1",
+        "shape": "box",
+        "position": [
+          0.36,
+          0.28,
+          0.14
+        ],
+        "dims": [
+          0.24,
+          0.17,
+          0.1
+        ],
+        "center": [
+          0.48,
+          0.365,
+          0.19
+        ],
+        "orientation": "xyz",
+        "mass": 3.0,
+        "fragile": false
+      }
+    ],
+    "unpacked": [
+      {
+        "id": "books_2",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      },
+      {
+        "id": "jacket",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      },
+      {
+        "id": "tripod",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      },
+      {
+        "id": "hair_dryer",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      },
+      {
+        "id": "gifts",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      },
+      {
+        "id": "umbrella",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      }
+    ],
+    "metrics": {
+      "items_packed": 12,
+      "items_unpacked": 6,
+      "volume_utilization": 0.5919561712622031,
+      "bbox_extent_utilization": 0.8557714285714285,
+      "packed_volume": 0.06215539798253133,
+      "usable_volume": 0.10500000000000001,
+      "total_mass": 16.4,
+      "max_mass": 23.0,
+      "com": [
+        0.35682926829268297,
+        0.22338414634146345,
+        0.1385365853658537
+      ],
+      "com_basis": "mass",
+      "com_target": [
+        0.375,
+        0.25,
+        0.0
+      ],
+      "com_lateral_offset": 0.03222699422459269,
+      "com_offset_3d": 0.1422355955504191,
+      "com_deviation": 0.3547125751182388,
+      "max_height": 0.26,
+      "max_height_fraction": 0.9285714285714285,
+      "unpacked_priority_volume_fraction": 0.3160995830126281,
+      "objective": 6.6093284236928564
+    },
+    "stats": {
+      "strategy": "first-fit bottom-back-left"
+    }
+  },
+  "optimized": {
+    "strategy": "optimized",
+    "container": {
+      "id": "suitcase",
+      "shape": "box",
+      "dims": [
+        0.75,
+        0.5,
+        0.28
+      ],
+      "gravity": true,
+      "max_mass": 23.0,
+      "min_support": 0.6,
+      "obstacles": [],
+      "com_target": [
+        0.375,
+        0.25,
+        0.0
+      ],
+      "com_axis_weights": [
+        1.0,
+        1.0,
+        0.5
+      ]
+    },
+    "placements": [
+      {
+        "item_id": "camera",
+        "shape": "box",
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dims": [
+          0.18,
+          0.25,
+          0.14
+        ],
+        "center": [
+          0.09,
+          0.125,
+          0.07
+        ],
+        "orientation": "yxz",
+        "mass": 2.2,
+        "fragile": true
+      },
+      {
+        "item_id": "jacket",
+        "shape": "box",
+        "position": [
+          0.18,
+          0.0,
+          0.0
+        ],
+        "dims": [
+          0.4,
+          0.3,
+          0.12
+        ],
+        "center": [
+          0.38,
+          0.15,
+          0.06
+        ],
+        "orientation": "xyz",
+        "mass": 1.1,
+        "fragile": false
+      },
+      {
+        "item_id": "shirts_2",
+        "shape": "box",
+        "position": [
+          0.18,
+          0.0,
+          0.12
+        ],
+        "dims": [
+          0.35,
+          0.25,
+          0.08
+        ],
+        "center": [
+          0.355,
+          0.125,
+          0.16
+        ],
+        "orientation": "xyz",
+        "mass": 0.9,
+        "fragile": false
+      },
+      {
+        "item_id": "books_1",
+        "shape": "box",
+        "position": [
+          0.58,
+          0.0,
+          0.0
+        ],
+        "dims": [
+          0.17,
+          0.24,
+          0.1
+        ],
+        "center": [
+          0.665,
+          0.12,
+          0.05
+        ],
+        "orientation": "yxz",
+        "mass": 3.0,
+        "fragile": false
+      },
+      {
+        "item_id": "jeans_2",
+        "shape": "box",
+        "position": [
+          0.18,
+          0.0,
+          0.2
+        ],
+        "dims": [
+          0.35,
+          0.28,
+          0.06
+        ],
+        "center": [
+          0.355,
+          0.14,
+          0.23
+        ],
+        "orientation": "xyz",
+        "mass": 0.7,
+        "fragile": false
+      },
+      {
+        "item_id": "toiletries",
+        "shape": "box",
+        "position": [
+          0.58,
+          0.0,
+          0.1
+        ],
+        "dims": [
+          0.15,
+          0.28,
+          0.12
+        ],
+        "center": [
+          0.655,
+          0.14,
+          0.16
+        ],
+        "orientation": "yxz",
+        "mass": 1.5,
+        "fragile": false
+      },
+      {
+        "item_id": "shoes_1",
+        "shape": "box",
+        "position": [
+          0.0,
+          0.3,
+          0.0
+        ],
+        "dims": [
+          0.32,
+          0.2,
+          0.12
+        ],
+        "center": [
+          0.16,
+          0.4,
+          0.06
+        ],
+        "orientation": "xyz",
+        "mass": 1.2,
+        "fragile": false
+      },
+      {
+        "item_id": "jeans_1",
+        "shape": "box",
+        "position": [
+          0.32,
+          0.3,
+          0.0
+        ],
+        "dims": [
+          0.35,
+          0.06,
+          0.28
+        ],
+        "center": [
+          0.495,
+          0.32999999999999996,
+          0.14
+        ],
+        "orientation": "xzy",
+        "mass": 0.7,
+        "fragile": false
+      },
+      {
+        "item_id": "shirts_1",
+        "shape": "box",
+        "position": [
+          0.32,
+          0.36,
+          0.0
+        ],
+        "dims": [
+          0.35,
+          0.08,
+          0.25
+        ],
+        "center": [
+          0.495,
+          0.4,
+          0.125
+        ],
+        "orientation": "xzy",
+        "mass": 0.9,
+        "fragile": false
+      },
+      {
+        "item_id": "laptop",
+        "shape": "box",
+        "position": [
+          0.32,
+          0.44,
+          0.0
+        ],
+        "dims": [
+          0.36,
+          0.03,
+          0.25
+        ],
+        "center": [
+          0.5,
+          0.45499999999999996,
+          0.125
+        ],
+        "orientation": "xzy",
+        "mass": 1.8,
+        "fragile": true
+      },
+      {
+        "item_id": "shoes_2",
+        "shape": "box",
+        "position": [
+          0.0,
+          0.3,
+          0.12
+        ],
+        "dims": [
+          0.32,
+          0.2,
+          0.12
+        ],
+        "center": [
+          0.16,
+          0.4,
+          0.18
+        ],
+        "orientation": "xyz",
+        "mass": 1.2,
+        "fragile": false
+      },
+      {
+        "item_id": "umbrella",
+        "shape": "cylinder",
+        "position": [
+          0.58,
+          0.0,
+          0.22
+        ],
+        "dims": [
+          0.06,
+          0.3,
+          0.06
+        ],
+        "center": [
+          0.61,
+          0.15,
+          0.25
+        ],
+        "orientation": "cyl_axis_y",
+        "mass": 0.5,
+        "fragile": false,
+        "axis": "y",
+        "radius": 0.03,
+        "height": 0.3
+      },
+      {
+        "item_id": "water_bottle",
+        "shape": "cylinder",
+        "position": [
+          0.67,
+          0.3,
+          0.0
+        ],
+        "dims": [
+          0.08,
+          0.08,
+          0.26
+        ],
+        "center": [
+          0.71,
+          0.33999999999999997,
+          0.13
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 0.9,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.04,
+        "height": 0.26
+      }
+    ],
+    "unpacked": [
+      {
+        "id": "gifts",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      },
+      {
+        "id": "wine",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      },
+      {
+        "id": "books_2",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      },
+      {
+        "id": "tripod",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      },
+      {
+        "id": "hair_dryer",
+        "reason": "no feasible position (space, support or fragile constraints)"
+      }
+    ],
+    "metrics": {
+      "items_packed": 13,
+      "items_unpacked": 5,
+      "volume_utilization": 0.7218584053367865,
+      "bbox_extent_utilization": 1.0,
+      "packed_volume": 0.07579513256036259,
+      "usable_volume": 0.10500000000000001,
+      "total_mass": 16.6,
+      "max_mass": 23.0,
+      "com": [
+        0.43262048192771085,
+        0.2392469879518072,
+        0.11328313253012047
+      ],
+      "com_basis": "mass",
+      "com_target": [
+        0.375,
+        0.25,
+        0.0
+      ],
+      "com_lateral_offset": 0.05861524721171303,
+      "com_offset_3d": 0.12754926625240567,
+      "com_deviation": 0.2969991433895839,
+      "max_height": 0.28,
+      "max_height_fraction": 1.0,
+      "unpacked_priority_volume_fraction": 0.19972288973728783,
+      "objective": 5.2792237577103815
+    },
+    "stats": {
+      "multistart_runs": 24,
+      "multistart_time_s": 0.40074270799959777,
+      "greedy_objective": 6.3454931730196265,
+      "sa_iterations": 446,
+      "sa_accepted": 145,
+      "sa_improvements": 12,
+      "search_objective": 5.2792237577103815,
+      "balance_swaps": 0,
+      "time_s": 6.001859708001575,
+      "seed": 0
+    }
+  }
+}

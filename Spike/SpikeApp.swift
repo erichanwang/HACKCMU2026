@@ -6,6 +6,21 @@ struct SpikeApp: App {
 }
 
 struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            List {
+                NavigationLink("Scan a box") { ScanScreen() }
+                NavigationLink("Plan AR frame") { PlanARView() }
+                NavigationLink("Plan 3D scene") { PlanSceneScreen() }
+            }
+            .navigationTitle("Spike")
+        }
+    }
+}
+
+/// The original scan screen, unchanged apart from moving off the app's root so
+/// only one ARSession is ever live.
+struct ScanScreen: View {
     @State private var item: ScannedItem?
     @State private var status = "Point at a box on a table, then tap it"
 

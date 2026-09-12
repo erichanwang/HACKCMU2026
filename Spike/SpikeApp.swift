@@ -1,3 +1,4 @@
+import ARKit
 import PackingPlan
 import PackingPlanUI
 import SwiftUI
@@ -32,8 +33,8 @@ struct ContentView: View {
                 .tabItem { Label("Pack", systemImage: "cube.transparent") }
                 .tag(AppTab.pack)
         }
-        .tint(.indigo)
-        .preferredColorScheme(.dark)
+        .tint(Sheet.accent)
+        .preferredColorScheme(.light)
     }
 }
 
@@ -85,6 +86,23 @@ struct ScanScreen: View {
                 // Anything here would be hidden behind it anyway, and a live ScanView
                 // would fight it.
                 Color.black.ignoresSafeArea()
+            } else if !ARWorldTrackingConfiguration.isSupported {
+                // A simulator, or a device with no LiDAR. Saying so beats a black screen
+                // that reads as a crash.
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    VStack(spacing: 10) {
+                        Image(systemName: "camera.metering.unknown").font(.largeTitle)
+                        Text("NO AR CAMERA")
+                            .font(.subheadline.weight(.bold)).tracking(1.4)
+                        Text("This device has no ARKit world tracking, so scanning is unavailable. Everything else works.")
+                            .font(.footnote)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(Sheet.paper.opacity(0.6))
+                            .padding(.horizontal, 44)
+                    }
+                    .foregroundStyle(Sheet.paper)
+                }
             } else {
                 ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
             }
@@ -105,7 +123,7 @@ struct ScanScreen: View {
             // Camera-app chrome: dark over the live feed whatever the system theme. Sheets follow the system.
             .environment(\.colorScheme, .dark)
         }
-        .tint(.indigo)
+        .tint(Sheet.accent)
         .animation(.easeOut(duration: 0.2), value: showingInventory)
         .sheet(isPresented: $showingItems) { itemList }
         .sheet(isPresented: $showSettings) { SettingsSheet(serverURL: $serverURL, authToken: $authToken) }
@@ -152,13 +170,14 @@ struct ScanScreen: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 240)
             .padding(6)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Sheet.ink.opacity(0.82))
             Spacer()
             Button { showSettings = true } label: {
-                Image(systemName: "gearshape.fill")
+                Image(systemName: "gearshape")
                     .font(.body.weight(.semibold))
+                    .foregroundStyle(Sheet.paper)
                     .frame(width: 44, height: 44)
-                    .background(.regularMaterial, in: Circle())
+                    .background(Sheet.ink.opacity(0.82))
             }
             .accessibilityLabel("Server settings")
         }
@@ -180,8 +199,8 @@ struct ScanScreen: View {
                         Text("\(inventory.count)")
                             .font(.caption2.bold().monospacedDigit())
                             .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(.white, in: Capsule())
-                            .foregroundStyle(.black)
+                            .background(Sheet.accent)
+                            .foregroundStyle(Sheet.paper)
                     }
                 }
         }
@@ -219,7 +238,7 @@ struct ScanScreen: View {
             actions
         }
         .padding(16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Sheet.ink.opacity(0.9))
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
     }

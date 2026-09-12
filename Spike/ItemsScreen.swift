@@ -15,6 +15,9 @@ struct ItemsScreen: View {
     @State private var suitcases: [API.Suitcase] = []
     /// Last failed request, in this file's "<what>: <error>" convention. Empty when fine.
     @State private var status = ""
+    /// The item a Delete was tapped on, until the dialog confirms or cancels. Swipe and
+    /// Edit-mode deletes are their own confirmation; a tapped button is not.
+    @State private var deleting: ScannedItem?
 
     var body: some View {
         NavigationStack {
@@ -38,18 +41,33 @@ struct ItemsScreen: View {
             }
             .navigationTitle("Items")
             .refreshable { await load() }
+            .toolbar {
+                // Swipe already deletes, but nothing on screen says so. Edit mode does.
+                if !items.isEmpty { ToolbarItem(placement: .topBarTrailing) { EditButton() } }
+            }
         }
         .task { await load() }
+        .confirmationDialog("Delete this item?",
+                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible, presenting: deleting) { doomed in
+            Button("Delete \(doomed.label ?? "item")", role: .destructive) { remove(doomed) }
+        } message: { _ in
+            Text("It leaves your inventory and any suitcase it was in.")
+        }
     }
 
     private func row(_ scanned: ScannedItem) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(scanned.labelStatus == "pending" ? "Labelling…" : (scanned.label ?? "Unlabelled"))
-                .font(.body.weight(.medium))
-            Text("\(scanned.sizeText) · \(shortBagName(for: scanned.suitcaseId))")
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
+        HStack(spacing: 13) {
+            StampIcon(symbol: scanned.symbol)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(scanned.labelStatus == "pending" ? "Identifying…" : (scanned.label ?? "Unlabelled"))
+                    .font(.body.weight(.medium))
+                Text("\(scanned.manifestSize) cm · \(shortBagName(for: scanned.suitcaseId))")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
         }
+        .padding(.vertical, 3)
     }
 
     /// Label, rigidity and the rest of the server's guesses, edited through the same
@@ -59,9 +77,14 @@ struct ItemsScreen: View {
             Section { ItemEditor(item: scanned) }
             Section("Suitcase") {
                 Menu {
-                    menu(scanned.wrappedValue)
+                    moveMenu(scanned.wrappedValue)
                 } label: {
                     Label(bagName(for: scanned.wrappedValue.suitcaseId), systemImage: "suitcase")
+                }
+            }
+            Section {
+                Button(role: .destructive) { deleting = scanned.wrappedValue } label: {
+                    Label("Delete item", systemImage: "trash")
                 }
             }
         }
@@ -71,6 +94,12 @@ struct ItemsScreen: View {
 
     /// Put in a suitcase, take out of one, or delete — current bag ticked.
     @ViewBuilder private func menu(_ target: ScannedItem) -> some View {
+        moveMenu(target)
+        Divider()
+        Button("Delete", systemImage: "trash", role: .destructive) { deleting = target }
+    }
+
+    @ViewBuilder private func moveMenu(_ target: ScannedItem) -> some View {
         if suitcases.isEmpty {
             Button("Scan a suitcase first") {}.disabled(true)
         }
@@ -82,8 +111,6 @@ struct ItemsScreen: View {
         if target.suitcaseId != nil {
             Button("Take out of its suitcase", systemImage: "arrow.up.bin") { move(target, to: nil) }
         }
-        Divider()
-        Button("Delete", systemImage: "trash", role: .destructive) { remove(target) }
     }
 
     private func bagName(for id: String?) -> String {
@@ -124,6 +151,7 @@ struct ItemsScreen: View {
 
     private func remove(_ removing: ScannedItem) {
         items.removeAll { $0.id == removing.id }
+        deleting = nil
         Task {
             do { try await API.delete(itemId: removing.id) } catch {
                 status = "delete: \(error.localizedDescription)"
@@ -131,6 +159,56 @@ struct ItemsScreen: View {
             }
         }
     }
+}
+
+/// An item's glyph in the load sheet's vocabulary: ink on paper inside a hairline
+/// field box, the way a form stamps a category. Not a tinted chip.
+struct StampIcon: View {
+    let symbol: String
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 14, weight: .regular))
+            .foregroundStyle(Sheet.ink.opacity(0.75))
+            .frame(width: 30, height: 30)
+            .overlay(Rectangle().stroke(Sheet.ink.opacity(0.25), lineWidth: 0.75))
+            .accessibilityHidden(true)
+    }
+}
+
+extension ScannedItem {
+    /// A glyph for whatever the server called this. Keyword match, first hit wins; an
+    /// item nobody has labelled yet gets the generic box rather than a wrong picture.
+    var symbol: String {
+        let text = (label ?? "").lowercased()
+        for (needle, symbol) in ScannedItem.symbols where text.contains(needle) { return symbol }
+        return "shippingbox.fill"
+    }
+
+    /// Ordered: "toiletry bag" has to match toiletries before it matches bags.
+    private static let symbols: [(String, String)] = [
+        ("toiletr", "drop.fill"), ("shampoo", "drop.fill"), ("soap", "drop.fill"), ("wash", "drop.fill"),
+        ("shoe", "shoe.fill"), ("boot", "shoe.fill"), ("sneaker", "shoe.fill"), ("trainer", "shoe.fill"),
+        ("sandal", "shoe.fill"),
+        ("jean", "tshirt.fill"), ("trouser", "tshirt.fill"), ("pant", "tshirt.fill"), ("shirt", "tshirt.fill"),
+        ("sweater", "tshirt.fill"), ("jumper", "tshirt.fill"), ("jacket", "tshirt.fill"), ("coat", "tshirt.fill"),
+        ("dress", "tshirt.fill"), ("sock", "tshirt.fill"), ("cloth", "tshirt.fill"), ("hoodie", "tshirt.fill"),
+        ("towel", "square.stack.fill"), ("blanket", "square.stack.fill"),
+        ("book", "book.closed.fill"), ("paperback", "book.closed.fill"), ("novel", "book.closed.fill"),
+        ("notebook", "book.closed.fill"),
+        ("camera", "camera.fill"), ("lens", "camera.fill"),
+        ("laptop", "laptopcomputer"), ("macbook", "laptopcomputer"), ("computer", "laptopcomputer"),
+        ("ipad", "ipad"), ("tablet", "ipad"), ("phone", "iphone"),
+        ("charger", "powerplug.fill"), ("cable", "powerplug.fill"), ("adapter", "powerplug.fill"),
+        ("battery", "powerplug.fill"), ("power", "powerplug.fill"),
+        ("headphone", "headphones"), ("earbud", "headphones"), ("earphone", "headphones"),
+        ("bottle", "waterbottle.fill"), ("flask", "waterbottle.fill"),
+        ("glasses", "eyeglasses"), ("sunglass", "eyeglasses"),
+        ("umbrella", "umbrella.fill"),
+        ("medicine", "cross.case.fill"), ("first aid", "cross.case.fill"), ("pill", "cross.case.fill"),
+        ("hat", "hat.widebrim.fill"), ("cap", "hat.widebrim.fill"),
+        ("bag", "bag.fill"), ("pouch", "bag.fill"), ("case", "bag.fill"), ("kit", "bag.fill"),
+    ]
 }
 
 extension API.Suitcase {

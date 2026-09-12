@@ -74,8 +74,30 @@ func bagFrame(
 final class PlanFrameController: NSObject, ObservableObject {
     @Published private(set) var status = BagCorner.backLeftFloor.prompt
     @Published private(set) var cornerCount = 0
+    /// True once the three corners have produced a usable frame.
+    @Published private(set) var isAnchored = false
 
     let arView = ARView(frame: .zero)
+
+    /// Fills the bag anchor once the frame is established. The axes view draws
+    /// axes; the plan overlay parents the shared placement entities. Everything
+    /// about finding the bag is the same either way, so it lives here once.
+    private let populate: (AnchorEntity) -> Void
+
+    /// Turns on LiDAR occlusion so the real bag and the user's hands hide the
+    /// virtual boxes behind them. Silently does nothing without scene depth.
+    private let wantsOcclusion: Bool
+
+    /// Both are read during `start()`, which runs before `onAppear`, so they are
+    /// settled here rather than assigned afterwards.
+    init(
+        populate: @escaping (AnchorEntity) -> Void = { _ in },
+        wantsOcclusion: Bool = false
+    ) {
+        self.populate = populate
+        self.wantsOcclusion = wantsOcclusion
+        super.init()
+    }
 
     private var corners: [SIMD3<Float>] = []
     private var markers: [AnchorEntity] = []
@@ -94,6 +116,9 @@ final class PlanFrameController: NSObject, ObservableObject {
             usesSceneMesh = true
         }
         arView.session.run(config)
+        if wantsOcclusion, usesSceneMesh {
+            arView.environment.sceneUnderstanding.options.insert(.occlusion)
+        }
         arView.addGestureRecognizer(
             UITapGestureRecognizer(target: self, action: #selector(tap))
         )
@@ -110,6 +135,7 @@ final class PlanFrameController: NSObject, ObservableObject {
         frameAnchor = nil
         corners.removeAll()
         cornerCount = 0
+        isAnchored = false
         status = BagCorner.backLeftFloor.prompt
     }
 
@@ -171,9 +197,10 @@ final class PlanFrameController: NSObject, ObservableObject {
         }
 
         let anchor = AnchorEntity(world: transform)
-        addAxes(to: anchor)
+        populate(anchor)
         arView.scene.addAnchor(anchor)
         frameAnchor = anchor
+        isAnchored = true
 
         // The measured legs are the quickest check that the frame landed on the bag.
         let width = simd_distance(corners[0], corners[1]) * 100
@@ -185,7 +212,7 @@ final class PlanFrameController: NSObject, ObservableObject {
     }
 
     /// One-metre bars along each axis of the anchor's own frame.
-    private func addAxes(to anchor: AnchorEntity) {
+    static func addAxes(to anchor: AnchorEntity) {
         let axes: [(direction: SIMD3<Float>, color: UIColor)] = [
             (SIMD3(1, 0, 0), .systemRed),
             (SIMD3(0, 1, 0), .systemGreen),
@@ -223,7 +250,9 @@ private struct PlanARContainer: UIViewRepresentable {
 /// Establishes the bag's coordinate frame by tapping three inner corners, then
 /// draws the resulting axes. Does not render a packing plan yet.
 struct PlanARView: View {
-    @StateObject private var controller = PlanFrameController()
+    @StateObject private var controller = PlanFrameController(
+        populate: { PlanFrameController.addAxes(to: $0) }
+    )
 
     var body: some View {
         ZStack(alignment: .bottom) {

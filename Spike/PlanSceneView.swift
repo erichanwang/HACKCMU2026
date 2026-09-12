@@ -23,8 +23,8 @@ final class PlanSceneController: ObservableObject {
 
     private let camera = PerspectiveCamera()
     private let target: SIMD3<Float>
-    /// Placement entities bucketed by layer index, bottom layer first.
-    private var entitiesByLayer: [[Entity]] = []
+    /// The shared placement entities.
+    private var content: PlanEntityBuilder.Content!
     /// Label pivots, re-oriented to face the camera whenever it moves.
     private var labels: [Entity] = []
 
@@ -45,20 +45,11 @@ final class PlanSceneController: ObservableObject {
         let root = AnchorEntity(world: .zero)
         root.addChild(wireframeBox(size: dimensions))
 
-        for layer in layers {
-            var entities: [Entity] = []
-            for placement in layer.placements {
-                let box = itemEntity(placement, scan: scans[placement.itemID])
-                root.addChild(box)
-                entities.append(box)
-
-                let label = labelPivot(for: placement)
-                root.addChild(label)
-                labels.append(label)
-                entities.append(label)
-            }
-            entitiesByLayer.append(entities)
-        }
+        // Same boxes the AR overlay draws — one builder, two hosts.
+        let built = PlanEntityBuilder(plan: plan, scans: scans).build(includeLabels: true)
+        root.addChild(built.root)
+        content = built
+        labels = built.labels
 
         let cameraAnchor = AnchorEntity(world: .zero)
         cameraAnchor.addChild(camera)
@@ -98,12 +89,9 @@ final class PlanSceneController: ObservableObject {
 
     // MARK: - Layers
 
-    /// Shows layers `0...topLayer`, so dragging the slider down peels the suitcase apart.
+    /// Peels the suitcase apart, delegating to the shared content.
     func show(upTo topLayer: Int) {
-        for (index, entities) in entitiesByLayer.enumerated() {
-            let visible = index <= topLayer
-            for entity in entities { entity.isEnabled = visible }
-        }
+        content?.show(upTo: topLayer)
     }
 
     // MARK: - Scene building
@@ -113,48 +101,6 @@ final class PlanSceneController: ObservableObject {
     /// The two meshes are anchored differently and that is easy to get wrong:
     /// `generateBox` is built around its centre, so it wants `renderCenter`, while
     /// the heightmap is authored from its min corner and wants `position`.
-    private func itemEntity(_ placement: Placement, scan: ScannedItem?) -> ModelEntity {
-        let material = SimpleMaterial(
-            color: color(for: placement).withAlphaComponent(0.45),
-            roughness: 0.6,
-            isMetallic: false
-        )
-
-        if let scan, let mesh = HeightmapMesh.generate(from: scan, fitting: placement) {
-            let entity = ModelEntity(mesh: mesh, materials: [material])
-            entity.position = placement.position.simd
-            return entity
-        }
-
-        let entity = ModelEntity(
-            mesh: .generateBox(size: placement.size.simd, cornerRadius: 0.002),
-            materials: [material]
-        )
-        // `renderCenter` is the shared min-corner → centre helper; never inline the
-        // `size / 2` here.
-        entity.position = placement.renderCenter.simd
-        return entity
-    }
-
-    private func labelPivot(for placement: Placement) -> Entity {
-        let mesh = MeshResource.generateText(
-            placement.label,
-            extrusionDepth: 0.0004,
-            font: .systemFont(ofSize: labelSize, weight: .medium),
-            alignment: .center
-        )
-        let text = ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: .label)])
-        // generateText anchors at the baseline's left edge; recentre on the pivot.
-        text.position = -text.visualBounds(relativeTo: nil).center
-
-        let pivot = Entity()
-        pivot.addChild(text)
-        var centre = placement.renderCenter
-        centre.y = placement.box.maxCorner.y + 0.012
-        pivot.position = centre.simd
-        return pivot
-    }
-
     /// Wireframe as twelve thin bars — RealityKit has no line primitive.
     private func wireframeBox(size: Vector3) -> Entity {
         let container = Entity()
@@ -182,16 +128,8 @@ final class PlanSceneController: ObservableObject {
         }
         return container
     }
-
-    private func color(for placement: Placement) -> UIColor {
-        UIColor(
-            hue: (CGFloat(placement.step) * 0.17).truncatingRemainder(dividingBy: 1),
-            saturation: 0.65,
-            brightness: 0.85,
-            alpha: 1
-        )
-    }
 }
+
 
 private struct PlanSceneContainer: UIViewRepresentable {
     let controller: PlanSceneController
@@ -205,20 +143,46 @@ private struct PlanSceneContainer: UIViewRepresentable {
 /// Non-AR — runs in the simulator with no camera.
 struct PlanSceneView: View {
     @StateObject private var controller: PlanSceneController
-    @State private var topLayer: Double
+    /// Used when the caller does not supply a binding.
+    @State private var ownTopLayer: Int
+    /// Set when an owner drives the selection — see `PlanSheet`.
+    private let externalTopLayer: Binding<Int>?
     @State private var lastDrag: CGSize = .zero
 
     private let plan: PackingPlan
+
+    /// The topmost visible layer, from whichever source is in charge, clamped to
+    /// what this plan actually has.
+    private var topLayer: Int {
+        let raw = externalTopLayer?.wrappedValue ?? ownTopLayer
+        return min(max(raw, 0), controller.layerCount - 1)
+    }
+
+    /// The slider works in `Double`; the shared index is an `Int`.
+    private var sliderBinding: Binding<Double> {
+        Binding(
+            get: { Double(topLayer) },
+            set: { newValue in
+                let clamped = min(max(Int(newValue), 0), controller.layerCount - 1)
+                if let externalTopLayer { externalTopLayer.wrappedValue = clamped }
+                else { ownTopLayer = clamped }
+            }
+        )
+    }
 
     /// - Parameter scans: LiDAR scans by item id. A placement whose id matches one
     ///   is drawn as the scanned surface; everything else falls back to its box.
     ///   This assumes the solver's `item_id` is the scanner's `id`, which is what
     ///   the server contract in SCAN_OUTPUT.md produces.
-    init(plan: PackingPlan, scans: [String: ScannedItem] = [:]) {
+    ///   - topLayer: a layer index owned by the caller, so it can be shared with
+    ///     the other views of the same plan. When omitted the view keeps its own
+    ///     and starts with every layer visible.
+    init(plan: PackingPlan, scans: [String: ScannedItem] = [:], topLayer: Binding<Int>? = nil) {
         self.plan = plan
         let controller = PlanSceneController(plan: plan, scans: scans)
         _controller = StateObject(wrappedValue: controller)
-        _topLayer = State(initialValue: Double(controller.layerCount - 1))
+        externalTopLayer = topLayer
+        _ownTopLayer = State(initialValue: controller.layerCount - 1)
     }
 
     var body: some View {
@@ -246,9 +210,11 @@ struct PlanSceneView: View {
         }
         .navigationTitle("Plan scene")
         .navigationBarTitleDisplayMode(.inline)
-        // onChange does not fire for the initial value, so the slider's starting
-        // position has to be pushed into the scene explicitly.
-        .onAppear { controller.show(upTo: Int(topLayer)) }
+        // onChange does not fire for the initial value, so the starting position
+        // has to be pushed in explicitly — and again whenever the shared index
+        // moves, including while this view is off screen.
+        .onAppear { controller.show(upTo: topLayer) }
+        .onChange(of: topLayer) { _, value in controller.show(upTo: value) }
     }
 
     private var controls: some View {
@@ -260,13 +226,10 @@ struct PlanSceneView: View {
                 .font(.system(.footnote, design: .monospaced))
             if controller.layerCount > 1 {
                 Slider(
-                    value: $topLayer,
+                    value: sliderBinding,
                     in: 0...Double(controller.layerCount - 1),
                     step: 1
                 )
-                .onChange(of: topLayer) { _, value in
-                    controller.show(upTo: Int(value))
-                }
             }
             Text("Drag to orbit · pinch to zoom")
                 .font(.caption2)
@@ -286,74 +249,104 @@ struct PlanSceneView: View {
     }
 
     private var layerCaption: String {
-        let shown = Int(topLayer) + 1
+        let shown = topLayer + 1
         let items = plan.layers().prefix(shown).reduce(0) { $0 + $1.placements.count }
         return "Layers 1–\(shown) of \(controller.layerCount) · \(items) items"
     }
 }
 
-/// Entry point from the app's root: the live plan for one suitcase.
+/// One plan, shown flat, in 3D, or anchored to the real bag.
 ///
-/// The server runs the solver and returns the real plan. The bundled mock is a
-/// fallback for when that fetch fails — and when it does, the failure is shown
-/// rather than swallowed, because a mock that silently stands in for a live plan
-/// is indistinguishable from a working one.
-struct PlanSceneScreen: View {
-    let suitcaseID: String?
+/// The plan is handed in rather than fetched: whoever presents this sheet owns
+/// the fetch, so a single request feeds every view and switching between them
+/// costs nothing.
+struct PlanSheet: View {
+    let plan: PackingPlan
+    /// Set when the plan on screen is not the one the server produced.
+    var notice: String?
+    var scans: [String: ScannedItem] = [:]
 
-    @State private var state: LoadState = .loading
+    /// The two ways of drawing the same diagram. AR is deliberately not a third
+    /// case here — it is a different mode, not another rendering, and it gets its
+    /// own control.
+    enum DiagramMode {
+        case flat, scene
 
-    enum LoadState {
-        case loading
-        /// The real plan, straight from the server.
-        case live(PackingPlan)
-        /// The server failed; this is the mock, and why.
-        case fallback(PackingPlan, reason: String)
-        /// Neither the server nor the mock produced anything.
-        case unavailable(String)
+        var title: String { self == .flat ? "2D" : "3D" }
+        var other: DiagramMode { self == .flat ? .scene : .flat }
+    }
+
+    @State private var diagram: DiagramMode = .flat
+    @State private var showingAR = false
+    /// Shared by all three views: the 2D picker shows layer `n`, the 3D slider
+    /// and the AR overlay peel down to layer `n`, so switching lands you where
+    /// you were rather than resetting.
+    @State private var selectedLayer: Int
+
+    init(plan: PackingPlan, notice: String? = nil, scans: [String: ScannedItem] = [:]) {
+        self.plan = plan
+        self.notice = notice
+        self.scans = scans
+        // Start on the top layer: in 3D and AR that means the whole bag is
+        // visible, which is the useful overview. Starting at 0 would open them
+        // with everything above the floor layer hidden, which reads as broken.
+        _selectedLayer = State(initialValue: max(plan.layers().count - 1, 0))
     }
 
     var body: some View {
-        Group {
-            switch state {
-            case .loading:
-                ProgressView("Planning…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            controls
 
-            case let .live(plan):
-                PlanSceneView(plan: plan)
-                    .id(identity(of: plan))
+            if let notice {
+                noticeBanner(notice)
+            }
 
-            case let .fallback(plan, reason):
-                PlanSceneView(plan: plan)
-                    .id(identity(of: plan))
-                    .overlay(alignment: .top) { banner(reason) }
-
-            case let .unavailable(reason):
-                ContentUnavailableView(
-                    "No plan",
-                    systemImage: "shippingbox",
-                    description: Text(reason)
-                )
+            switch diagram {
+            case .flat:
+                PlanDiagramView(plan: plan, selectedLayer: $selectedLayer)
+            case .scene:
+                PlanSceneView(plan: plan, scans: scans, topLayer: $selectedLayer)
             }
         }
-        .task { await load() }
+        .fullScreenCover(isPresented: $showingAR) {
+            PlanARPlanView(plan: plan, scans: scans, topLayer: $selectedLayer)
+        }
     }
 
-    /// The scene is built once per plan, so a plan arriving after the view is on
-    /// screen rebuilds it instead of leaving the first one rendered.
-    private func identity(of plan: PackingPlan) -> String {
-        "\(plan.container.id)-\(plan.placements.count)"
+    private var controls: some View {
+        HStack {
+            // One control: tapping it flips between the two diagrams.
+            Button {
+                diagram = diagram.other
+            } label: {
+                Label(diagram.title, systemImage: "arrow.triangle.2.circlepath")
+                    .font(.body.monospacedDigit())
+            }
+            .buttonStyle(.bordered)
+            .accessibilityHint("Switches to \(diagram.other.title)")
+
+            Spacer()
+
+            Button {
+                showingAR = true
+            } label: {
+                Label("AR", systemImage: "arkit")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!PlanARPlanView.isSupported)
+        }
+        .padding(.horizontal)
+        .padding(.top)
     }
 
-    private func banner(_ reason: String) -> some View {
+    private func noticeBanner(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Showing the bundled mock plan")
                     .font(.caption.weight(.semibold))
-                Text(reason)
+                Text(text)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -365,32 +358,30 @@ struct PlanSceneScreen: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .padding()
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .padding([.horizontal, .top])
     }
+}
 
-    private func load() async {
-        if let suitcaseID {
-            do {
-                state = .live(try await API.plan(suitcaseId: suitcaseID))
-                return
-            } catch {
-                state = fallbackState(reason: Self.message(for: error))
-                return
-            }
+/// The bundled mock, for looking at the views without a server or a scan.
+struct MockPlanScreen: View {
+    var body: some View {
+        if let plan = PlanFallback.mockPlan() {
+            PlanSheet(plan: plan)
+        } else {
+            ContentUnavailableView(
+                "No plan",
+                systemImage: "shippingbox",
+                description: Text("The bundled mock plan could not be loaded.")
+            )
         }
-        state = fallbackState(reason: "No suitcase selected.")
     }
+}
 
-    private func fallbackState(reason: String) -> LoadState {
-        guard let mock = Self.mockPlan() else {
-            return .unavailable("\(reason)\n\nThe bundled mock plan could not be loaded either.")
-        }
-        return .fallback(mock, reason: reason)
-    }
-
-    /// The mock, in the scanned bag when one is bundled.
-    private static func mockPlan() -> PackingPlan? {
+/// The stand-in used when the server cannot produce a plan.
+enum PlanFallback {
+    /// The hand-authored mock, in the scanned bag when one is bundled.
+    static func mockPlan() -> PackingPlan? {
         guard let mock = try? PlanLoader.mockPlan() else { return nil }
         guard let scanned = try? ScannedContainerLoader.bundled(),
               let rehomed = mock.replacingContainer(with: scanned)
@@ -400,7 +391,7 @@ struct PlanSceneScreen: View {
 
     /// `API` puts the server's own `{"detail": …}` message in the error, which is
     /// far more useful than "operation could not be completed".
-    private static func message(for error: Error) -> String {
+    static func message(for error: Error) -> String {
         let described = (error as NSError).localizedDescription
         return described.isEmpty ? String(describing: error) : described
     }

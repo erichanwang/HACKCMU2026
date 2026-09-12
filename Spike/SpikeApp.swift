@@ -23,7 +23,7 @@ struct ContentView: View {
                 Section {
                     NavigationLink("Scan a box") { ScanScreen() }
                     NavigationLink("Plan AR frame") { PlanARView() }
-                    NavigationLink("Plan 3D scene") { PlanSceneScreen(suitcaseID: Self.demoSuitcaseID) }
+                    NavigationLink("Plan views (mock)") { MockPlanScreen() }
                     NavigationLink("Scanned item") { ScannedItemScreen() }
                 }
 
@@ -61,12 +61,6 @@ struct ContentView: View {
             .navigationTitle("Spike")
         }
     }
-
-    /// The suitcase the bundled scan belongs to, so the 3D scene has something to
-    /// ask the server for without a picker in front of it.
-    private static var demoSuitcaseID: String? {
-        try? ScannedContainerLoader.bundled().id
-    }
 }
 
 /// The original scan screen, unchanged apart from moving off the app's root so
@@ -76,8 +70,10 @@ struct ScanScreen: View {
     @State private var status = "Point at your open suitcase on the floor, then tap it"
     @State private var suitcaseId: String?
     @State private var mode = ScanMode.suitcase
-    /// The plan the solver actually produced, shown in the sheet. Nil = no sheet.
+    /// The plan shown in the sheet. Nil = no sheet.
     @State private var plan: PackingPlan?
+    /// Set when `plan` is the bundled mock rather than the server's, and why.
+    @State private var planNotice: String?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -106,7 +102,7 @@ struct ScanScreen: View {
                 .padding(.bottom, 40)
         }
         .sheet(isPresented: Binding(get: { plan != nil }, set: { if !$0 { plan = nil } })) {
-            if let plan { PlanDiagramView(plan: plan) }
+            if let plan { PlanSheet(plan: plan, notice: planNotice) }
         }
     }
 
@@ -116,9 +112,17 @@ struct ScanScreen: View {
         Task {
             do {
                 plan = try await API.plan(suitcaseId: suitcaseId)
+                planNotice = nil
                 status = "Packed \(plan?.placements.count ?? 0) items"
             } catch {
-                status = "plan: \(error.localizedDescription)"
+                // The mock stands in so the views are still usable, but never
+                // silently: the sheet says it is a mock and why.
+                let reason = PlanFallback.message(for: error)
+                status = "plan: \(reason)"
+                if let mock = PlanFallback.mockPlan() {
+                    planNotice = reason
+                    plan = mock
+                }
             }
         }
     }

@@ -26,16 +26,28 @@ public struct PlanDiagramView: View {
     /// - Parameter initialLayer: which layer to show first. Useful for previews
     ///   and for returning the user to the layer they were last working on.
     public init(plan: PackingPlan, initialLayer: Int = 0) {
+        self.init(plan: plan, initialLayer: initialLayer, externalSelection: nil)
+    }
+
+    /// - Parameter selectedLayer: a layer index owned by the caller, so it can be
+    ///   shared with another view of the same plan.
+    public init(plan: PackingPlan, selectedLayer: Binding<Int>) {
+        self.init(plan: plan, initialLayer: selectedLayer.wrappedValue, externalSelection: selectedLayer)
+    }
+
+    private init(plan: PackingPlan, initialLayer: Int, externalSelection: Binding<Int>?) {
         self.plan = plan
         self.layers = plan.layers()
-        self._selection = State(initialValue: initialLayer)
+        self._ownSelection = State(initialValue: initialLayer)
+        self.externalSelection = externalSelection
         // Computed once: a plan does not change while it is on screen, and the
         // 2D view is exactly where a bad plan should become visible.
         self.issues = plan.geometryIssues()
     }
 
     private var currentLayer: PlanLayer? {
-        layers.indices.contains(selection) ? layers[selection] : layers.first
+        let index = selection.wrappedValue
+        return layers.indices.contains(index) ? layers[index] : layers.first
     }
 
     public var body: some View {
@@ -47,7 +59,7 @@ public struct PlanDiagramView: View {
             }
 
             if layers.count > 1 {
-                Picker("Layer", selection: $selection) {
+                Picker("Layer", selection: selection) {
                     ForEach(layers) { layer in
                         Text("Layer \(layer.index + 1)").tag(layer.index)
                     }

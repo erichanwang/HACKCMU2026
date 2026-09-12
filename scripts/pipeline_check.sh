@@ -72,7 +72,7 @@ step_root_suite() {
 
 step_packer3d() {
   ( cd packer3d && PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 "$HOME/.venv/bin/python" \
-      -m pytest -q -p no:cacheprovider -m "not slow" tests/ )
+      -m pytest -q -p no:cacheprovider tests/ )
 }
 
 step_server_check() {

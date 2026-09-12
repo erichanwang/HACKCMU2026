@@ -1,9 +1,18 @@
 """Provable bounds, gap reporting and exhaustive search for tiny instances.
 
 3D bin packing is NP-hard; nothing certifies a global optimum on realistic instances.
-What we *can* prove: items cannot overlap, so utilisation <= sum(volume)/usable; if the
-mass limit is exceeded at least k items must stay out; items that fit in no orientation
-must stay out.  ``exhaustive_small`` enumerates every sequence through the same decoder.
+What we *can* prove: two items' *solids* cannot overlap, so utilisation <=
+sum(volume)/usable; if the mass limit is exceeded at least k items must stay out; items
+that fit in no orientation must stay out.  ``exhaustive_small`` enumerates every sequence
+through the same decoder.
+
+"Solids", not bounding boxes, is load-bearing throughout this module.  Two bounding boxes
+*can* overlap -- that is exactly what a nested placement is, a cup inside a bowl's scanned
+well -- and a footprint-packed prism reserves less than its box too.  Every sum here is
+over ``Item.volume`` / ``Placement.volume``, the item's true solid volume, which is why
+nesting cannot double-count into these bounds.  The one place a bounding box is summed is
+``gap_report``'s slack attribution, and that one has to subtract
+``models.nested_overlap_by_host``.
 """
 from __future__ import annotations
 
@@ -13,7 +22,7 @@ import time
 from typing import Optional
 
 from .decoder import DecoderParams, decode
-from .models import Container, PackResult, validate_items
+from .models import Container, PackResult, nested_overlap_by_host, validate_items
 from .objective import ObjectiveWeights, build_result, evaluate_state, priority_volume_total
 
 
@@ -53,10 +62,17 @@ def lower_bounds(container: Container, items) -> dict:
 def waste_bounds(container: Container, items) -> dict:
     """Provably unavoidable empty volume, and the most volume any packing could hold.
 
-    Items cannot overlap, so no packing holds more item volume than ``usable_volume``; and
-    if the mass limit forces at least ``k`` of the fitting items out, the best case loses
-    the ``k`` *smallest* of them.  Whatever is left over after that ceiling is empty space
-    no packer could have filled -- the floor under this plan's waste.
+    Two items' solids cannot overlap, so no packing holds more *true* item volume than
+    ``usable_volume``; and if the mass limit forces at least ``k`` of the fitting items out,
+    the best case loses the ``k`` *smallest* of them.  Whatever is left over after that
+    ceiling is empty space no packer could have filled -- the floor under this plan's waste.
+
+    The proof survives nesting and footprint prisms for one reason: ``Item.volume`` is the
+    true solid volume, so the inequality it rests on is "solids do not overlap" and not
+    "boxes do not overlap" -- which nesting falsifies.  Stated on bounding boxes this floor
+    would be wrong in the direction that matters, claiming unavoidable waste that a nest can
+    in fact fill.  ``gap_report`` compares this floor against ``metrics["packed_volume"]``,
+    the same true-volume basis; do not feed it a box sum.
     """
     items = validate_items(items)
     usable = container.usable_volume
@@ -91,11 +107,18 @@ def gap_report(result: PackResult, items, verbose: bool = True) -> dict:
         if it is not None and it.fits_in(result.container):
             gap_items.append({"id": it.id, "volume": it.volume, "kind": "left behind",
                               "detail": u.get("reason", "")})
+    # A host's box reserves its cavity, and a nested guest's box then sits inside it, so the
+    # guest's volume would be charged twice -- once as its own placement, once as its host's
+    # slack.  Charge the host only for the air nothing fills.  (The subtraction is the guest's
+    # whole box, so a guest that somehow poked into host solid would under-report slack rather
+    # than invent it; the >1e-12 test already drops a negative.)
+    filled = nested_overlap_by_host(result.placements)
     for p in result.placements:
-        slack = p.dims[0] * p.dims[1] * p.dims[2] - p.volume
+        slack = p.dims[0] * p.dims[1] * p.dims[2] - p.volume - filled.get(p.item_id, 0.0)
         if slack > 1e-12:
             gap_items.append({"id": p.item_id, "volume": slack, "kind": "bbox slack",
-                              "detail": "space its bounding box reserves but its real shape does not fill"})
+                              "detail": "space its bounding box reserves that neither its real "
+                                        "shape nor an item nested in it fills"})
     gap_items.sort(key=lambda g: -g["volume"])
     share = wb["usable_volume"] or 1.0
     for g in gap_items:

@@ -256,6 +256,26 @@ main.db.items.update_one({"_id": "t3"}, {"$set": {"labelStatus": "pending"}})
 assert c.post(f"/suitcases/{sc['id']}/plan").json()["pendingLabels"] == 1, "the app shows the count"
 main.db.items.update_one({"_id": "t3"}, {"$set": {"labelStatus": "done"}})
 
+# --- move between suitcases: PATCH suitcaseId drops the stale plan on both sides --------------
+other = c.post("/suitcases", json={"name": "duffel", "dimensions": [0.5, 0.3, 0.3]}).json()
+assert c.patch("/items/t3", json={"suitcaseId": "ghost"}).status_code == 404
+assert c.get(f"/suitcases/{sc['id']}/plan").status_code == 200, "a refused move leaves the plan alone"
+r = c.patch("/items/t3", json={"suitcaseId": other["id"]})
+assert r.status_code == 200 and r.json()["suitcaseId"] == other["id"], r.text
+assert r.json()["rigidity"] == "soft" and r.json()["labelStatus"] == "done", "a move sets suitcaseId and nothing else"
+assert c.get(f"/suitcases/{sc['id']}/plan").status_code == 404, "the source bag's plan no longer has t3 in it"
+assert [i["id"] for i in c.get("/items", params={"suitcaseId": other["id"]}).json()] == ["t3"]
+assert c.post(f"/suitcases/{other['id']}/plan").status_code == 200
+assert c.patch("/items/t3", json={"keepUpright": False}).json()["suitcaseId"] == other["id"], "a patch without the field leaves it alone"
+assert c.get(f"/suitcases/{other['id']}/plan").status_code == 200, "and leaves the plan alone"
+r = c.patch("/items/t3", json={"suitcaseId": None})
+assert r.status_code == 200 and r.json()["suitcaseId"] is None, "null takes the item out of any bag"
+assert c.get(f"/suitcases/{other['id']}/plan").status_code == 404, "detaching drops the plan of the bag it left"
+assert c.get("/items", params={"suitcaseId": other["id"]}).json() == [] and c.get("/items/t3").status_code == 200
+assert c.patch("/items/t3", json={"suitcaseId": sc["id"]}).json()["suitcaseId"] == sc["id"]
+assert c.post(f"/suitcases/{sc['id']}/plan").status_code == 200, "back in the carry-on, planned again for the delete checks below"
+assert c.delete(f"/suitcases/{other['id']}").status_code == 200
+
 # --- delete ----------------------------------------------------------------------
 assert c.delete("/items/t4").json() == {"deleted": "t4"}
 assert c.get(f"/suitcases/{sc['id']}/plan").status_code == 404, "deleting an item drops the now-stale plan"

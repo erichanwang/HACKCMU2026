@@ -33,12 +33,24 @@ def scan(item_id, w, h, d, **over):
             "rigidity": "rigid", "compressibility": 1.0, "mass": 0.5, "keepUpright": False, "label": item_id} | over
 
 
+def round_scan(item_id, diameter, h, **over):
+    """A circular-footprint scan (a bottle seen from above), so `Item.from_scanned_heightmap`
+    classifies it as a cylinder and the solver may lay it on its side (cyl_axis_x / cyl_axis_y)."""
+    cell = 0.01
+    n = math.ceil(diameter / cell)
+    c, r = (n - 1) / 2, diameter / (2 * cell)
+    heights = [[h if (i - c) ** 2 + (j - c) ** 2 <= r * r else 0.0 for j in range(n)] for i in range(n)]
+    return scan(item_id, diameter, h, diameter, **over) | {"cellSize": cell, "heights": heights}
+
+
 SUITCASE = {"_id": "contract-carry-on", "name": "Contract carry-on", "dimensions": [0.4, 0.2, 0.3]}
 ITEMS = [
     scan("shirts", 0.3, 0.1, 0.2, rigidity="soft", compressibility=2.0, label="Folded shirts"),
     scan("bottle", 0.07, 0.18, 0.07, keepUpright=True, label="Water bottle"),
     scan("camera", 0.15, 0.08, 0.1, rigidity="fragile", label="Camera"),
     scan("book", 0.15, 0.04, 0.2, label="Paperback"),
+    # taller than the bag: it can only fit lying down, which exercises the cylinder rotations
+    round_scan("longbottle", 0.18, 0.35, label="Tall bottle"),
 ]
 
 

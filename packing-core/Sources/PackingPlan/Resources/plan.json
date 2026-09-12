@@ -1,0 +1,103 @@
+{
+  "_comment": [
+    "Hand-authored mock plan. All values in METRES. position is the MIN CORNER of the item's box, not its center.",
+    "Bag frame: origin at the inner floor corner of the interior; X = width, Y = up, Z = depth.",
+    "Demo suitcase interior is 16 x 6 x 24 in => 0.4064 x 0.1524 x 0.6096 m, so every placement satisfies",
+    "0 <= position and position + size <= (0.4064, 0.1524, 0.6096).",
+    "The cavity is only 15.24 cm tall, so this is a two-layer bag, not three. Layout:",
+    "  end-well  Z 0.00-0.17, full height  - shoes and the dopp kit stand upright in the short end.",
+    "  base      Z 0.17-0.6096, Y 0.00-0.075  - flat soft goods.",
+    "  upper     Z 0.17-0.6096, Y 0.075-0.1524 - second layer over the base.",
+    "The three zones are disjoint. Every pair of items is separated on at least one axis; the shoes and the",
+    "dopp kit touch at X = 0.30, which is contact, not overlap."
+  ],
+  "version": 1,
+  "units": "meters",
+  "container": {
+    "id": "demo-carry-on",
+    "label": "Demo carry-on (16 x 6 x 24 in)",
+    "dimensions": { "x": 0.4064, "y": 0.1524, "z": 0.6096 },
+    "zones": [
+      {
+        "id": "end-well",
+        "label": "End well",
+        "origin": { "x": 0.0000, "y": 0.0000, "z": 0.0000 },
+        "size":   { "x": 0.4064, "y": 0.1524, "z": 0.1700 }
+      },
+      {
+        "id": "base",
+        "label": "Base layer",
+        "origin": { "x": 0.0000, "y": 0.0000, "z": 0.1700 },
+        "size":   { "x": 0.4064, "y": 0.0750, "z": 0.4396 }
+      },
+      {
+        "id": "upper",
+        "label": "Upper layer",
+        "origin": { "x": 0.0000, "y": 0.0750, "z": 0.1700 },
+        "size":   { "x": 0.4064, "y": 0.0774, "z": 0.4396 }
+      }
+    ]
+  },
+  "placements": [
+    {
+      "step": 1,
+      "itemId": "shoes-pair",
+      "label": "Running shoes",
+      "zone": "end-well",
+      "position": { "x": 0.0000, "y": 0.0000, "z": 0.0000 },
+      "size":     { "x": 0.3000, "y": 0.1150, "z": 0.1500 },
+      "rotation": "XYZ",
+      "note": "Soles down, side by side, pushed flush into the end corner. Stuff socks inside."
+    },
+    {
+      "step": 2,
+      "itemId": "toiletry-kit",
+      "label": "Toiletry kit",
+      "zone": "end-well",
+      "position": { "x": 0.3000, "y": 0.0000, "z": 0.0000 },
+      "size":     { "x": 0.1000, "y": 0.1400, "z": 0.1600 },
+      "rotation": "ZYX",
+      "note": "Stood on end beside the shoes, zip facing up."
+    },
+    {
+      "step": 3,
+      "itemId": "jeans-folded",
+      "label": "Folded jeans",
+      "zone": "base",
+      "position": { "x": 0.0050, "y": 0.0000, "z": 0.1800 },
+      "size":     { "x": 0.3900, "y": 0.0350, "z": 0.3000 },
+      "rotation": "XYZ",
+      "note": "Flat across the full width, starting just past the shoes."
+    },
+    {
+      "step": 4,
+      "itemId": "sweater-roll",
+      "label": "Rolled sweater",
+      "zone": "base",
+      "position": { "x": 0.0200, "y": 0.0000, "z": 0.4900 },
+      "size":     { "x": 0.3600, "y": 0.0700, "z": 0.1150 },
+      "rotation": "XZY",
+      "note": "Rolled along the width and pressed into the far end of the base layer."
+    },
+    {
+      "step": 5,
+      "itemId": "shirt-stack",
+      "label": "Stack of shirts",
+      "zone": "upper",
+      "position": { "x": 0.0200, "y": 0.0750, "z": 0.1900 },
+      "size":     { "x": 0.3000, "y": 0.0450, "z": 0.1600 },
+      "rotation": "XYZ",
+      "note": "Second layer, resting on the jeans with the folded edges outward."
+    },
+    {
+      "step": 6,
+      "itemId": "laptop-sleeve",
+      "label": "Laptop sleeve",
+      "zone": "upper",
+      "position": { "x": 0.0250, "y": 0.0750, "z": 0.3600 },
+      "size":     { "x": 0.3550, "y": 0.0300, "z": 0.2400 },
+      "rotation": "XYZ",
+      "note": "Flat on the very top so it comes out first at security."
+    }
+  ]
+}

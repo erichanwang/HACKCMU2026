@@ -1,0 +1,20 @@
+{
+  "container": {"id": "suitcase", "shape": "box", "dims": [0.75, 0.50, 0.28], "gravity": true, "max_mass": 23, "min_support": 0.6},
+  "items": [
+    {"id": "shoes", "shape": "box", "dims": [0.32, 0.20, 0.12], "mass": 1.2, "count": 2},
+    {"id": "jeans", "shape": "box", "dims": [0.35, 0.28, 0.06], "mass": 0.7, "count": 2},
+    {"id": "shirts", "shape": "box", "dims": [0.35, 0.25, 0.08], "mass": 0.9, "count": 2},
+    {"id": "laptop", "shape": "box", "dims": [0.36, 0.25, 0.03], "mass": 1.8, "fragile": true, "priority": 3},
+    {"id": "camera", "shape": "box", "dims": [0.25, 0.18, 0.14], "mass": 2.2, "fragile": true, "keep_upright": true, "priority": 3},
+    {"id": "toiletries", "shape": "box", "dims": [0.28, 0.15, 0.12], "mass": 1.5},
+    {"id": "water_bottle", "shape": "cylinder", "radius": 0.04, "height": 0.26, "mass": 0.9},
+    {"id": "wine", "shape": "cylinder", "radius": 0.04, "height": 0.32, "mass": 1.4, "fragile": true},
+    {"id": "books", "shape": "box", "dims": [0.24, 0.17, 0.10], "mass": 3.0, "count": 2},
+    {"id": "jacket", "shape": "box", "dims": [0.40, 0.30, 0.12], "mass": 1.1},
+    {"id": "tripod", "shape": "cylinder", "radius": 0.05, "height": 0.55, "mass": 2.0},
+    {"id": "hair_dryer", "shape": "box", "dims": [0.22, 0.10, 0.20], "mass": 0.8},
+    {"id": "gifts", "shape": "box", "dims": [0.30, 0.30, 0.20], "mass": 2.5, "priority": 0.5},
+    {"id": "umbrella", "shape": "cylinder", "radius": 0.03, "height": 0.30, "mass": 0.5}
+  ],
+  "optimizer": {"time_budget_s": 4, "seed": 0}
+}

@@ -1,0 +1,1700 @@
+{
+  "backend": "cache(mock)",
+  "pan_available": true,
+  "returned_after_ms": 27.818100003059953,
+  "candidates": [
+    {
+      "candidate_id": "A",
+      "label": "shoe first",
+      "physics_status": "valid",
+      "simulation_status": "complete",
+      "execution_risk": "low",
+      "action_text": "A traveler picks up the black running shoe, currently outside the suitcase to the left of it, and places it flat on the suitcase floor in the front-left corner, laid flat. The other objects remain in their current positions.",
+      "pan_preview_video": "candidates/A/step_0/rollout.gif",
+      "pan_final_frame": "candidates/A/step_0/frame_02.png",
+      "risk_metadata": {
+        "steps": [
+          {
+            "accessibility_risk": 0.0016,
+            "visible_shift": false,
+            "possible_topple": false,
+            "occlusion_risk": 0.00321,
+            "confidence": 0.8,
+            "evidence": {
+              "regime": "segmented",
+              "acted_object": "shoe",
+              "image_size": [
+                512,
+                512
+              ],
+              "diagonal_px": 724.077,
+              "shift_px_threshold": 14.482,
+              "frame_count": 3,
+              "sampled_frame_indices": [
+                0,
+                1,
+                2
+              ],
+              "objects": {
+                "camera": {
+                  "first": {
+                    "area": 650,
+                    "visible": true,
+                    "centroid": [
+                      424.295,
+                      265.225
+                    ],
+                    "bbox": [
+                      409,
+                      253,
+                      441,
+                      279
+                    ],
+                    "width": 33,
+                    "height": 27,
+                    "aspect": 1.22222
+                  },
+                  "last": {
+                    "area": 645,
+                    "visible": true,
+                    "centroid": [
+                      424.274,
+                      265.186
+                    ],
+                    "bbox": [
+                      409,
+                      253,
+                      441,
+                      279
+                    ],
+                    "width": 33,
+                    "height": 27,
+                    "aspect": 1.22222
+                  },
+                  "area_track": [
+                    650,
+                    635,
+                    645
+                  ],
+                  "acted": false,
+                  "displacement_px": 0.044,
+                  "displacement_frac_diag": 6e-05,
+                  "aspect_change": 0.0,
+                  "area_change": 0.00769
+                },
+                "charger": {
+                  "first": {
+                    "area": 198,
+                    "visible": true,
+                    "centroid": [
+                      284.5,
+                      245.364
+                    ],
+                    "bbox": [
+                      276,
+                      240,
+                      293,
+                      251
+                    ],
+                    "width": 18,
+                    "height": 12,
+                    "aspect": 1.5
+                  },
+                  "last": {
+                    "area": 198,
+                    "visible": true,
+                    "centroid": [
+                      284.5,
+                      245.364
+                    ],
+                    "bbox": [
+                      276,
+                      240,
+                      293,
+                      251
+                    ],
+                    "width": 18,
+                    "height": 12,
+                    "aspect": 1.5
+                  },
+                  "area_track": [
+                    198,
+                    198,
+                    198
+                  ],
+                  "acted": false,
+                  "displacement_px": 0.0,
+                  "displacement_frac_diag": 0.0,
+                  "aspect_change": 0.0,
+                  "area_change": 0.0
+                },
+                "headphones_case": {
+                  "first": {
+                    "area": 231,
+                    "visible": true,
+                    "centroid": [
+                      286.281,
+                      258.407
+                    ],
+                    "bbox": [
+                      276,
+                      240,
+                      312,
+                      264
+                    ],
+                    "width": 37,
+                    "height": 25,
+                    "aspect": 1.48
+                  },
+                  "last": {
+                    "area": 231,
+                    "visible": true,
+                    "centroid": [
+                      286.281,
+                      258.407
+                    ],
+                    "bbox": [
+                      276,
+                      240,
+                      312,
+                      264
+                    ],
+                    "width": 37,
+                    "height": 25,
+                    "aspect": 1.48
+                  },
+                  "area_track": [
+                    231,
+                    231,
+                    231
+                  ],
+                  "acted": false,
+                  "displacement_px": 0.0,
+                  "displacement_frac_diag": 0.0,
+                  "aspect_change": 0.0,
+                  "area_change": 0.0
+                },
+                "laptop": {
+                  "first": {
+                    "area": 1772,
+                    "visible": true,
+                    "centroid": [
+                      237.067,
+                      260.064
+                    ],
+                    "bbox": [
+                      207,
+                      245,
+                      268,
+                      277
+                    ],
+                    "width": 62,
+                    "height": 33,
+                    "aspect": 1.87879
+                  },
+                  "last": {
+                    "area": 1178,
+                    "visible": true,
+                    "centroid": [
+                      239.351,
+                      254.789
+                    ],
+                    "bbox": [
+                      208,
+                      245,
+                      268,
+                      277
+                    ],
+                    "width": 61,
+                    "height": 33,
+                    "aspect": 1.84848
+                  },
+                  "area_track": [
+                    1772,
+                    1516,
+                    1178
+                  ],
+                  "acted": false,
+                  "displacement_px": 5.748,
+                  "displacement_frac_diag": 0.00794,
+                  "aspect_change": 0.01613,
+                  "area_change": 0.33521
+                },
+                "shoe": {
+                  "first": {
+                    "area": 2181,
+                    "visible": true,
+                    "centroid": [
+                      111.622,
+                      264.325
+                    ],
+                    "bbox": [
+                      68,
+                      248,
+                      456,
+                      297
+                    ],
+                    "width": 389,
+                    "height": 50,
+                    "aspect": 7.78
+                  },
+                  "last": {
+                    "area": 2174,
+                    "visible": true,
+                    "centroid": [
+                      235.54,
+                      280.292
+                    ],
+                    "bbox": [
+                      193,
+                      264,
+                      500,
+                      313
+                    ],
+                    "width": 308,
+                    "height": 50,
+                    "aspect": 6.16
+                  },
+                  "area_track": [
+                    2181,
+                    2174,
+                    2174
+                  ],
+                  "acted": true,
+                  "displacement_px": 124.942,
+                  "displacement_frac_diag": 0.17255,
+                  "aspect_change": 0.20823,
+                  "area_change": 0.00321
+                },
+                "toiletry_bag": {
+                  "first": {
+                    "area": 1351,
+                    "visible": true,
+                    "centroid": [
+                      291.579,
+                      283.175
+                    ],
+                    "bbox": [
+                      271,
+                      254,
+                      315,
+                      300
+                    ],
+                    "width": 45,
+                    "height": 47,
+                    "aspect": 0.95745
+                  },
+                  "last": {
+                    "area": 1351,
+                    "visible": true,
+                    "centroid": [
+                      291.579,
+                      283.175
+                    ],
+                    "bbox": [
+                      271,
+                      254,
+                      315,
+                      300
+                    ],
+                    "width": 45,
+                    "height": 47,
+                    "aspect": 0.95745
+                  },
+                  "area_track": [
+                    1351,
+                    1351,
+                    1351
+                  ],
+                  "acted": false,
+                  "displacement_px": 0.0,
+                  "displacement_frac_diag": 0.0,
+                  "aspect_change": 0.0,
+                  "area_change": 0.0
+                },
+                "toiletry_bottle": {
+                  "first": {
+                    "area": 100,
+                    "visible": true,
+                    "centroid": [
+                      304.26,
+                      235.54
+                    ],
+                    "bbox": [
+                      298,
+                      232,
+                      311,
+                      239
+                    ],
+                    "width": 14,
+                    "height": 8,
+                    "aspect": 1.75
+                  },
+                  "last": {
+                    "area": 100,
+                    "visible": true,
+                    "centroid": [
+                      304.26,
+                      235.54
+                    ],
+                    "bbox": [
+                      298,
+                      232,
+                      311,
+                      239
+                    ],
+                    "width": 14,
+                    "height": 8,
+                    "aspect": 1.75
+                  },
+                  "area_track": [
+                    100,
+                    100,
+                    100
+                  ],
+                  "acted": false,
+                  "displacement_px": 0.0,
+                  "displacement_frac_diag": 0.0,
+                  "aspect_change": 0.0,
+                  "area_change": 0.0
+                }
+              },
+              "shifted_objects": [],
+              "topple": {
+                "shoe": {
+                  "aspect_first": 7.78,
+                  "aspect_last": 6.16,
+                  "aspect_change": 0.20823,
+                  "area_first": 2181,
+                  "area_last": 2174,
+                  "area_change": 0.00321,
+                  "flagged": false
+                }
+              },
+              "occlusion": {
+                "mode": "area_shrink_proxy",
+                "first_area": 2181,
+                "last_area": 2174
+              },
+              "accessibility": {
+                "mode": "occlusion_fallback",
+                "factor": 0.5
+              },
+              "noise_median_abs_diff": 1.0,
+              "confidence_terms": {
+                "base": 0.8
+              },
+              "thresholds": {
+                "color_tol": 60.0,
+                "min_area": 25.0,
+                "shift_frac_diag": 0.02,
+                "aspect_change": 0.4,
+                "area_change": 0.5,
+                "sample_k": 5.0,
+                "noise_median_abs_diff": 12.0,
+                "base_confidence": 0.8,
+                "confidence_min": 0.05,
+                "confidence_max": 0.9,
+                "gray_diff": 25.0,
+                "unseg_shift_frac": 0.05,
+                "unseg_confidence": 0.3,
+                "unseg_confidence_max": 0.35
+              }
+            },
+            "notes": [
+              "occlusion_risk is the WEAK proxy (no expected_final given): the acted object's visible-area loss between first and last frame, which also fires when it simply moves out of frame or turns a smaller face to the camera.",
+              "no next-action target given, so accessibility_risk is a fallback of 0.5 * occlusion_risk and carries no independent information.",
+              "Visual proxies from a learned rollout, one viewpoint, image pixels only: a ranking hint, never a feasibility gate -- physics decides validity (PAN.md \u00a76)."
+            ]
+          }
+        ]
+      },
+      "score_components": {
+        "total": 1.998395,
+        "geometry_score": 1.0,
+        "stability_score": 1.0,
+        "pan_risk": 0.00321,
+        "execution_risk_weight": 0.5,
+        "n_steps": 1
+      }
+    },
+    {
+      "candidate_id": "B",
+      "label": "camera first",
+      "physics_status": "valid",
+      "simulation_status": "complete",
+      "execution_risk": "low",
+      "action_text": "A traveler picks up the mirrorless camera, currently outside the suitcase to the right of it, and places it on top of the toiletry bag in the front-right corner, laid flat. The other objects remain in their current positions.",
+      "pan_preview_video": "candidates/B/step_0/rollout.gif",
+      "pan_final_frame": "candidates/B/step_0/frame_02.png",
+      "risk_metadata": {
+        "steps": [
+          {
+            "accessibility_risk": 0.0,
+            "visible_shift": false,
+            "possible_topple": false,
+            "occlusion_risk": 0.0,
+            "confidence": 0.8,
+            "evidence": {
+              "regime": "segmented",
+              "acted_object": "camera",
+              "image_size": [
+                512,
+                512
+              ],
+              "diagonal_px": 724.077,
+              "shift_px_threshold": 14.482,
+              "frame_count": 3,
+              "sampled_frame_indices": [
+                0,
+                1,
+                2
+              ],
+              "objects": {
+                "camera": {
+                  "first": {
+                    "area": 650,
+                    "visible": true,
+                    "centroid": [
+                      424.295,
+                      265.225
+                    ],
+                    "bbox": [
+                      409,
+                      253,
+                      441,
+                      279
+                    ],
+                    "width": 33,
+                    "height": 27,
+                    "aspect": 1.22222
+                  },
+                  "last": {
+                    "area": 650,
+                    "visible": true,
+                    "centroid": [
+                      293.295,
+                      271.225
+                    ],
+                    "bbox": [
+                      278,
+                      259,
+                      310,
+                      285
+                    ],
+                    "width": 33,
+                    "height": 27,
+                    "aspect": 1.22222
+                  },
+                  "area_track": [
+                    650,
+                    650,
+                    650
+                  ],
+                  "acted": true,
+                  "displacement_px": 131.137,
+                  "displacement_frac_diag": 0.18111,
+                  "aspect_change": 0.0,
+                  "area_change": 0.0
+                },
+                "charger": {
+                  "first": {
+                    "area": 198,
+                    "visible": true,
+                    "centroid": [
+                      284.5,
+                      245.364
+                    ],
+                    "bbox": [
+                      276,
+                      240,
+                      293,
+                      251
+                    ],
+                    "width": 18,
+                    "height": 12,
+                    "aspect": 1.5
+                  },
+                  "last": {
+                    "area": 198,
+                    "visible": true,
+                    "centroid": [
+                      284.5,
+                      245.364
+                    ],
+                    "bbox": [
+                      276,
+                      240,
+                      293,
+                      251
+                    ],
+                    "width": 18,
+                    "height": 12,
+                    "aspect": 1.5
+                  },
+                  "area_track": [
+                    198,
+                    198,
+                    198
+                  ],
+                  "acted": false,
+                  "displacement_px": 0.0,
+                  "displacement_frac_diag": 0.0,
+                  "aspect_change": 0.0,
+                  "area_change": 0.0
+                },
+                "headphones_case": {
+                  "first": {
+                    "area": 231,
+                    "visible": true,
+                    "centroid": [
+                      286.281,
+                      258.407
+                    ],
+                    "bbox": [
+                      276,
+                      240,
+                      312,
+                      264
+                    ],
+                    "width": 37,
+                    "height": 25,
+                    "aspect": 1.48
+                  },
+                  "last": {
+                    "area": 131,
+                    "visible": true,
+                    "centroid": [
+                      285.74,
+                      256.076
+                    ],
+                    "bbox": [
+                      276,
+                      240,
+                      312,
+                      264
+                    ],
+                    "width": 37,
+                    "height": 25,
+                    "aspect": 1.48
+                  },
+                  "area_track": [
+                    231,
+                    231,
+                    131
+                  ],
+                  "acted": false,
+                  "displacement_px": 2.393,
+                  "displacement_frac_diag": 0.0033,
+                  "aspect_change": 0.0,
+                  "area_change": 0.4329
+                },
+                "laptop": {
+                  "first": {
+                    "area": 1772,
+                    "visible": true,
+                    "centroid": [
+                      237.067,
+                      260.064
+                    ],
+                    "bbox": [
+                      207,
+                      245,
+                      268,
+                      277
+                    ],
+                    "width": 62,
+                    "height": 33,
+                    "aspect": 1.87879
+                  },
+                  "last": {
+                    "area": 1772,
+                    "visible": true,
+                    "centroid": [
+                      237.067,
+                      260.064
+                    ],
+                    "bbox": [
+                      207,
+                      245,
+                      268,
+                      277
+                    ],
+                    "width": 62,
+                    "height": 33,
+                    "aspect": 1.87879
+                  },
+                  "area_track": [
+                    1772,
+                    1772,
+                    1772
+                  ],
+                  "acted": false,
+                  "displacement_px": 0.0,
+                  "displacement_frac_diag": 0.0,
+                  "aspect_change": 0.0,
+                  "area_change": 0.0
+                },
+                "shoe": {
+                  "first": {
+                    "area": 2181,
+                    "visible": true,
+                    "centroid": [
+                      111.622,
+                      264.325
+                    ],
+                    "bbox": [
+                      68,
+                      248,
+                      456,
+                      297
+                    ],
+                    "width": 389,
+                    "height": 50,
+                    "aspect": 7.78
+                  },
+                  "last": {
+                    "area": 2181,
+                    "visible": true,
+                    "centroid": [
+                      111.622,
+                      264.325
+                    ],
+                    "bbox": [
+                      68,
+                      248,
+                      456,
+                      297
+                    ],
+                    "width": 389,
+                    "height": 50,
+                    "aspect": 7.78
+                  },
+                  "area_track": [
+                    2181,
+                    2161,
+                    2181
+                  ],
+                  "acted": false,
+                  "displacement_px": 0.0,
+                  "displacement_frac_diag": 0.0,
+                  "aspect_change": 0.0,
+                  "area_change": 0.0
+                },
+                "toiletry_bag": {
+                  "first": {
+                    "area": 1351,
+                    "visible": true,
+                    "centroid": [
+                      291.579,
+                      283.175
+                    ],
+                    "bbox": [
+                      271,
+                      254,
+                      315,
+                      300
+                    ],
+                    "width": 45,
+                    "height": 47,
+                    "aspect": 0.95745
+                  },
+                  "last": {
+                    "area": 929,
+                    "visible": true,
+                    "centroid": [
+                      290.727,
+                      286.583
+                    ],
+                    "bbox": [
+                      271,
+                      254,
+                      315,
+                      300
+                    ],
+                    "width": 45,
+                    "height": 47,
+                    "aspect": 0.95745
+                  },
+                  "area_track": [
+                    1351,
+                    1351,
+                    929
+                  ],
+                  "acted": false,
+                  "displacement_px": 3.513,
+                  "displacement_frac_diag": 0.00485,
+                  "aspect_change": 0.0,
+                  "area_change": 0.31236
+                },
+                "toiletry_bottle": {
+                  "first": {
+                    "area": 100,
+                    "visible": true,
+                    "centroid": [
+                      304.26,
+                      235.54
+                    ],
+                    "bbox": [
+                      298,
+                      232,
+                      311,
+                      239
+                    ],
+                    "width": 14,
+                    "height": 8,
+                    "aspect": 1.75
+                  },
+                  "last": {
+                    "area": 100,
+                    "visible": true,
+                    "centroid": [
+                      304.26,
+                      235.54
+                    ],
+                    "bbox": [
+                      298,
+                      232,
+                      311,
+                      239
+                    ],
+                    "width": 14,
+                    "height": 8,
+                    "aspect": 1.75
+                  },
+                  "area_track": [
+                    100,
+                    100,
+                    100
+                  ],
+                  "acted": false,
+                  "displacement_px": 0.0,
+                  "displacement_frac_diag": 0.0,
+                  "aspect_change": 0.0,
+                  "area_change": 0.0
+                }
+              },
+              "shifted_objects": [],
+              "topple": {
+                "camera": {
+                  "aspect_first": 1.22222,
+                  "aspect_last": 1.22222,
+                  "aspect_change": 0.0,
+                  "area_first": 650,
+                  "area_last": 650,
+                  "area_change": 0.0,
+                  "flagged": false
+                }
+              },
+              "occlusion": {
+                "mode": "area_shrink_proxy",
+                "first_area": 650,
+                "last_area": 650
+              },
+              "accessibility": {
+                "mode": "occlusion_fallback",
+                "factor": 0.5
+              },
+              "noise_median_abs_diff": 1.0,
+              "confidence_terms": {
+                "base": 0.8
+              },
+              "thresholds": {
+                "color_tol": 60.0,
+                "min_area": 25.0,
+                "shift_frac_diag": 0.02,
+                "aspect_change": 0.4,
+                "area_change": 0.5,
+                "sample_k": 5.0,
+                "noise_median_abs_diff": 12.0,
+                "base_confidence": 0.8,
+                "confidence_min": 0.05,
+                "confidence_max": 0.9,
+                "gray_diff": 25.0,
+                "unseg_shift_frac": 0.05,
+                "unseg_confidence": 0.3,
+                "unseg_confidence_max": 0.35
+              }
+            },
+            "notes": [
+              "occlusion_risk is the WEAK proxy (no expected_final given): the acted object's visible-area loss between first and last frame, which also fires when it simply moves out of frame or turns a smaller face to the camera.",
+              "no next-action target given, so accessibility_risk is a fallback of 0.5 * occlusion_risk and carries no independent information.",
+              "Visual proxies from a learned rollout, one viewpoint, image pixels only: a ranking hint, never a feasibility gate -- physics decides validity (PAN.md \u00a76)."
+            ]
+          }
+        ]
+      },
+      "score_components": {
+        "total": 2.0,
+        "geometry_score": 1.0,
+        "stability_score": 1.0,
+        "pan_risk": 0.0,
+        "execution_risk_weight": 0.5,
+        "n_steps": 1
+      }
+    },
+    {
+      "candidate_id": "C",
+      "label": "camera on laptop",
+      "physics_status": "invalid",
+      "simulation_status": "unavailable",
+      "execution_risk": null,
+      "action_text": "A traveler picks up the mirrorless camera, currently outside the suitcase to the right of it, and places it on top of the 13-inch laptop in the rear-left corner, laid flat. The other objects remain in their current positions.",
+      "pan_preview_video": null,
+      "pan_final_frame": null,
+      "risk_metadata": {
+        "steps": [
+          null
+        ]
+      },
+      "score_components": {
+        "total": 1.9487179487179487,
+        "geometry_score": 0.9487179487179487,
+        "stability_score": 1.0,
+        "pan_risk": null,
+        "execution_risk_weight": 0.5,
+        "n_steps": 1
+      }
+    }
+  ],
+  "steps": [
+    {
+      "candidate_id": "A",
+      "label": "shoe first",
+      "physics_status": "valid",
+      "simulation_status": "complete",
+      "execution_risk": "low",
+      "action_text": "A traveler picks up the black running shoe, currently outside the suitcase to the left of it, and places it flat on the suitcase floor in the front-left corner, laid flat. The other objects remain in their current positions.",
+      "pan_preview_video": "candidates/A/step_0/rollout.gif",
+      "pan_final_frame": "candidates/A/step_0/frame_02.png",
+      "risk_metadata": {
+        "accessibility_risk": 0.0016,
+        "visible_shift": false,
+        "possible_topple": false,
+        "occlusion_risk": 0.00321,
+        "confidence": 0.8,
+        "evidence": {
+          "regime": "segmented",
+          "acted_object": "shoe",
+          "image_size": [
+            512,
+            512
+          ],
+          "diagonal_px": 724.077,
+          "shift_px_threshold": 14.482,
+          "frame_count": 3,
+          "sampled_frame_indices": [
+            0,
+            1,
+            2
+          ],
+          "objects": {
+            "camera": {
+              "first": {
+                "area": 650,
+                "visible": true,
+                "centroid": [
+                  424.295,
+                  265.225
+                ],
+                "bbox": [
+                  409,
+                  253,
+                  441,
+                  279
+                ],
+                "width": 33,
+                "height": 27,
+                "aspect": 1.22222
+              },
+              "last": {
+                "area": 645,
+                "visible": true,
+                "centroid": [
+                  424.274,
+                  265.186
+                ],
+                "bbox": [
+                  409,
+                  253,
+                  441,
+                  279
+                ],
+                "width": 33,
+                "height": 27,
+                "aspect": 1.22222
+              },
+              "area_track": [
+                650,
+                635,
+                645
+              ],
+              "acted": false,
+              "displacement_px": 0.044,
+              "displacement_frac_diag": 6e-05,
+              "aspect_change": 0.0,
+              "area_change": 0.00769
+            },
+            "charger": {
+              "first": {
+                "area": 198,
+                "visible": true,
+                "centroid": [
+                  284.5,
+                  245.364
+                ],
+                "bbox": [
+                  276,
+                  240,
+                  293,
+                  251
+                ],
+                "width": 18,
+                "height": 12,
+                "aspect": 1.5
+              },
+              "last": {
+                "area": 198,
+                "visible": true,
+                "centroid": [
+                  284.5,
+                  245.364
+                ],
+                "bbox": [
+                  276,
+                  240,
+                  293,
+                  251
+                ],
+                "width": 18,
+                "height": 12,
+                "aspect": 1.5
+              },
+              "area_track": [
+                198,
+                198,
+                198
+              ],
+              "acted": false,
+              "displacement_px": 0.0,
+              "displacement_frac_diag": 0.0,
+              "aspect_change": 0.0,
+              "area_change": 0.0
+            },
+            "headphones_case": {
+              "first": {
+                "area": 231,
+                "visible": true,
+                "centroid": [
+                  286.281,
+                  258.407
+                ],
+                "bbox": [
+                  276,
+                  240,
+                  312,
+                  264
+                ],
+                "width": 37,
+                "height": 25,
+                "aspect": 1.48
+              },
+              "last": {
+                "area": 231,
+                "visible": true,
+                "centroid": [
+                  286.281,
+                  258.407
+                ],
+                "bbox": [
+                  276,
+                  240,
+                  312,
+                  264
+                ],
+                "width": 37,
+                "height": 25,
+                "aspect": 1.48
+              },
+              "area_track": [
+                231,
+                231,
+                231
+              ],
+              "acted": false,
+              "displacement_px": 0.0,
+              "displacement_frac_diag": 0.0,
+              "aspect_change": 0.0,
+              "area_change": 0.0
+            },
+            "laptop": {
+              "first": {
+                "area": 1772,
+                "visible": true,
+                "centroid": [
+                  237.067,
+                  260.064
+                ],
+                "bbox": [
+                  207,
+                  245,
+                  268,
+                  277
+                ],
+                "width": 62,
+                "height": 33,
+                "aspect": 1.87879
+              },
+              "last": {
+                "area": 1178,
+                "visible": true,
+                "centroid": [
+                  239.351,
+                  254.789
+                ],
+                "bbox": [
+                  208,
+                  245,
+                  268,
+                  277
+                ],
+                "width": 61,
+                "height": 33,
+                "aspect": 1.84848
+              },
+              "area_track": [
+                1772,
+                1516,
+                1178
+              ],
+              "acted": false,
+              "displacement_px": 5.748,
+              "displacement_frac_diag": 0.00794,
+              "aspect_change": 0.01613,
+              "area_change": 0.33521
+            },
+            "shoe": {
+              "first": {
+                "area": 2181,
+                "visible": true,
+                "centroid": [
+                  111.622,
+                  264.325
+                ],
+                "bbox": [
+                  68,
+                  248,
+                  456,
+                  297
+                ],
+                "width": 389,
+                "height": 50,
+                "aspect": 7.78
+              },
+              "last": {
+                "area": 2174,
+                "visible": true,
+                "centroid": [
+                  235.54,
+                  280.292
+                ],
+                "bbox": [
+                  193,
+                  264,
+                  500,
+                  313
+                ],
+                "width": 308,
+                "height": 50,
+                "aspect": 6.16
+              },
+              "area_track": [
+                2181,
+                2174,
+                2174
+              ],
+              "acted": true,
+              "displacement_px": 124.942,
+              "displacement_frac_diag": 0.17255,
+              "aspect_change": 0.20823,
+              "area_change": 0.00321
+            },
+            "toiletry_bag": {
+              "first": {
+                "area": 1351,
+                "visible": true,
+                "centroid": [
+                  291.579,
+                  283.175
+                ],
+                "bbox": [
+                  271,
+                  254,
+                  315,
+                  300
+                ],
+                "width": 45,
+                "height": 47,
+                "aspect": 0.95745
+              },
+              "last": {
+                "area": 1351,
+                "visible": true,
+                "centroid": [
+                  291.579,
+                  283.175
+                ],
+                "bbox": [
+                  271,
+                  254,
+                  315,
+                  300
+                ],
+                "width": 45,
+                "height": 47,
+                "aspect": 0.95745
+              },
+              "area_track": [
+                1351,
+                1351,
+                1351
+              ],
+              "acted": false,
+              "displacement_px": 0.0,
+              "displacement_frac_diag": 0.0,
+              "aspect_change": 0.0,
+              "area_change": 0.0
+            },
+            "toiletry_bottle": {
+              "first": {
+                "area": 100,
+                "visible": true,
+                "centroid": [
+                  304.26,
+                  235.54
+                ],
+                "bbox": [
+                  298,
+                  232,
+                  311,
+                  239
+                ],
+                "width": 14,
+                "height": 8,
+                "aspect": 1.75
+              },
+              "last": {
+                "area": 100,
+                "visible": true,
+                "centroid": [
+                  304.26,
+                  235.54
+                ],
+                "bbox": [
+                  298,
+                  232,
+                  311,
+                  239
+                ],
+                "width": 14,
+                "height": 8,
+                "aspect": 1.75
+              },
+              "area_track": [
+                100,
+                100,
+                100
+              ],
+              "acted": false,
+              "displacement_px": 0.0,
+              "displacement_frac_diag": 0.0,
+              "aspect_change": 0.0,
+              "area_change": 0.0
+            }
+          },
+          "shifted_objects": [],
+          "topple": {
+            "shoe": {
+              "aspect_first": 7.78,
+              "aspect_last": 6.16,
+              "aspect_change": 0.20823,
+              "area_first": 2181,
+              "area_last": 2174,
+              "area_change": 0.00321,
+              "flagged": false
+            }
+          },
+          "occlusion": {
+            "mode": "area_shrink_proxy",
+            "first_area": 2181,
+            "last_area": 2174
+          },
+          "accessibility": {
+            "mode": "occlusion_fallback",
+            "factor": 0.5
+          },
+          "noise_median_abs_diff": 1.0,
+          "confidence_terms": {
+            "base": 0.8
+          },
+          "thresholds": {
+            "color_tol": 60.0,
+            "min_area": 25.0,
+            "shift_frac_diag": 0.02,
+            "aspect_change": 0.4,
+            "area_change": 0.5,
+            "sample_k": 5.0,
+            "noise_median_abs_diff": 12.0,
+            "base_confidence": 0.8,
+            "confidence_min": 0.05,
+            "confidence_max": 0.9,
+            "gray_diff": 25.0,
+            "unseg_shift_frac": 0.05,
+            "unseg_confidence": 0.3,
+            "unseg_confidence_max": 0.35
+          }
+        },
+        "notes": [
+          "occlusion_risk is the WEAK proxy (no expected_final given): the acted object's visible-area loss between first and last frame, which also fires when it simply moves out of frame or turns a smaller face to the camera.",
+          "no next-action target given, so accessibility_risk is a fallback of 0.5 * occlusion_risk and carries no independent information.",
+          "Visual proxies from a learned rollout, one viewpoint, image pixels only: a ranking hint, never a feasibility gate -- physics decides validity (PAN.md \u00a76)."
+        ]
+      },
+      "score_components": {
+        "geometry_score": 1.0,
+        "stability_score": 1.0,
+        "pan_risk": 0.00321,
+        "execution_risk_weight": 0.5,
+        "total": 1.998395
+      }
+    },
+    {
+      "candidate_id": "B",
+      "label": "camera first",
+      "physics_status": "valid",
+      "simulation_status": "complete",
+      "execution_risk": "low",
+      "action_text": "A traveler picks up the mirrorless camera, currently outside the suitcase to the right of it, and places it on top of the toiletry bag in the front-right corner, laid flat. The other objects remain in their current positions.",
+      "pan_preview_video": "candidates/B/step_0/rollout.gif",
+      "pan_final_frame": "candidates/B/step_0/frame_02.png",
+      "risk_metadata": {
+        "accessibility_risk": 0.0,
+        "visible_shift": false,
+        "possible_topple": false,
+        "occlusion_risk": 0.0,
+        "confidence": 0.8,
+        "evidence": {
+          "regime": "segmented",
+          "acted_object": "camera",
+          "image_size": [
+            512,
+            512
+          ],
+          "diagonal_px": 724.077,
+          "shift_px_threshold": 14.482,
+          "frame_count": 3,
+          "sampled_frame_indices": [
+            0,
+            1,
+            2
+          ],
+          "objects": {
+            "camera": {
+              "first": {
+                "area": 650,
+                "visible": true,
+                "centroid": [
+                  424.295,
+                  265.225
+                ],
+                "bbox": [
+                  409,
+                  253,
+                  441,
+                  279
+                ],
+                "width": 33,
+                "height": 27,
+                "aspect": 1.22222
+              },
+              "last": {
+                "area": 650,
+                "visible": true,
+                "centroid": [
+                  293.295,
+                  271.225
+                ],
+                "bbox": [
+                  278,
+                  259,
+                  310,
+                  285
+                ],
+                "width": 33,
+                "height": 27,
+                "aspect": 1.22222
+              },
+              "area_track": [
+                650,
+                650,
+                650
+              ],
+              "acted": true,
+              "displacement_px": 131.137,
+              "displacement_frac_diag": 0.18111,
+              "aspect_change": 0.0,
+              "area_change": 0.0
+            },
+            "charger": {
+              "first": {
+                "area": 198,
+                "visible": true,
+                "centroid": [
+                  284.5,
+                  245.364
+                ],
+                "bbox": [
+                  276,
+                  240,
+                  293,
+                  251
+                ],
+                "width": 18,
+                "height": 12,
+                "aspect": 1.5
+              },
+              "last": {
+                "area": 198,
+                "visible": true,
+                "centroid": [
+                  284.5,
+                  245.364
+                ],
+                "bbox": [
+                  276,
+                  240,
+                  293,
+                  251
+                ],
+                "width": 18,
+                "height": 12,
+                "aspect": 1.5
+              },
+              "area_track": [
+                198,
+                198,
+                198
+              ],
+              "acted": false,
+              "displacement_px": 0.0,
+              "displacement_frac_diag": 0.0,
+              "aspect_change": 0.0,
+              "area_change": 0.0
+            },
+            "headphones_case": {
+              "first": {
+                "area": 231,
+                "visible": true,
+                "centroid": [
+                  286.281,
+                  258.407
+                ],
+                "bbox": [
+                  276,
+                  240,
+                  312,
+                  264
+                ],
+                "width": 37,
+                "height": 25,
+                "aspect": 1.48
+              },
+              "last": {
+                "area": 131,
+                "visible": true,
+                "centroid": [
+                  285.74,
+                  256.076
+                ],
+                "bbox": [
+                  276,
+                  240,
+                  312,
+                  264
+                ],
+                "width": 37,
+                "height": 25,
+                "aspect": 1.48
+              },
+              "area_track": [
+                231,
+                231,
+                131
+              ],
+              "acted": false,
+              "displacement_px": 2.393,
+              "displacement_frac_diag": 0.0033,
+              "aspect_change": 0.0,
+              "area_change": 0.4329
+            },
+            "laptop": {
+              "first": {
+                "area": 1772,
+                "visible": true,
+                "centroid": [
+                  237.067,
+                  260.064
+                ],
+                "bbox": [
+                  207,
+                  245,
+                  268,
+                  277
+                ],
+                "width": 62,
+                "height": 33,
+                "aspect": 1.87879
+              },
+              "last": {
+                "area": 1772,
+                "visible": true,
+                "centroid": [
+                  237.067,
+                  260.064
+                ],
+                "bbox": [
+                  207,
+                  245,
+                  268,
+                  277
+                ],
+                "width": 62,
+                "height": 33,
+                "aspect": 1.87879
+              },
+              "area_track": [
+                1772,
+                1772,
+                1772
+              ],
+              "acted": false,
+              "displacement_px": 0.0,
+              "displacement_frac_diag": 0.0,
+              "aspect_change": 0.0,
+              "area_change": 0.0
+            },
+            "shoe": {
+              "first": {
+                "area": 2181,
+                "visible": true,
+                "centroid": [
+                  111.622,
+                  264.325
+                ],
+                "bbox": [
+                  68,
+                  248,
+                  456,
+                  297
+                ],
+                "width": 389,
+                "height": 50,
+                "aspect": 7.78
+              },
+              "last": {
+                "area": 2181,
+                "visible": true,
+                "centroid": [
+                  111.622,
+                  264.325
+                ],
+                "bbox": [
+                  68,
+                  248,
+                  456,
+                  297
+                ],
+                "width": 389,
+                "height": 50,
+                "aspect": 7.78
+              },
+              "area_track": [
+                2181,
+                2161,
+                2181
+              ],
+              "acted": false,
+              "displacement_px": 0.0,
+              "displacement_frac_diag": 0.0,
+              "aspect_change": 0.0,
+              "area_change": 0.0
+            },
+            "toiletry_bag": {
+              "first": {
+                "area": 1351,
+                "visible": true,
+                "centroid": [
+                  291.579,
+                  283.175
+                ],
+                "bbox": [
+                  271,
+                  254,
+                  315,
+                  300
+                ],
+                "width": 45,
+                "height": 47,
+                "aspect": 0.95745
+              },
+              "last": {
+                "area": 929,
+                "visible": true,
+                "centroid": [
+                  290.727,
+                  286.583
+                ],
+                "bbox": [
+                  271,
+                  254,
+                  315,
+                  300
+                ],
+                "width": 45,
+                "height": 47,
+                "aspect": 0.95745
+              },
+              "area_track": [
+                1351,
+                1351,
+                929
+              ],
+              "acted": false,
+              "displacement_px": 3.513,
+              "displacement_frac_diag": 0.00485,
+              "aspect_change": 0.0,
+              "area_change": 0.31236
+            },
+            "toiletry_bottle": {
+              "first": {
+                "area": 100,
+                "visible": true,
+                "centroid": [
+                  304.26,
+                  235.54
+                ],
+                "bbox": [
+                  298,
+                  232,
+                  311,
+                  239
+                ],
+                "width": 14,
+                "height": 8,
+                "aspect": 1.75
+              },
+              "last": {
+                "area": 100,
+                "visible": true,
+                "centroid": [
+                  304.26,
+                  235.54
+                ],
+                "bbox": [
+                  298,
+                  232,
+                  311,
+                  239
+                ],
+                "width": 14,
+                "height": 8,
+                "aspect": 1.75
+              },
+              "area_track": [
+                100,
+                100,
+                100
+              ],
+              "acted": false,
+              "displacement_px": 0.0,
+              "displacement_frac_diag": 0.0,
+              "aspect_change": 0.0,
+              "area_change": 0.0
+            }
+          },
+          "shifted_objects": [],
+          "topple": {
+            "camera": {
+              "aspect_first": 1.22222,
+              "aspect_last": 1.22222,
+              "aspect_change": 0.0,
+              "area_first": 650,
+              "area_last": 650,
+              "area_change": 0.0,
+              "flagged": false
+            }
+          },
+          "occlusion": {
+            "mode": "area_shrink_proxy",
+            "first_area": 650,
+            "last_area": 650
+          },
+          "accessibility": {
+            "mode": "occlusion_fallback",
+            "factor": 0.5
+          },
+          "noise_median_abs_diff": 1.0,
+          "confidence_terms": {
+            "base": 0.8
+          },
+          "thresholds": {
+            "color_tol": 60.0,
+            "min_area": 25.0,
+            "shift_frac_diag": 0.02,
+            "aspect_change": 0.4,
+            "area_change": 0.5,
+            "sample_k": 5.0,
+            "noise_median_abs_diff": 12.0,
+            "base_confidence": 0.8,
+            "confidence_min": 0.05,
+            "confidence_max": 0.9,
+            "gray_diff": 25.0,
+            "unseg_shift_frac": 0.05,
+            "unseg_confidence": 0.3,
+            "unseg_confidence_max": 0.35
+          }
+        },
+        "notes": [
+          "occlusion_risk is the WEAK proxy (no expected_final given): the acted object's visible-area loss between first and last frame, which also fires when it simply moves out of frame or turns a smaller face to the camera.",
+          "no next-action target given, so accessibility_risk is a fallback of 0.5 * occlusion_risk and carries no independent information.",
+          "Visual proxies from a learned rollout, one viewpoint, image pixels only: a ranking hint, never a feasibility gate -- physics decides validity (PAN.md \u00a76)."
+        ]
+      },
+      "score_components": {
+        "geometry_score": 1.0,
+        "stability_score": 1.0,
+        "pan_risk": 0.0,
+        "execution_risk_weight": 0.5,
+        "total": 2.0
+      }
+    },
+    {
+      "candidate_id": "C",
+      "label": "camera on laptop",
+      "physics_status": "invalid",
+      "simulation_status": "unavailable",
+      "execution_risk": null,
+      "action_text": "A traveler picks up the mirrorless camera, currently outside the suitcase to the right of it, and places it on top of the 13-inch laptop in the rear-left corner, laid flat. The other objects remain in their current positions.",
+      "pan_preview_video": null,
+      "pan_final_frame": null,
+      "risk_metadata": null,
+      "score_components": {
+        "geometry_score": 0.9487179487179487,
+        "stability_score": 1.0,
+        "pan_risk": null,
+        "execution_risk_weight": 0.5,
+        "total": 1.9487179487179487
+      }
+    }
+  ]
+}

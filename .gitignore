@@ -1,23 +1,26 @@
-# personal / local
 CLAUDE.local.md
-.claude/settings.local.json
-.DS_Store
-
-# Xcode (project is regenerated from project.yml with `xcodegen`)
 *.xcodeproj
-*.xcworkspace
 xcuserdata/
 DerivedData/
+.build/
+.DS_Store
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.pan_cache/
+out/
+.playwright-mcp/
+graphify-out/cache/
+# personal / local
+.claude/settings.local.json
+# Xcode (project is regenerated from project.yml with `xcodegen`)
+*.xcworkspace
 *.xcarchive
 *.ipa
 *.dSYM*
-
 # Swift build output
-.build/
 .swiftpm/
-
 # Python
 .venv/
-__pycache__/
-.env
-.env.*

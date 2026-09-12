@@ -122,22 +122,21 @@ if __name__ == "__main__":
 
 
 class TestNesting(unittest.TestCase):
-    """`nestedIn` is copied from the solver's `nested_in`, never inferred from overlapping boxes."""
+    """`nestedIn` is copied from the solver's `nested_in` (host + cavity), never inferred from boxes."""
 
-    def test_solver_nesting_is_copied_and_cavity_converted_to_bag_frame(self):
+    def test_solver_nesting_is_copied_with_the_cavity_in_bag_frame(self):
         result = {"placements": [
             {"item_id": "bowl", "position": [0, 0, 0], "dims": [0.3, 0.3, 0.1], "orientation": "xyz"},
             {"item_id": "cup", "position": [0.1, 0.1, 0.02], "dims": [0.08, 0.08, 0.07], "orientation": "xyz",
              "nested_in": {"item_id": "bowl", "position": [0.05, 0.05, 0.02], "dims": [0.2, 0.2, 0.08]}},
             {"item_id": "spoon", "position": [0.1, 0.1, 0.02], "dims": [0.02, 0.1, 0.01], "orientation": "xyz",
-             "nested_in": "bowl"},
+             "nested_in": "bowl"},  # host without its cavity box: not checkable, so not emitted
         ]}
         by_id = {q["itemId"]: q for q in to_app_plan(result, {"_id": "s", "dimensions": [1, 1, 1]}, {})["placements"]}
-        self.assertEqual(by_id["cup"]["nestedIn"], "bowl")
-        self.assertEqual(by_id["cup"]["cavity"], {"position": {"x": 0.05, "y": 0.02, "z": 0.05},
-                                                  "size": {"x": 0.2, "y": 0.08, "z": 0.2}})
-        self.assertEqual(by_id["spoon"]["nestedIn"], "bowl")
-        self.assertNotIn("cavity", by_id["spoon"])
+        self.assertEqual(by_id["cup"]["nestedIn"], {"itemId": "bowl",
+                                                    "cavity": {"position": {"x": 0.05, "y": 0.02, "z": 0.05},
+                                                               "size": {"x": 0.2, "y": 0.08, "z": 0.2}}})
+        self.assertIsNone(by_id["spoon"]["nestedIn"])
         self.assertIsNone(by_id["bowl"]["nestedIn"])
 
     def test_overlapping_boxes_without_solver_nesting_stay_unnested(self):

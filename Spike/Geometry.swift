@@ -221,7 +221,23 @@ func connectedCluster(_ points: [SIMD3<Float>], seed: SIMD3<Float>, cell radius:
         } }
         return false
     }
-    var frontier = [key(seed)], seen = Set(frontier), out: [SIMD3<Float>] = []
+    // The seed is a raycast hit, not a mesh sample: a tap a centimetre outside the silhouette, or
+    // in a hole in the mesh, lands in an empty bucket. Start from the nearest occupied bucket in
+    // the 3×3 window around it (within `radius`, like every other link here), which is the
+    // tolerance the old occupancy flood had by expanding that window unconditionally.
+    var start = key(seed)
+    if grid[start] == nil {
+        var best: (key: Key, d2: Float)?
+        for ci in -1...1 { for cj in -1...1 {
+            let n = Key(x: start.x + ci, z: start.z + cj)
+            guard let pts = grid[n] else { continue }
+            let d2 = pts.map { let dx = $0.x - seed.x, dz = $0.z - seed.z; return dx * dx + dz * dz }.min()!
+            if d2 <= r2, best.map({ d2 < $0.d2 }) ?? true { best = (n, d2) }
+        } }
+        guard let best else { return [] }
+        start = best.key
+    }
+    var frontier = [start], seen = Set(frontier), out: [SIMD3<Float>] = []
     while let k = frontier.popLast() {
         guard let here = grid[k] else { continue }
         out += here

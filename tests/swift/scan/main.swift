@@ -126,6 +126,23 @@ record("long object (50 cm, one tap)", "\(longPts.count) pts kept",
        "\(longCluster.count) pts kept", longCluster.count == longPts.count ? "-" : "fragmented")
 check(longCluster.count == longPts.count, "long object fragmented: \(longCluster.count)/\(longPts.count)")
 
+// An edge tap. The seed is ScanView's estimatedPlane raycast hit, which lands where the finger
+// pointed, not on a mesh sample: a centimetre outside the object's silhouette (or in a hole in
+// the mesh) puts it in a grid bucket with no points at all. The flood must still start from the
+// object next to it, as the old occupancy flood did by expanding the seed's 3×3 window
+// unconditionally; without that a tap near the edge of a small item measures nothing.
+let edgePts = scan(boxTris(0.20, 0.10, 0.05, at: SIMD2(1.0, 2.0), yaw: 0, planeY: planeY), planeY: planeY)
+for (dx, dz, where_) in [(Float(0.11), Float(0), "1 cm past the end"), (0, 0.06, "1 cm past the side"),
+                         (0.105, 0.055, "1 cm off the corner"), (0.119, 0, "just inside the 2 cm reach")] {
+    let edge = connectedCluster(edgePts, seed: SIMD3(1.0 + dx, planeY + 0.05, 2.0 + dz), cell: clusterCellMeters)
+    record("edge tap \(where_)", "the whole box", "\(edge.count) pts", edge.count == edgePts.count ? "-" : "PARTIAL")
+    check(edge.count == edgePts.count, "edge tap \(where_): \(edge.count)/\(edgePts.count) pts; the seed bucket was empty and the flood gave up")
+}
+// Further than the cluster radius from anything is still nothing: a tap on the empty table
+// must not measure the nearest object across the gap.
+let farOff = connectedCluster(edgePts, seed: SIMD3(1.0 + 0.10 + 0.03, planeY + 0.05, 2.0), cell: clusterCellMeters)
+check(farOff.isEmpty, "a tap 3 cm past the object measured \(farOff.count) pts of it")
+
 // --- 3. L-shape and an open-top box --------------------------------------------------------
 let ell = tap(boxTris(0.20, 0.10, 0.05, at: SIMD2(1.0, 1.95), yaw: 0, planeY: planeY)
               + boxTris(0.10, 0.10, 0.05, at: SIMD2(0.95, 2.05), yaw: 0, planeY: planeY),

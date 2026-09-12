@@ -1,0 +1,170 @@
+{
+  "container": {
+    "id": "checked_30in_interior",
+    "shape": "box",
+    "dims": [0.75, 0.48, 0.31],
+    "gravity": true,
+    "max_mass": 23.0,
+    "min_support": 0.6
+  },
+  "items": [
+    {
+      "id": "nalgene_1l_wide_mouth",
+      "shape": "cylinder",
+      "radius": 0.0445,
+      "height": 0.215,
+      "mass": 0.178,
+      "keepUpright": true,
+      "allow_lay_down": false
+    },
+    {
+      "id": "hydroflask_32oz",
+      "shape": "cylinder",
+      "radius": 0.044,
+      "height": 0.274,
+      "mass": 0.44,
+      "keepUpright": true,
+      "allow_lay_down": false
+    },
+    {
+      "id": "french_press_bodum_1l",
+      "shape": "cylinder",
+      "radius": 0.051,
+      "height": 0.235,
+      "mass": 0.9,
+      "fragile": true,
+      "keepUpright": true,
+      "allow_lay_down": false,
+      "priority": 2
+    },
+    {
+      "id": "wine_bottle_750ml",
+      "shape": "cylinder",
+      "radius": 0.0375,
+      "height": 0.305,
+      "mass": 1.25,
+      "fragile": true,
+      "keepUpright": true,
+      "allow_lay_down": false,
+      "priority": 2
+    },
+    {
+      "id": "olive_oil_tin_1l",
+      "shape": "box",
+      "dims": [0.085, 0.085, 0.245],
+      "mass": 1.05,
+      "rigidity": "rigid",
+      "keepUpright": true
+    },
+    {
+      "id": "hand_grinder_comandante",
+      "shape": "cylinder",
+      "radius": 0.0235,
+      "height": 0.158,
+      "mass": 0.63,
+      "keepUpright": true,
+      "allow_lay_down": false
+    },
+    {
+      "id": "toiletry_bottle_250ml",
+      "shape": "cylinder",
+      "radius": 0.03,
+      "height": 0.17,
+      "mass": 0.28,
+      "keepUpright": true,
+      "allow_lay_down": false,
+      "count": 3
+    },
+    {
+      "id": "thermos_food_jar_16oz",
+      "shape": "cylinder",
+      "radius": 0.048,
+      "height": 0.15,
+      "mass": 0.4,
+      "keepUpright": true,
+      "allow_lay_down": false
+    },
+    {
+      "id": "moka_pot_6cup_boxed",
+      "shape": "box",
+      "dims": [0.155, 0.115, 0.215],
+      "mass": 0.85,
+      "rigidity": "rigid",
+      "keepUpright": true
+    },
+    {
+      "id": "packing_cube_half_full",
+      "width": 35,
+      "depth": 25,
+      "height": 12,
+      "cellSize": 2.5,
+      "heights": [
+        [12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0],
+        [12.0, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 8.5, 10.5, 12.0],
+        [12.0, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 10.5, 12.0],
+        [12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0]
+      ],
+      "mass": 1.85,
+      "fragile": false
+    },
+    {
+      "id": "wool_sweater",
+      "shape": "box",
+      "dims": [0.32, 0.26, 0.08],
+      "mass": 0.45,
+      "rigidity": "soft",
+      "compressibility": 2.0,
+      "count": 2
+    },
+    {
+      "id": "tshirt_folded",
+      "shape": "box",
+      "dims": [0.25, 0.2, 0.03],
+      "mass": 0.15,
+      "rigidity": "soft",
+      "compressibility": 1.8,
+      "count": 4
+    },
+    {
+      "id": "socks_bundle",
+      "shape": "box",
+      "dims": [0.11, 0.09, 0.07],
+      "mass": 0.08,
+      "rigidity": "soft",
+      "compressibility": 2.0,
+      "count": 6
+    },
+    {
+      "id": "jeans_folded",
+      "shape": "box",
+      "dims": [0.33, 0.28, 0.05],
+      "mass": 0.62,
+      "rigidity": "soft",
+      "compressibility": 1.6
+    },
+    {
+      "id": "towel_rolled",
+      "shape": "box",
+      "dims": [0.3, 0.15, 0.15],
+      "mass": 0.42,
+      "rigidity": "soft",
+      "compressibility": 2.5
+    }
+  ],
+  "optimizer": {
+    "time_budget_s": 6,
+    "seed": 0
+  },
+  "weights": {
+    "unpacked": 10,
+    "compact": 1,
+    "com": 8,
+    "height": 0.5
+  }
+}

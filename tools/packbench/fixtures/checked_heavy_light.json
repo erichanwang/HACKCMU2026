@@ -1,0 +1,150 @@
+{
+  "container": {
+    "id": "checked_29in_interior",
+    "shape": "box",
+    "dims": [0.72, 0.46, 0.29],
+    "gravity": true,
+    "max_mass": 23.0,
+    "min_support": 0.6
+  },
+  "items": [
+    {
+      "id": "boot_left_dm1460",
+      "width": 30,
+      "depth": 12,
+      "height": 17,
+      "cellSize": 2,
+      "heights": [
+        [5.0, 5.0, 6.5, 6.5, 6.5, 6.5, 10.0, 10.0, 10.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0],
+        [7.0, 7.0, 8.0, 8.0, 8.0, 8.0, 9.0, 9.0, 9.0, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5],
+        [7.0, 7.0, 8.0, 8.0, 8.0, 8.0, 9.0, 9.0, 9.0, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5],
+        [7.0, 7.0, 8.0, 8.0, 8.0, 8.0, 9.0, 9.0, 9.0, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5],
+        [7.0, 7.0, 8.0, 8.0, 8.0, 8.0, 9.0, 9.0, 9.0, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5],
+        [5.0, 5.0, 6.5, 6.5, 6.5, 6.5, 10.0, 10.0, 10.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0]
+      ],
+      "mass": 0.86,
+      "fragile": false,
+      "keepUpright": true
+    },
+    {
+      "id": "boot_right_dm1460",
+      "width": 30,
+      "depth": 12,
+      "height": 17,
+      "cellSize": 2,
+      "heights": [
+        [5.0, 5.0, 6.5, 6.5, 6.5, 6.5, 10.0, 10.0, 10.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0],
+        [7.0, 7.0, 8.0, 8.0, 8.0, 8.0, 9.0, 9.0, 9.0, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5],
+        [7.0, 7.0, 8.0, 8.0, 8.0, 8.0, 9.0, 9.0, 9.0, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5],
+        [7.0, 7.0, 8.0, 8.0, 8.0, 8.0, 9.0, 9.0, 9.0, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5],
+        [7.0, 7.0, 8.0, 8.0, 8.0, 8.0, 9.0, 9.0, 9.0, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5],
+        [5.0, 5.0, 6.5, 6.5, 6.5, 6.5, 10.0, 10.0, 10.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0]
+      ],
+      "mass": 0.86,
+      "fragile": false,
+      "keepUpright": true
+    },
+    {
+      "id": "duvet_jacket_loose",
+      "shape": "box",
+      "dims": [0.42, 0.32, 0.24],
+      "mass": 0.48,
+      "rigidity": "soft",
+      "compressibility": 4.0
+    },
+    {
+      "id": "down_sleeping_bag",
+      "shape": "box",
+      "dims": [0.35, 0.22, 0.22],
+      "mass": 0.95,
+      "rigidity": "soft",
+      "compressibility": 3.0
+    },
+    {
+      "id": "climbing_rope_60m",
+      "shape": "box",
+      "dims": [0.36, 0.36, 0.14],
+      "mass": 4.1,
+      "rigidity": "rigid"
+    },
+    {
+      "id": "laptop_macbook_pro_16",
+      "shape": "box",
+      "dims": [0.3557, 0.2481, 0.0168],
+      "mass": 2.15,
+      "rigidity": "rigid",
+      "fragile": true,
+      "priority": 3
+    },
+    {
+      "id": "book_hardcover",
+      "shape": "box",
+      "dims": [0.24, 0.16, 0.035],
+      "mass": 0.62,
+      "rigidity": "rigid",
+      "count": 3,
+      "priority": 0.6
+    },
+    {
+      "id": "wash_bag_full",
+      "shape": "box",
+      "dims": [0.28, 0.15, 0.14],
+      "mass": 1.6,
+      "rigidity": "rigid"
+    },
+    {
+      "id": "power_bank_26k",
+      "shape": "box",
+      "dims": [0.16, 0.08, 0.025],
+      "mass": 0.58,
+      "rigidity": "rigid",
+      "priority": 2
+    },
+    {
+      "id": "trainers_in_shoe_bag",
+      "shape": "box",
+      "dims": [0.32, 0.22, 0.13],
+      "mass": 0.64,
+      "rigidity": "rigid"
+    },
+    {
+      "id": "wool_sweater",
+      "shape": "box",
+      "dims": [0.32, 0.26, 0.08],
+      "mass": 0.45,
+      "rigidity": "soft",
+      "compressibility": 2.0,
+      "count": 2
+    },
+    {
+      "id": "jeans_folded",
+      "shape": "box",
+      "dims": [0.33, 0.28, 0.05],
+      "mass": 0.62,
+      "rigidity": "soft",
+      "compressibility": 1.6,
+      "count": 2
+    },
+    {
+      "id": "tshirt_folded",
+      "shape": "box",
+      "dims": [0.25, 0.2, 0.03],
+      "mass": 0.15,
+      "rigidity": "soft",
+      "compressibility": 1.8,
+      "count": 4
+    },
+    {
+      "id": "towel_rolled",
+      "shape": "box",
+      "dims": [0.3, 0.15, 0.15],
+      "mass": 0.42,
+      "rigidity": "soft",
+      "compressibility": 2.5
+    }
+  ],
+  "optimizer": {
+    "time_budget_s": 6,
+    "seed": 0
+  }
+}

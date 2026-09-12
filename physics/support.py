@@ -53,6 +53,16 @@ approximation this replaced):
 - No support at all (empty support polygon) reports
   `stability_margin_m = FLOATING_MARGIN_SENTINEL_M` rather than a real
   distance.
+- BRIDGING: the support polygon is a hull, so it spans the void between two
+  separated supporters -- correct rigid-body statics (a plank on two bricks
+  with its COM between them does not topple) but it hides a real-world risk,
+  because the void's "supporters" out here are shoes and soft bags that sag.
+  `com_over_patch` is the extra bit: True when the COM projection lies inside
+  (or within `TOUCH_TOL_M` of) at least ONE individual contact patch, False
+  when it is only inside the hull of several. So a laptop bridging two shoes
+  reads `unstable=False, com_over_patch=False` -- statically fine, resting on
+  nothing. `unstable and not com_over_patch` is just an overhang; the
+  interesting case is `not unstable and not com_over_patch`.
 - CHAIN INSTABILITY: `supported_by_unstable` is True when any object this one
   rests on is itself `floating`, `unstable`, or `supported_by_unstable`.
   Computed bottom-up in ascending `aabb_min.y` order (a supporter always has a
@@ -121,6 +131,9 @@ class SupportResult:
     contact_polygon: list[list[float]] = field(default_factory=list)
     # supporter id ("container_floor" included) -> contact patch area m^2.
     patch_areas_m2: dict[str, float] = field(default_factory=dict)
+    # True when the COM projects into one actual contact patch, not merely into
+    # the hull of several. False + unstable=False == bridging a void.
+    com_over_patch: bool = False
 
 
 def _cross(o: Pt, a: Pt, b: Pt) -> float:
@@ -432,15 +445,19 @@ def check_support(
         )
         candidates += [(geom.ids[j], top_hulls[j], False) for j in sorted(supporters[i])]
 
+        com = centers_xz[i]
         names: list[str] = []
         patch_areas: dict[str, float] = {}
         patch_vertices: list[Pt] = []
         covered = 0.0
+        com_over_patch = False
         point_supported = [False] * len(bottom_pts[i]) if degenerate else []
         for name, top_hull, uncut in candidates:
             patch = bottom_hull if uncut else _clip(bottom_hull, top_hull)
             if not patch:
                 continue
+            if not com_over_patch and _signed_dist(com, patch) >= -TOUCH_TOL_M:
+                com_over_patch = True
             names.append(name)
             # An uncut patch IS the bottom footprint, area included.
             area = bottom_area if patch is bottom_hull else _poly_area(patch)
@@ -467,7 +484,6 @@ def check_support(
         else:
             support_polygon = _hull(patch_vertices)
         if support_polygon:
-            com = centers_xz[i]
             margin = _signed_dist(com, support_polygon)
             if -TOUCH_TOL_M < margin < 0.0:
                 margin = 0.0  # COM on the boundary counts as supported
@@ -484,6 +500,7 @@ def check_support(
                 unstable=margin < 0,
                 contact_polygon=[list(p) for p in support_polygon],
                 patch_areas_m2=patch_areas,
+                com_over_patch=com_over_patch,
             )
         )
 

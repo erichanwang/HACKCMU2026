@@ -45,17 +45,26 @@ against the code on `loop` today (grep or read), not carried over from the morni
 
 ## 4. Missing versus the spec
 
-- **Cavity nesting does not fire in a real solve.** `tests/plan_contract/make_plan.py`'s forcing
-  scenario (a 0.24 x 0.10 x 0.24 bag, an open box 0.22 x 0.08 x 0.22 with a 3 cm rim, socks
-  0.1 x 0.04 x 0.1 that fit nowhere but the cavity) leaves the socks unpacked on `loop`, on
-  7358c16 and on 7358c16~1 alike, for both `pack_naive` and `pack_optimized`; so the decoder's
-  cavity search (875137d, `decoder.py:391-452`) never places into this cavity and no real plan has
-  carried `nestedIn` yet. The wire path is ready: `Placement.nested_in`
-  is set by the decoder from what it actually did and `to_dict()` emits `{item_id, position, dims}`,
-  which `server/app_plan.py::_nesting` copies into `nestedIn` + `cavity`; `packing-core`'s overlap
-  check and `ar_sim.py` honour it. What is left: see it once on a phone with a real open shoe or
-  dopp kit (the Linux proof is `tests/plan_contract/run.sh`'s bowl fixture and 8a's
-  `nested-plan.json`).
+- **Cavity nesting is unreachable for an open-topped scan** (root-caused by 8a, 12 Sep).
+  `tests/plan_contract/make_plan.py`'s forcing scenario (a 0.24 x 0.10 x 0.24 bag, an open box
+  0.22 x 0.08 x 0.22 with a 3 cm rim, socks 0.1 x 0.04 x 0.1 that fit nowhere but the cavity)
+  leaves the socks unpacked on `loop`. Not because the decoder can't nest — with `fragile: False`
+  on the box the same fixture places the socks and emits `nested_in` — but because two defaults
+  collide: a scan with a real cavity has volume / bbox < 0.9, so
+  `Item.from_scanned_heightmap` classifies it `irregular`; `irregular` defaults to
+  `fragile=True` ("don't stack on it"); and `decoder.py`'s fragile-below rule then rejects any
+  candidate resting on a fragile solid — the cavity floor included. `physics/prepack.packable`
+  only ever sets `fragile`, never clears it, so no SCAN_OUTPUT document gets past this. Nesting
+  does fire today for a box-classified host with a small recess (`tools/pipeline_check/
+  check_seams.py`, six assertions end to end against `planner.plan()`). The wire path is ready:
+  `Placement.nested_in` → `to_dict()` `{item_id, position, dims}` → `server/app_plan.py::_nesting`
+  → `nestedIn` + `cavity`, honoured by `packing-core`'s overlap check and `ar_sim.py`. The fix
+  is a judgement call in `packer3d` (8a's): distinguish resting *inside* a cavity from resting
+  *on* a top, classify a large single recess as a container, or let a cavity floor be
+  non-fragile. Second trap from the same investigation: `solid_boxes` max-pools `heights` into
+  4x4 blocks, so a recess that isn't a whole number of blocks vanishes and the host has no cavity
+  at all — a shoe at 1 cm cells may hit this, which would read as intermittent nesting.
+  `tests/plan_contract/run.sh` keeps its WARN (not `exit 1`) until the decoder decision lands.
 - **Folding exists but isn't used.** `physics/prepack.py:71`'s `fold_options` (flat / half-fold /
   rolled candidate boxes, real logic, tested in `tests/test_folding.py`) is computed for every
   soft item and attached to its scenario dict via `prepare_items` → `packable` — but nothing in

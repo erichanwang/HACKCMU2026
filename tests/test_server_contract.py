@@ -122,6 +122,15 @@ class ServerContractTests(unittest.TestCase):
             self.assertIn(pl["zone"], zone_ids)
             self.assertEqual(set(pl["position"]), {"x", "y", "z"})
             self.assertEqual(set(pl["size"]), {"x", "y", "z"})
+            # nesting is advisory but must never dangle: a host must be a placement in this plan,
+            # and a cavity box only makes sense with a host
+            self.assertIn("nestedIn", pl)
+            if pl["nestedIn"] is not None:
+                self.assertIn(pl["nestedIn"], {q["itemId"] for q in p["placements"]})
+                self.assertNotEqual(pl["nestedIn"], pl["itemId"])
+            if pl.get("cavity") is not None:
+                self.assertIsNotNone(pl["nestedIn"])
+                self.assertEqual(set(pl["cavity"]), {"position", "size"})
 
     # --- (3) re-uploading the same item id replaces, not duplicates -----------------------
 

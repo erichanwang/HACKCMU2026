@@ -39,6 +39,10 @@ the fixes. `swift build -c release`, clean tree: **0 warnings** (library + `pack
    (`die("--objects requires a positive integer", code: 2)`). Only `Int(Double)` in the package; library code
    has none.
 
+5. **Box-only port.** `swift/PackPhysics` now has convex-prism footprint parity with the Python
+   validator (ff9673c; see `docs/SWIFT_PORT.md`, "Prism footprints"); the differential test that
+   documented the divergence now asserts agreement.
+
 ## Verified clean
 
 5. **No Apple-only APIs.** No `import simd`/`simd_*`/`CGFloat`/`CGPoint`/`Darwin`/`os.log`/`DispatchQueue`/

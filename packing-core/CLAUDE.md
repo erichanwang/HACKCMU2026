@@ -144,6 +144,41 @@ The plan is the contract between solver and app. The models live in
   identical for a symmetric box.
 - `step` is 1-based and must form `1...n` with no gaps or repeats; the loader enforces this.
 - `note` is one short presentation-only line. Never parse it.
+- `nestedIn` is optional and describes an item the solver deliberately placed **inside
+  another item's scanned cavity** — socks in a shoe, a charger in the dip of a dopp kit.
+  See below; absent or `null` means not nested, which is the common case.
+
+### Nested placements
+
+```json
+"nestedIn": { "itemId": "dopp-kit",
+              "cavity": { "position": { "x": 0.12, "y": 0.02, "z": 0.30 },
+                          "size":     { "x": 0.08, "y": 0.04, "z": 0.10 } } }
+```
+
+Two items' boxes may legitimately intersect when one sits in the other's cavity, so a
+consumer that treats every item as one solid box reports a correct plan as an overlap.
+`nestedIn` names the host and the **specific cavity cell**, in bag frame, min corner plus
+full extent like every other box here. A host can have several cavity cells and "may these
+two overlap" has a different answer in each, which is why the cell travels with the field
+instead of just the host's id.
+
+The field is an **assertion the solver has already checked** against its own solid
+decomposition (`packer3d`'s `verify()` is the authority; `server/app_plan.py` copies it
+verbatim and infers nothing — deriving nesting from "these boxes intersect" would relabel
+any overlap the validator missed as legitimate and hide it).
+
+Consumers trust it anyway, but verify the cell rather than the pair:
+
+- intersection between a nested item and its host is permitted **only inside `cavity`**.
+  Overlap anywhere outside it is still an overlap and is still reported. That is the line
+  between a feature and a suppressed collision.
+- the host's cavity counts as support for the nested item, so it does not read as floating.
+- absent, `null`, an `itemId` not in the plan, a self-reference and a cycle are all treated
+  as not nested. A dangling `itemId` additionally raises its own geometry issue — silently
+  ignoring it would hide a producer bug.
+- a host with no cavity cell is never representable: the producer emits `null` rather than
+  a `nestedIn` the consumer cannot check.
 
 ### Loading vs validating
 

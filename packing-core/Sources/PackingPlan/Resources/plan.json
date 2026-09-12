@@ -4,12 +4,17 @@
     "Bag frame: origin at the inner floor corner of the interior; X = width, Y = up, Z = depth.",
     "Demo suitcase interior is 16 x 6 x 24 in => 0.4064 x 0.1524 x 0.6096 m, so every placement satisfies",
     "0 <= position and position + size <= (0.4064, 0.1524, 0.6096).",
-    "The cavity is only 15.24 cm tall, so this is a two-layer bag, not three. Layout:",
+    "The cavity is only 15.24 cm tall. Layout:",
     "  end-well  Z 0.00-0.17, full height  - shoes and the dopp kit stand upright in the short end.",
-    "  base      Z 0.17-0.6096, Y 0.00-0.075  - flat soft goods.",
-    "  upper     Z 0.17-0.6096, Y 0.075-0.1524 - second layer over the base.",
-    "The three zones are disjoint. Every pair of items is separated on at least one axis; the shoes and the",
-    "dopp kit touch at X = 0.30, which is contact, not overlap."
+    "  base      Z 0.17-0.6096, Y 0.00-0.075  - flat soft goods on the bag floor.",
+    "  upper     Z 0.17-0.6096, Y 0.035-0.1524 - what is stacked on the base, from the top of the jeans up.",
+    "Every item rests on the floor or on the item beneath it: the shirts sit on the jeans (top Y = 0.035)",
+    "and the laptop sits on the shirts (top Y = 0.08), concentric with them so nothing is cantilevered off",
+    "its support. Nothing hangs in mid-air, so stabilityIssues() is empty as well as geometryIssues().",
+    "The base and upper zones therefore overlap in Y 0.035-0.075: the base layer is not uniformly thick",
+    "(jeans 3.5 cm, sweater roll 7 cm), so no single flat shelf height exists. Zones name where a thing",
+    "goes; the item boxes are what must not collide, and no pair of them does - the shoes and the dopp kit",
+    "touch at X = 0.30, which is contact, not overlap."
   ],
   "version": 1,
   "units": "meters",
@@ -33,8 +38,8 @@
       {
         "id": "upper",
         "label": "Upper layer",
-        "origin": { "x": 0.0000, "y": 0.0750, "z": 0.1700 },
-        "size":   { "x": 0.4064, "y": 0.0774, "z": 0.4396 }
+        "origin": { "x": 0.0000, "y": 0.0350, "z": 0.1700 },
+        "size":   { "x": 0.4064, "y": 0.1174, "z": 0.4396 }
       }
     ]
   },
@@ -84,7 +89,7 @@
       "itemId": "shirt-stack",
       "label": "Stack of shirts",
       "zone": "upper",
-      "position": { "x": 0.0200, "y": 0.0750, "z": 0.1900 },
+      "position": { "x": 0.0200, "y": 0.0350, "z": 0.2300 },
       "size":     { "x": 0.3000, "y": 0.0450, "z": 0.1600 },
       "rotation": "XYZ",
       "note": "Second layer, resting on the jeans with the folded edges outward."
@@ -94,10 +99,10 @@
       "itemId": "laptop-sleeve",
       "label": "Laptop sleeve",
       "zone": "upper",
-      "position": { "x": 0.0250, "y": 0.0750, "z": 0.3600 },
+      "position": { "x": 0.0250, "y": 0.0800, "z": 0.1900 },
       "size":     { "x": 0.3550, "y": 0.0300, "z": 0.2400 },
       "rotation": "XYZ",
-      "note": "Flat on the very top so it comes out first at security."
+      "note": "Flat on top of the shirt stack, last in so it comes out first at security."
     }
   ]
 }

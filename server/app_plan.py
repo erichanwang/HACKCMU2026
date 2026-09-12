@@ -45,6 +45,23 @@ def _v(x, y, z) -> dict:
     return {"x": float(x), "y": float(y), "z": float(z)}
 
 
+def _nesting(p: dict) -> dict:
+    """`nestedIn` for one placement, copied from the solver's own `nested_in` (the decoder knows
+    when it placed an item into another item's scanned cavity; nothing is inferred here, since
+    inferring it from overlapping boxes would relabel a missed collision as nesting).
+
+    Contract (agreed with packing-core): `{"itemId": <host>, "cavity": {"position", "size"}}` with the
+    host's cavity sub-box in bag frame (min corner + extent, like a placement), or null. The cavity
+    is required, so a consumer allows overlap only inside that cell and stays strict elsewhere;
+    a solver nesting record without its cavity box is emitted as null, not as a bare host id."""
+    n = p.get("nested_in")
+    if not isinstance(n, dict) or not n.get("item_id") or n.get("position") is None or n.get("dims") is None:
+        return {"nestedIn": None}
+    x, y, z = n["position"]
+    dx, dy, dz = n["dims"]
+    return {"nestedIn": {"itemId": n["item_id"], "cavity": {"position": _v(x, z, y), "size": _v(dx, dz, dy)}}}
+
+
 def to_app_plan(result: dict, suitcase: dict, items_by_id: dict) -> dict:
     """`PackResult.to_dict()` -> a `PackingPlan` JSON document for the app.
 
@@ -66,6 +83,7 @@ def to_app_plan(result: dict, suitcase: dict, items_by_id: dict) -> dict:
             "size": _v(dx, dz, dy),
             "rotation": _ROTATION.get(p.get("orientation"), "XYZ"),
             "note": item.get("description") or "",
+            **_nesting(p),
         })
     return {
         "version": 1,

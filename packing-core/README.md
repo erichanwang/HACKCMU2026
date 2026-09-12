@@ -115,7 +115,8 @@ commit the SVGs.
 ## The bundled demo plan
 
 `Sources/PackingPlan/Resources/plan.json` is the hand-authored demo carry-on (0.4064 ×
-0.1524 × 0.6096 m, six items, three disjoint zones). Every `#Preview` renders it,
+0.1524 × 0.6096 m, six items, three zones — `base` and `upper` overlap in Y, see
+CLAUDE.md). Every `#Preview` renders it,
 `PlanLoader.mockPlan()` loads it, and the tests assert it is both geometrically clean and
 free of stability issues (`testMockPlanIsCleanAndStable`). That assertion is load-bearing:
 until today the shirts and the laptop floated in mid-air in it. If you edit the plan, that

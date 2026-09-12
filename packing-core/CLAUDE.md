@@ -97,7 +97,11 @@ center. Do not rotate the box and then re-derive `position`.
 The plan is the contract between solver and app. The models live in
 `Sources/PackingPlan/PackingPlan.swift`; a hand-authored reference plan is at
 `Sources/PackingPlan/Resources/plan.json` — the real demo suitcase interior,
-0.4064 × 0.1524 × 0.6096 m (16 × 6 × 24 in), with six items in three disjoint zones.
+0.4064 × 0.1524 × 0.6096 m (16 × 6 × 24 in), with six items in three zones. The `base` and
+`upper` zones overlap in Y, deliberately: the base layer is not uniformly thick (the jeans are
+3.5 cm, the sweater roll 7 cm), so there is no single shelf height that both base items fit
+under and an upper item can rest on. Nothing checks zone disjointness; placement boxes are
+what must not overlap, and they do not.
 
 ```json
 {

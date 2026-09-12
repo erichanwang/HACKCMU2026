@@ -24,8 +24,8 @@ Both flags on the second command are load-bearing:
   with no `XAI_API_KEY`, and then every scanned item comes back labelled `"unknown"`
   (`labelStatus: "pending"`) instead of being classified by Grok.
 - **`--host 0.0.0.0`** — the phone reaches the server over Wi-Fi, not localhost. Get the Mac's
-  address with `ipconfig getifaddr en0`, then tap the small URL button at the bottom of the
-  app's control panel and type it as `http://<ip>:8000`. It is kept in `UserDefaults`, so this
+  address with `ipconfig getifaddr en0`, then open the app's Settings sheet from the gear at the
+  top right and type it as `http://<ip>:8000`. It is kept in `UserDefaults`, so this
   survives a relaunch and needs no rebuild. Keep phone and Mac on the same network. (A
   `PACKAR_SERVER` scheme variable and a hard-coded fallback back it up, in that order — but
   neither can be changed while standing in a demo line, which is what the settings sheet is

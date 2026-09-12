@@ -271,7 +271,10 @@ public struct PlanDiagramView: View {
                 .foregroundStyle(.secondary)
             }
 
-            Text("Seen from above · X across, Z down · origin at top-left")
+            // Traveller-facing, not frame-facing: "X across, Z down" is true and useless to
+            // someone lining a real bag up with the picture. The long side running down the
+            // screen follows from Z being depth, which is the bag's longer axis.
+            Text("Seen from above · lay the bag with its long side running down the screen")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -311,12 +314,15 @@ struct PlanIssueBanner: View {
             }
         }
 
+        /// The leading word carries the verdict on its own: orange and yellow are close
+        /// together on a phone in daylight, and the glyph only reinforces what the word says.
         func title(count: Int) -> String {
             switch self {
             case .geometry:
-                return "\(count) geometry \(count == 1 ? "issue" : "issues") — this plan is wrong"
+                return "Wrong: \(count) geometry \(count == 1 ? "issue" : "issues") — "
+                    + "this plan cannot be packed as drawn"
             case .stability:
-                return "\(count) stability \(count == 1 ? "warning" : "warnings") — "
+                return "Unstable: \(count) stability \(count == 1 ? "warning" : "warnings") — "
                     + "this plan will not survive being carried"
             }
         }

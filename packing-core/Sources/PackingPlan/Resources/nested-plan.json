@@ -1,0 +1,57 @@
+{
+  "_comment": [
+    "Hand-authored nesting fixture: a cup standing in a bowl's scanned well. All values in METRES,",
+    "position is the MIN CORNER, bag frame X = width, Y = up, Z = depth — same rules as plan.json.",
+    "The bowl occupies X 0.05-0.25, Y 0.00-0.10, Z 0.05-0.25 as a solid box, but its scanned cavity",
+    "is the well X 0.08-0.22, Y 0.03-0.10, Z 0.08-0.22, and the cup stands on the floor of that well.",
+    "So the two boxes DO share volume (X 0.10-0.18, Y 0.03-0.10, Z 0.10-0.18) and that shared volume",
+    "lies entirely inside the cavity, which is what makes it nesting rather than a collision. The cup",
+    "is 0.09 tall and so pokes 0.02 above the bowl's rim; only the shared part must be in the cavity.",
+    "Clean on both geometryIssues() and stabilityIssues(): the cavity floor at Y = 0.03 holds the cup",
+    "up, so it is not floating, and its centre of mass is over the cavity footprint."
+  ],
+  "version": 1,
+  "units": "meters",
+  "container": {
+    "id": "nesting-demo",
+    "label": "Nesting demo interior (0.34 x 0.20 x 0.50 m)",
+    "dimensions": { "x": 0.3400, "y": 0.2000, "z": 0.5000 },
+    "zones": [
+      {
+        "id": "interior",
+        "label": "Interior",
+        "origin": { "x": 0.0000, "y": 0.0000, "z": 0.0000 },
+        "size":   { "x": 0.3400, "y": 0.2000, "z": 0.5000 }
+      }
+    ]
+  },
+  "placements": [
+    {
+      "step": 1,
+      "itemId": "bowl",
+      "label": "Mixing bowl",
+      "zone": "interior",
+      "position": { "x": 0.0500, "y": 0.0000, "z": 0.0500 },
+      "size":     { "x": 0.2000, "y": 0.1000, "z": 0.2000 },
+      "rotation": "XYZ",
+      "note": "Open side up, flat on the bag floor."
+    },
+    {
+      "step": 2,
+      "itemId": "cup",
+      "label": "Travel cup",
+      "zone": "interior",
+      "position": { "x": 0.1000, "y": 0.0300, "z": 0.1000 },
+      "size":     { "x": 0.0800, "y": 0.0900, "z": 0.0800 },
+      "rotation": "XYZ",
+      "note": "Stood upright in the middle of the bowl, resting on the bowl's inner floor.",
+      "nestedIn": {
+        "itemId": "bowl",
+        "cavity": {
+          "position": { "x": 0.0800, "y": 0.0300, "z": 0.0800 },
+          "size":     { "x": 0.1400, "y": 0.0700, "z": 0.1400 }
+        }
+      }
+    }
+  ]
+}

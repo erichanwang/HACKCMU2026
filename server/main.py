@@ -104,6 +104,8 @@ def detect(jpeg: bytes) -> dict:
     )
     r.raise_for_status()
     out = json.loads(r.json()["choices"][0]["message"]["content"])
+    if not isinstance(out, dict):  # a JSON array or bare string is garbage like any other bad answer
+        raise ValueError(f"expected a JSON object from Grok, got {type(out).__name__}")
     rigidity = out.get("rigidity") if out.get("rigidity") in RIGIDITIES else "rigid"
     try:
         mass = min(50.0, max(0.0, float(out.get("mass", 0))))

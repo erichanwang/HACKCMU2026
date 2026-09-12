@@ -100,9 +100,28 @@ assert main.db.items.find_one({"_id": "t1c"})["labelAttempts"] == main.LABEL_MAX
 main.db.items.update_one({"_id": "t1c"}, {"$set": {"labelStatus": "pending"}, "$unset": {"photo": ""}})
 assert main.relabel_pending() == 0 and c.get("/items/t1c").json()["labelStatus"] == "failed", "no photo, nothing to retry"
 
+# Grok answering with something that is not a JSON object is garbage like any other bad answer: the
+# scan must still be kept, the attempt must count, and the sweep must not abort on it and skip the
+# pending items queued behind it.
+def not_an_object(*_a, **_k):
+    return httpx.Response(200, request=httpx.Request("POST", "https://api.x.ai/v1/chat/completions"),
+                          json={"choices": [{"message": {"content": '[{"label": "a book"}]'}}]})
+
+with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "post", not_an_object):
+    r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1d"})}, files=img)
+    assert r.status_code == 200 and r.json()["labelStatus"] == "pending", r.text
+    with patch.object(main.httpx, "post", side_effect=httpx.ConnectError("down")):  # t1e queues behind t1d
+        assert c.post("/items", data={"item": json.dumps(bad | {"id": "t1e"})}, files=img).json()["labelStatus"] == "pending"
+    for _ in range(main.LABEL_MAX_ATTEMPTS):
+        assert main.relabel_pending() == 0
+assert c.get("/items/t1d").json()["labelStatus"] == "failed", "a non-object answer must count as a failed attempt"
+assert c.get("/items/t1e").json()["labelStatus"] == "failed", "an unreadable item must not block the ones behind it"
+
 assert c.delete("/items/t1b").json() == {"deleted": "t1b"}
 assert c.delete("/items/t1b").status_code == 404
 assert c.delete("/items/t1c").json() == {"deleted": "t1c"}
+assert c.delete("/items/t1d").json() == {"deleted": "t1d"}
+assert c.delete("/items/t1e").json() == {"deleted": "t1e"}
 
 items = c.get("/items").json()
 assert len(items) == 1 and items[0]["heights"] == [[0.1]] and "_id" not in items[0], items

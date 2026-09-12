@@ -39,11 +39,16 @@ retries, PATCH overrides) are visible in the inventory for free.
     place, else insert at index 0) and into `items` (replace in place, else append). The
     label polling in ScanView updates `item` again when Grok answers, so the same upsert
     refreshes the label.
-  - `Inventory (N)` button next to `Items (N)`, always enabled (no suitcase needed to look at
-    your things). Sheet lists `inventory` with the same rows as the Items sheet; swipe to
-    delete calls `API.delete(itemId:)`. Factor the row/list into one view used by both sheets
-    rather than copying it.
-  - `reset()` does not touch `inventory`.
+  - A backpack button (`backpack.fill`, 48 pt, count badge) floats over the panel's bottom-right
+    corner: the segmented picker makes the panel full-width, so that corner is the screen's.
+    It toggles `InventoryRings` (Spike/InventoryRings.swift): the inventory as concentric rings
+    of circles over the camera, one circle per item, ring k seating 6k items, each ring turning
+    once per `30 + 15k` s in alternating directions, frozen under Reduce Motion. Tapping a
+    circle sets `item` (the panel's ItemEditor then shows and edits it); tapping the backdrop or
+    the backpack closes the overlay. `ringSlots`/`ringSpin` are pure and checked on Linux by
+    tests/swift/rings.
+  - Deleting a row in the Items sheet also drops it from `inventory`, so the two counts agree.
+  - `reset()` does not touch `inventory`; the Reset dialog says the items stay.
 - `ScanView.swift` is not modified.
 
 ### Docs
@@ -60,9 +65,10 @@ retries, PATCH overrides) are visible in the inventory for free.
   first; as u2 it returns `[]`; after `DELETE /suitcases/{id}` the items are still in u1's
   inventory with `suitcaseId == None`, and the existing `GET /items?suitcaseId=` == `[]`
   assertion still holds.
-- Swift: `tests/swift/api/run.sh` (unchanged helpers still pass), `tests/swift/typecheck/run.sh`
-  (API.swift + Geometry.swift + ScanView.swift typecheck), `swiftc -parse Spike/SpikeApp.swift`.
-  The app itself builds only on the teammates' Macs.
+- Swift: `tests/swift/api/run.sh` (unchanged helpers still pass), `tests/swift/rings/run.sh`
+  (ring layout), `tests/swift/typecheck/run.sh` (API.swift + Geometry.swift + ScanView.swift
+  typecheck; SpikeApp.swift and InventoryRings.swift parse only). The app itself builds only on
+  the teammates' Macs.
 
 ## Known corner
 

@@ -206,10 +206,10 @@ def get_suitcase(suitcase_id: str):
 
 @app.delete("/suitcases/{suitcase_id}")
 def delete_suitcase(suitcase_id: str, user: str = Depends(current_user)):
-    """Remove a suitcase with its items and plan, so demo runs do not pile up."""
+    """Remove a suitcase and its plan; its items are detached, so they stay in the owner's inventory."""
     owned(db.suitcases.find_one({"_id": suitcase_id}), user)
     db.suitcases.delete_one({"_id": suitcase_id})
-    db.items.delete_many({"suitcaseId": suitcase_id})
+    db.items.update_many({"suitcaseId": suitcase_id}, {"$set": {"suitcaseId": None}})
     db.plans.delete_one({"_id": suitcase_id})
     return {"deleted": suitcase_id}
 
@@ -329,6 +329,12 @@ def update_item(item_id: str, patch: Patch, user: str = Depends(current_user)):
 @app.get("/items")
 def list_items(suitcaseId: str | None = None):
     return [public(d) for d in db.items.find({"suitcaseId": suitcaseId} if suitcaseId else {})]
+
+
+@app.get("/inventory")
+def list_inventory(user: str = Depends(current_user)):
+    """The caller's items across every suitcase, newest first; survives DELETE /suitcases."""
+    return [public(d) for d in db.items.find({"owner_id": user}).sort("createdAt", -1)]
 
 
 @app.get("/items/{item_id}")

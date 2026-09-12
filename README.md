@@ -39,12 +39,13 @@ Endpoints (port 8000):
 | `POST /suitcases` | JSON `{"name": …, "dimensions": [w, h, d]}` in metres. The container everything packs into. |
 | `GET /suitcases` | All suitcases, newest first. |
 | `GET /suitcases/{id}` | One suitcase plus its items. |
-| `DELETE /suitcases/{id}` | Drops the suitcase, its items and its plan. |
+| `DELETE /suitcases/{id}` | Drops the suitcase and its plan; its items are detached (`suitcaseId: null`) and stay in the owner's inventory. |
 | `POST /suitcases/{id}/plan` | Runs the solver + physics validation over that suitcase's items, stores the plan. |
 | `GET /suitcases/{id}/plan` | The stored plan (404 until you POST it). |
 | `POST /items` | multipart: `item` (ScannedItem JSON, **must include `suitcaseId`**) + `image` (JPEG, ≤10MB). Labels via Grok, stores, returns the item. |
 | `GET /items` | All items, or one suitcase's with `?suitcaseId=…`. |
 | `GET /items/{id}` | One item; the app polls this while `labelStatus` is `"pending"`. |
+| `GET /inventory` | Everything the signed-in user has scanned, across suitcases, newest first. Survives a suitcase delete. |
 | `PATCH /items/{id}` | JSON with any of `label`, `rigidity` (`rigid`/`soft`/`fragile`), `compressibility`, `mass`, `keepUpright` — user override. |
 | `DELETE /items/{id}` | Drops the item and invalidates the suitcase's stored plan. |
 

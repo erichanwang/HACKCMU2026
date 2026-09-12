@@ -14,6 +14,12 @@ cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0
 
 (`make mongo` / `make server` do the same two steps if `.env` is at the repo root.)
 
+For a repeatable plan on stage, launch the server as `PLAN_ITERATIONS=<N> make server` instead:
+with it set the solver does fixed work and the same scan gives the same plan; unset, the 3 s
+wall-clock budget applies and the plan varies with machine load. Set N to `stats.sa_iterations`
+from one normal run on the demo laptop (it depends on the laptop and its load, so measure it
+there, not here).
+
 Get the Mac's LAN IP and sanity-check the server before touching the phone:
 
 ```sh

@@ -169,6 +169,12 @@ r = c.patch("/items/t4", json={"mass": 1.5, "keepUpright": True}).json()
 assert r["mass"] == 1.5 and r["keepUpright"] is True, r
 assert c.patch("/items/t4", json={"mass": -1}).status_code == 422
 
+# the inventory is every item this user ever scanned, newest first, across all suitcases
+inv = c.get("/inventory").json()
+assert [i["id"] for i in inv] == ["t4", "t3", "t2", "t1"], inv
+assert [i["createdAt"] for i in inv] == sorted((i["createdAt"] for i in inv), reverse=True), inv
+assert all("photo" not in i and "_id" not in i for i in inv), inv
+
 r = c.post(f"/suitcases/{sc['id']}/plan")
 assert r.status_code == 200, r.text
 plan = r.json()
@@ -209,6 +215,9 @@ assert c.delete("/items/t4").json() == {"deleted": "t4"}
 assert c.get(f"/suitcases/{sc['id']}/plan").status_code == 404, "deleting an item drops the now-stale plan"
 assert c.delete(f"/suitcases/{sc['id']}").json() == {"deleted": sc["id"]}
 assert c.get(f"/suitcases/{sc['id']}").status_code == 404 and c.get("/items", params={"suitcaseId": sc["id"]}).json() == []
+inv = c.get("/inventory").json()  # the suitcase is gone; its items are detached, not deleted
+assert [i["id"] for i in inv] == ["t3", "t2", "t1"], inv
+assert all(i["suitcaseId"] is None for i in inv), inv
 assert c.delete(f"/suitcases/{sc['id']}").status_code == 404
 assert c.get("/suitcases").json() == [{k: v for k, v in empty.items()}], "only the untouched suitcase remains"
 assert main.db.users.find_one({"_id": "u1"})["email"] == "u1@example.com", "current_user must upsert a users doc"
@@ -222,11 +231,13 @@ assert r.status_code == 200 and c.delete(f"/suitcases/{r.json()['id']}").status_
 with patch.dict(os.environ, {"AUTH0_DOMAIN": "test-tenant.example.auth0.com", "AUTH0_AUDIENCE": "test-audience"}):
     assert c.post("/suitcases", json={"name": "x", "dimensions": [1, 1, 1]}).status_code == 401
     assert c.delete(f"/suitcases/{empty['id']}").status_code == 401
+    assert c.get("/inventory").status_code == 401, "the inventory is per-user, so it needs a token"
 main.app.dependency_overrides[auth.require_auth] = lambda: {"sub": "u1", "email": "u1@example.com"}
 
 main.app.dependency_overrides[auth.require_auth] = lambda: {"sub": "u2"}  # a different, authenticated user
 assert c.delete(f"/suitcases/{empty['id']}").status_code == 403, "u2 must not delete u1's suitcase"
 assert c.post(f"/suitcases/{empty['id']}/plan").status_code == 403
+assert c.get("/inventory").json() == [], "u2 has scanned nothing, and must not see u1's items"
 main.app.dependency_overrides[auth.require_auth] = lambda: {"sub": "u1", "email": "u1@example.com"}
 assert c.delete(f"/suitcases/{empty['id']}").json() == {"deleted": empty["id"]}, "u1 (the owner) may delete it"
 

@@ -194,6 +194,193 @@ final class PlanNestingTests: XCTestCase {
         XCTAssertEqual(intersections(withSpoon.geometryIssues(tolerance: tolerance)), [Set(["bowl", "spoon"])])
     }
 
+    // MARK: - The guest must rest on the floor it declares
+
+    /// The cavity used to only have to *exist*: a guest hanging in mid-air inside a
+    /// correctly-shaped cavity passed every check, because the plinth that
+    /// suppresses `.floating` was built from the same declaration nobody was
+    /// testing. Lift the cup 8 mm and leave its cavity where it is — the shared
+    /// volume is still entirely inside the cavity, so nothing else in the file has
+    /// anything to say about it.
+    func testGuestLiftedOffItsDeclaredCavityFloorIsReported() throws {
+        let plan = try loadNestedPlan()
+        let cavity = try XCTUnwrap(plan.placements.first { $0.itemID == "cup" }?.nestedIn?.cavity)
+        let lifted = try replacingCup(
+            in: plan,
+            position: Vector3(0.10, 0.038, 0.10),
+            nestedIn: Nesting(itemID: "bowl", cavity: cavity)
+        )
+        let issues = lifted.geometryIssues(tolerance: tolerance)
+
+        // The nest is still honoured and the overlap is still excused: this issue is
+        // the only thing between the plan and a silent pass.
+        XCTAssertEqual(lifted.honouredNesting()["cup"]?.itemID, "bowl")
+        XCTAssertEqual(intersections(issues), [])
+        let offFloor = issues.compactMap { issue -> Float? in
+            if case let .nestedOffCavityFloor(itemID, hostItemID, gap) = issue,
+               itemID == "cup", hostItemID == "bowl" { return gap }
+            return nil
+        }
+        XCTAssertEqual(offFloor.count, 1, "expected one off-floor issue, found: \(issues)")
+        XCTAssertEqual(try XCTUnwrap(offFloor.first), 0.008, accuracy: 1e-6)
+        XCTAssertThrowsError(try lifted.validateGeometry(tolerance: tolerance))
+        XCTAssertTrue(
+            issues.first?.description.contains("0.008 m above the floor of the cavity") == true,
+            "expected the gap and its direction in the message, got: \(issues)"
+        )
+        // And the stability pass agrees rather than contradicting it.
+        XCTAssertTrue(lifted.stabilityIssues(tolerance: tolerance).contains { issue in
+            if case let .floating(itemID, _) = issue { return itemID == "cup" }
+            return false
+        })
+    }
+
+    /// The other direction: sunk into the floor it claims. Says "below", not a
+    /// negative "above".
+    func testGuestSunkIntoItsDeclaredCavityFloorIsReported() throws {
+        let plan = try loadNestedPlan()
+        let cavity = try XCTUnwrap(plan.placements.first { $0.itemID == "cup" }?.nestedIn?.cavity)
+        let sunk = try replacingCup(
+            in: plan,
+            position: Vector3(0.10, 0.024, 0.10),
+            nestedIn: Nesting(itemID: "bowl", cavity: cavity)
+        )
+        let issues = sunk.geometryIssues(tolerance: tolerance)
+
+        XCTAssertTrue(
+            issues.contains { issue in
+                if case let .nestedOffCavityFloor(itemID, _, gap) = issue {
+                    return itemID == "cup" && abs(gap + 0.006) < 1e-6
+                }
+                return false
+            },
+            "expected the cup to be reported 6 mm below its declared floor, found: \(issues)"
+        )
+        XCTAssertTrue(
+            issues.contains { $0.description.contains("0.006 m below the floor of the cavity") },
+            "expected the direction in the message, got: \(issues)"
+        )
+    }
+
+    /// The tolerance is 1 mm (`restingContactTolerance`), not the 1e-6 float slack:
+    /// "is this resting on that" across two independently authored faces, the same
+    /// question `tools/pipeline_check/check_seams.py` asks with the same number.
+    func testRestingContactIsJudgedAtOneMillimetre() throws {
+        let plan = try loadNestedPlan()
+        let cavity = try XCTUnwrap(plan.placements.first { $0.itemID == "cup" }?.nestedIn?.cavity)
+        func offFloorIssues(liftedBy lift: Float) throws -> [GeometryIssue] {
+            try replacingCup(
+                in: plan,
+                position: Vector3(0.10, 0.03 + lift, 0.10),
+                nestedIn: Nesting(itemID: "bowl", cavity: cavity)
+            )
+            .geometryIssues(tolerance: tolerance)
+            .filter { if case .nestedOffCavityFloor = $0 { return true } else { return false } }
+        }
+
+        XCTAssertEqual(try offFloorIssues(liftedBy: 0.0005), [])
+        XCTAssertEqual(try offFloorIssues(liftedBy: 0.0015).count, 1)
+    }
+
+    /// **The boundary, stated as a test so nobody mistakes the check above for more
+    /// than it is.** Lift the guest *and* its declared floor together, exactly as
+    /// `check_nested_support`'s negative control does: the declaration stays
+    /// perfectly self-consistent — the cup rests on the floor it claims, the cavity
+    /// is still inside the bowl, the shared volume is still inside the cavity — and
+    /// only the host's real solid decomposition can say the cup is in the air. The
+    /// plan JSON does not carry that decomposition, so this plan is clean here, and
+    /// catching it is `tools/pipeline_check/check_seams.py`'s job, not this file's.
+    func testGuestAndItsDeclaredFloorLiftedTogetherIsBeyondWhatAPlanCanShow() throws {
+        let plan = try loadNestedPlan()
+        let raised = try replacingCup(
+            in: plan,
+            position: Vector3(0.10, 0.038, 0.10),
+            nestedIn: Nesting(
+                itemID: "bowl",
+                cavity: Nesting.Cavity(
+                    position: Vector3(0.08, 0.038, 0.08),
+                    size: Vector3(0.14, 0.062, 0.14)
+                )
+            )
+        )
+        let issues = raised.geometryIssues(tolerance: tolerance)
+        XCTAssertTrue(
+            issues.isEmpty,
+            "the plan alone cannot disprove a self-consistent declaration; found:\n"
+                + issues.map { "• \($0)" }.joined(separator: "\n")
+        )
+    }
+
+    // MARK: - The cavity must be inside the host
+
+    /// A cavity is a void in the host, so one poking out through the bowl's wall
+    /// describes nothing — and it would still license the pair's overlap and hold
+    /// the cup up. The cup itself is inside both the cavity and the bowl, so this is
+    /// the only issue in the plan.
+    func testCavityReachingOutsideTheHostIsReported() throws {
+        let plan = try loadNestedPlan()
+        let pushed = try replacingCup(
+            in: plan,
+            position: Vector3(0.16, 0.03, 0.10),
+            nestedIn: Nesting(
+                itemID: "bowl",
+                cavity: Nesting.Cavity(
+                    position: Vector3(0.15, 0.03, 0.08),
+                    size: Vector3(0.14, 0.07, 0.14)
+                )
+            )
+        )
+        let issues = pushed.geometryIssues(tolerance: tolerance)
+
+        XCTAssertEqual(intersections(issues), [])
+        XCTAssertEqual(issues.count, 1, "expected only the cavity issue, found: \(issues)")
+        guard case let .cavityOutsideHost(itemID, hostItemID, overshoot) = try XCTUnwrap(issues.first) else {
+            return XCTFail("expected .cavityOutsideHost, got \(issues)")
+        }
+        XCTAssertEqual(itemID, "cup")
+        XCTAssertEqual(hostItemID, "bowl")
+        XCTAssertEqual(overshoot.x, 0.04, accuracy: 1e-6)
+        XCTAssertEqual(overshoot.y, 0, accuracy: 1e-6)
+    }
+
+    /// The same rule on the axis that matters most: a declared floor *below* the
+    /// host's own base. The bowl stands on the bag floor, so a cavity floor at
+    /// y = -0.01 is under the bag as well as under the bowl — and the cup, still on
+    /// the bowl's real inner floor, is now 4 cm off the floor it declares.
+    func testCavityFloorBelowTheHostsBaseIsReported() throws {
+        let plan = try loadNestedPlan()
+        let sunkCavity = try replacingCup(
+            in: plan,
+            nestedIn: Nesting(
+                itemID: "bowl",
+                cavity: Nesting.Cavity(
+                    position: Vector3(0.08, -0.01, 0.08),
+                    size: Vector3(0.14, 0.11, 0.14)
+                )
+            )
+        )
+        let issues = sunkCavity.geometryIssues(tolerance: tolerance)
+
+        XCTAssertTrue(
+            issues.contains { issue in
+                if case let .cavityOutsideHost(itemID, _, overshoot) = issue {
+                    return itemID == "cup" && abs(overshoot.y - 0.01) < 1e-6
+                }
+                return false
+            },
+            "expected the cavity to be reported 1 cm below the bowl, found: \(issues)"
+        )
+        XCTAssertTrue(
+            issues.contains { issue in
+                if case let .nestedOffCavityFloor(itemID, _, gap) = issue {
+                    return itemID == "cup" && abs(gap - 0.04) < 1e-6
+                }
+                return false
+            },
+            "expected the cup to be reported 4 cm above that floor, found: \(issues)"
+        )
+    }
+
     // MARK: - A dubious assertion is not nesting
 
     func testDanglingHostIsReportedAndIgnored() throws {

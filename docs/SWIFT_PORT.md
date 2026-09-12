@@ -36,7 +36,7 @@ agree with the prototype" is a test result, not a code review question.
 `ContractTests.swift` (4 tests) checks cross-module glue: the parity dataset
 loads, the quaternion convention matches Python's, `precompute` numbers
 match a hand-checked fixture, and malformed scenes name the right object.
-178 tests total, all passing (`swift test`, this checkout).
+180 tests total, all passing (`swift test`, this checkout).
 
 `Validator.swift`/`Incremental.swift` landed while this doc was being
 written; signatures as built: `validateLayout(_ scene: Scene,

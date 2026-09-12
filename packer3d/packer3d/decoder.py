@@ -14,7 +14,8 @@ from typing import Optional
 import numpy as np
 
 from .geometry import EPS, rnd3
-from .models import Container, Item, Placement, oriented_solid_boxes
+from .models import (Container, Item, Placement, footprints_overlap, local_footprint_offsets,
+                     oriented_footprint, oriented_solid_boxes, point_in_polygon_2d, rect_polygon)
 
 REASON_TOO_BIG = "larger than the container in every allowed orientation"
 REASON_MASS = "would exceed the container mass limit"
@@ -59,6 +60,8 @@ class PackState:
         self.smax = np.zeros((0, 3))
         self.sfrag = np.zeros(0, dtype=bool)
         self.sowner = np.zeros(0, dtype=int)   # index into self.placements, OBSTACLE for obstacles
+        self.spoly: list = []                  # per solid: its owner's world footprint, or None
+        self.any_poly = False                  # any solid has one -> the polygon path is live
         self.n_obstacles = 0
 
         self.placements: list[Placement] = []
@@ -126,10 +129,18 @@ class PackState:
         surface rather than to the number of items placed.
         ponytail: assumes every item dim > EPS, same assumption the ``ov > EPS`` overlap test
         already makes; a sub-micron item would be treated as non-overlapping either way.
+
+        A solid with a scanned footprint only kills points really inside its cross-section --
+        otherwise every candidate corner in the free part of an L-shape's bounding box would be
+        culled before the feasibility test ever sees it.
         """
         if len(self.smin) == 0:
             return False
-        return bool(np.any(np.all((p >= self.smin - EPS) & (p < self.smax - EPS), axis=1)))
+        if not self.any_poly:   # hot path, kept bit-for-bit and allocation-for-allocation
+            return bool(np.any(np.all((p >= self.smin - EPS) & (p < self.smax - EPS), axis=1)))
+        inside = np.all((p >= self.smin - EPS) & (p < self.smax - EPS), axis=1)
+        return any(self.spoly[i] is None or point_in_polygon_2d((p[0], p[1]), self.spoly[i])
+                   for i in np.nonzero(inside)[0])
 
     def _wall(self, a: int, p) -> float:
         """Coordinate of the container wall when projecting point p along -axis a."""
@@ -151,17 +162,23 @@ class PackState:
             return max(base, float(self.smax[m, a].max()))
         return base
 
-    def _add_solid(self, lo, hi, fragile: bool, owner: int = OBSTACLE) -> None:
+    def _add_solid(self, lo, hi, fragile: bool, owner: int = OBSTACLE, poly=None) -> None:
         lo = np.round(np.asarray(lo, dtype=float), 9)
         hi = np.round(np.asarray(hi, dtype=float), 9)
         self.smin = np.vstack([self.smin, lo[None, :]])
         self.smax = np.vstack([self.smax, hi[None, :]])
         self.sfrag = np.append(self.sfrag, bool(fragile))
         self.sowner = np.append(self.sowner, int(owner))
+        self.spoly.append(poly)
+        self.any_poly = self.any_poly or poly is not None
         # extreme points the new solid swallows are dead (same test as _point_in_solid)
         if self._eps:
             arr = self._ep_array()
             inside = np.all((arr >= lo - EPS) & (arr < hi - EPS), axis=1)
+            if poly is not None and inside.any():   # keep the ones outside the real cross-section
+                for i in np.nonzero(inside)[0]:
+                    if not point_in_polygon_2d((arr[i, 0], arr[i, 1]), poly):
+                        inside[i] = False
             if inside.any():
                 keys = list(self._eps.keys())
                 for i in np.nonzero(inside)[0]:
@@ -233,7 +250,34 @@ class PackState:
         return np.round(cands, 9)
 
     # ------------------------------------------------------------------ feasibility + score
-    def _feasible_and_score(self, lo, d, m, bbox_vol, pos, fragile=False, round_xy=False):
+    def _footprint_clear(self, bad, ok, lo, d, fp_base, near_idx) -> None:
+        """Un-flag AABB clashes in ``bad`` (C,S) that footprint polygons prove are not real
+        overlaps, in place.
+
+        The cheap AABB test comes first and does all the culling: only pairs it already flagged,
+        and only for candidates still otherwise feasible, ever reach a polygon clip -- and the
+        first pair that really does overlap ends that candidate.  A pair where NEITHER side has a
+        scanned footprint keeps exactly today's verdict (both polygons would be the rectangles
+        the AABB test just compared).  ``fp_base`` is this item's footprint offsets for the
+        orientation being placed, computed once per orientation by ``place()``.
+        """
+        for c in np.nonzero(bad.any(axis=1) & ok)[0]:
+            mine = None
+            for j in np.nonzero(bad[c])[0]:
+                g = near_idx[j]
+                other = self.spoly[g]
+                if other is None and fp_base is None:
+                    break
+                if mine is None:
+                    x0, y0 = lo[c, 0], lo[c, 1]
+                    mine = (tuple((x0 + ox, y0 + oy) for ox, oy in fp_base) if fp_base is not None
+                            else rect_polygon((x0, y0), (x0 + d[0], y0 + d[1])))
+                if footprints_overlap(mine, other if other is not None
+                                      else rect_polygon(self.smin[g], self.smax[g])):
+                    break
+                bad[c, j] = False
+
+    def _feasible_and_score(self, lo, d, m, bbox_vol, pos, fragile=False, round_xy=False, fp_base=None):
         """Vectorised feasibility and placement score for candidate min-corners ``lo`` (C,3)."""
         C = len(lo)
         hi = lo + d
@@ -280,7 +324,10 @@ class PackState:
             l3 = lo[:, None, :]
             h3 = hi[:, None, :]
             ov = np.clip(np.minimum(h3, smax) - np.maximum(l3, smin), 0.0, None)  # (C,S,3)
-            ok &= ~np.any(np.all(ov > EPS, axis=2), axis=1)                        # no overlap
+            bad = np.all(ov > EPS, axis=2)                                         # (C,S)
+            if self.any_poly or fp_base is not None:   # exact same work as before when neither
+                self._footprint_clear(bad, ok, lo, d, fp_base, np.nonzero(near)[0])
+            ok &= ~np.any(bad, axis=1)                                             # no overlap
             axy = ov[:, :, 0] * ov[:, :, 1]
             below = np.abs(smax[:, :, 2] - l3[:, :, 2]) < EPS       # solid top flush with base
             contact_below = axy * below
@@ -314,7 +361,8 @@ class PackState:
             score = score + self.p.w_com * dev
         return ok, score
 
-    def _best_candidate(self, cands, d, m, bbox_vol, best=math.inf, fragile=False, round_xy=False):
+    def _best_candidate(self, cands, d, m, bbox_vol, best=math.inf, fragile=False, round_xy=False,
+                        fp_base=None):
         """Best feasible candidate with score < ``best`` (branch-and-bound over sorted chunks)."""
         if len(cands) == 0:
             return best, None
@@ -335,7 +383,8 @@ class PackState:
             idx = order[start:start + chunk]
             if lb[idx[0]] >= best:
                 break
-            ok, score = self._feasible_and_score(cands[idx], d, m, bbox_vol, pos[idx], fragile, round_xy)
+            ok, score = self._feasible_and_score(cands[idx], d, m, bbox_vol, pos[idx], fragile,
+                                                 round_xy, fp_base)
             if ok.any():
                 sc = np.where(ok, score, np.inf)
                 j = int(np.argmin(sc))
@@ -367,13 +416,15 @@ class PackState:
         n_solids = len(self.smin)
         keys = {k: (rnd3(oris[k].dims), item.fragile) for k in order}
         order = [k for k in order if self._fail_cache.get(keys[k]) != n_solids]
+        # one footprint transform per (item, orientation), reused by every candidate in it
+        fps = {k: local_footprint_offsets(item, oris[k].dims, oris[k].name) for k in order}
         best_score, best_pos, best_k = math.inf, None, None
         for stage in ("ep", "grid"):
             for k in order:
                 d = np.asarray(oris[k].dims, dtype=float)
                 cands = self._ep_array() if stage == "ep" else self._grid(d)
                 sc, pos = self._best_candidate(cands, d, item.mass, bbox_vol, best_score, item.fragile,
-                                               oris[k].axis == "z")
+                                               oris[k].axis == "z", fps[k])
                 if pos is not None:
                     best_score, best_pos, best_k = sc, pos, k
                     if orient_idx is not None:   # genome mode: first orientation that works
@@ -433,9 +484,15 @@ class PackState:
         center = (lo + hi) / 2.0
         nested_in = self._nested_in(lo, hi)
         owner = len(self.placements)
+        poly = oriented_footprint(item, lo, d, o.name)
         for blo, bhi in oriented_solid_boxes(item, lo, d, o.name):
-            self._add_solid(blo, bhi, item.fragile, owner)
-        if item.occupied_volume < item.bbox_volume - EPS:
+            self._add_solid(blo, bhi, item.fragile, owner, poly)
+        # A host is a HEIGHT-GRID cavity: `nested_in` tells consumers that model an item as one
+        # bbox which overlap is a legal nest, and its cavity is derived from the grid's solids.
+        # A footprint-only overlap is not that -- it is two prisms missing each other, which the
+        # physics gate reads off the item's own `footprint` (physics.packer3d_adapter), so
+        # inventing a cavity for it would emit a zero-height nest nobody can use.
+        if item.height_grid is not None and item.occupied_volume < item.bbox_volume - EPS:
             self._hosts.append(owner)
         self.total_mass += item.mass
         self.mass_moment += item.mass * center

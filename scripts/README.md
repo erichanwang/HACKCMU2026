@@ -26,8 +26,9 @@ and keeps whatever Grok answered (label, rigidity, compressibility, mass, keepUp
 stored with the item in Mongo and used by the solver), so the packing follows the photos.
 Any five photos named that way work, e.g. `curl -o photos/shoes.jpg https://loremflickr.com/640/480/sneaker`.
 
-`--server` / `--out` override the defaults (`http://127.0.0.1:8000`, `out/e2e`), which is
-where `plan.json`, `solver.json`, `validation.json` and the PAN rollout assets land.
+`--server` / `--out` override the defaults (`http://127.0.0.1:8000`, and an `e2e` folder under
+`out/`, created on the first run), which is where `plan.json`, `solver.json`, `validation.json`
+and the PAN rollout assets land.
 Without an `XAI_API_KEY` the server labels every item "unknown" and drops `keepUpright`;
 the script PATCHes each fixture's label/rigidity/compressibility/mass/keepUpright back in, so the plan is
 meaningful either way.

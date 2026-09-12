@@ -27,7 +27,8 @@ which is what lets `tools/plan3d` render the 3D view on Linux.
 
 ## Build and test it on Linux
 
-`swift test` runs here — 86 tests, all green:
+`swift test` runs here, and the whole suite is green. The count moves most days, so
+this does not pin it — `tools/doc_check` would only ever be catching the doc up:
 
 ```sh
 source swift/PackPhysics/swiftenv.sh      # from the repo root: Swift 6.3.3 via swiftly + libxml2 compat
@@ -36,8 +37,8 @@ swift test --scratch-path /tmp/pc-build
 ```
 
 ```
-Test Suite 'All tests' passed at 2026-09-12 10:29:33.003
-	 Executed 86 tests, with 0 failures (0 unexpected) in 0.375 (0.375) seconds
+Test Suite 'All tests' passed at ...
+	 Executed <n> tests, with 0 failures (0 unexpected) in 0.375 (0.375) seconds
 ```
 
 It did not run until today. `PackingPlanUI` imported `CoreGraphics` and `SwiftUI`

@@ -290,7 +290,12 @@ struct ScannedItem: Codable, Identifiable, Equatable {
     var footprint: [[Float]]?
     var label: String?
     var labelSource: String?
-    var labelStatus: String?       // "done", or "pending" while the server retries Grok in the background
+    /// "pending" (server retrying in the background), "done", "unidentified" (every configured
+    /// model answered and declined, or none is configured — terminal), or "failed" (the call
+    /// itself kept erroring — terminal). See `labelStatusMessage` for what each shows the user.
+    var labelStatus: String?
+    /// Set by the server only when `labelStatus == "unidentified"`: why, and what to do about it.
+    var identifyHint: String?
     var description: String?       // one sentence from Grok
     var mass: Double?              // estimated kg from Grok, 0 = unknown
     var keepUpright: Bool?         // must stay this side up (liquids, open containers)

@@ -81,6 +81,10 @@ struct ScanScreen: View {
     /// Shown as InventoryRings over the camera while the backpack is open.
     @State private var inventory: [ScannedItem] = []
     @State private var showingInventory = false
+    /// The user's suitcases, for "put this item in…"; re-read whenever the current one changes.
+    @State private var suitcases: [API.Suitcase] = []
+    /// The item a Delete was tapped on, until the dialog confirms or cancels.
+    @State private var deleting: ScannedItem?
     @State private var confirmingReset = false
     /// Where the server is and how to authenticate; typed on the phone, kept across launches.
     @AppStorage("serverURL") private var serverURL = API.defaultBase
@@ -106,7 +110,8 @@ struct ScanScreen: View {
                 ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
             }
             if showingInventory {
-                InventoryRings(items: inventory, select: { item = $0 }, dismiss: { showingInventory = false })
+                InventoryRings(items: inventory, select: { item = $0 }, dismiss: { showingInventory = false },
+                               menu: { itemMenu($0) })
                     .transition(.opacity)
             }
             VStack(spacing: 0) {
@@ -132,8 +137,18 @@ struct ScanScreen: View {
                             isPresented: $confirmingReset, titleVisibility: .visible) {
             Button("Reset", role: .destructive) { reset() }
         }
+        .confirmationDialog("Delete this item?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible, presenting: deleting) { doomed in
+            Button("Delete \(doomed.label ?? "item")", role: .destructive) { remove(doomed) }
+        } message: { _ in
+            Text("It leaves your inventory and any suitcase it was in.")
+        }
         // Quiet on launch: a server that isn't up yet must not replace the first-tap hint.
-        .task { if let saved = try? await API.inventory() { inventory = saved } }
+        .task {
+            if let saved = try? await API.inventory() { inventory = saved }
+            await loadSuitcases()
+        }
+        .onChange(of: suitcaseId) { _, _ in Task { await loadSuitcases() } }
         .onChange(of: item) { _, new in
             // ScanView sets `item` on the upload ack and again when the label arrives, and ItemEditor
             // sets it on a PATCH, so both lists stay current without reopening a sheet. A `createdAt`
@@ -206,6 +221,14 @@ struct ScanScreen: View {
                 Divider()
                 if item.label != nil {
                     ItemEditor(item: Binding($item)!)
+                    HStack {
+                        Menu { itemMenu(item) } label: {
+                            Label(bagName(for: item.suitcaseId), systemImage: "suitcase")
+                        }
+                        Spacer()
+                        Button(role: .destructive) { deleting = item } label: { Label("Delete", systemImage: "trash") }
+                    }
+                    .font(.subheadline.weight(.medium))
                 } else {
                     HStack(alignment: .firstTextBaseline) {
                         Text("New item").font(.headline)
@@ -228,7 +251,7 @@ struct ScanScreen: View {
         HStack(spacing: 10) {
             if status.contains("…") {
                 ProgressView().controlSize(.small)
-            } else if ["server:", "plan:", "items:", "reset:", "delete:"].contains(where: { status.hasPrefix($0) }) {
+            } else if ["server:", "plan:", "items:", "reset:", "delete:", "move:"].contains(where: { status.hasPrefix($0) }) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             }
             Text(status).font(.subheadline)
@@ -272,6 +295,8 @@ struct ScanScreen: View {
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
+                    // Move only: swipe already deletes here, and the Delete dialog lives under this sheet.
+                    .contextMenu { moveMenu(scanned) }
                 }
                 .onDelete { offsets in
                     let ids = offsets.map { items[$0].id }
@@ -295,6 +320,82 @@ struct ScanScreen: View {
         }
         .presentationDetents([.medium, .large])
         .task { await loadItems() }
+    }
+
+    // MARK: - Put in a suitcase / delete
+
+    /// The suitcase rows of an item's menu, current bag ticked, then "take out" when it is in one.
+    @ViewBuilder private func moveMenu(_ target: ScannedItem) -> some View {
+        if suitcases.isEmpty {
+            Button("Scan a suitcase first") {}.disabled(true)
+        }
+        ForEach(suitcases) { bag in
+            Button { move(target, to: bag.id) } label: {
+                if bag.id == target.suitcaseId { Label(bagName(bag), systemImage: "checkmark") } else { Text(bagName(bag)) }
+            }
+        }
+        if target.suitcaseId != nil {
+            Button("Take out of its suitcase", systemImage: "arrow.up.bin") { move(target, to: nil) }
+        }
+    }
+
+    @ViewBuilder private func itemMenu(_ target: ScannedItem) -> some View {
+        moveMenu(target)
+        Divider()
+        Button("Delete", systemImage: "trash", role: .destructive) { deleting = target }
+    }
+
+    /// Every bag is created as "scanned suitcase", so the size is what tells them apart.
+    private func bagName(_ bag: API.Suitcase) -> String {
+        guard bag.dimensions.count == 3 else { return bag.name }
+        let size = String(format: "%.0f × %.0f × %.0f cm", bag.dimensions[0] * 100, bag.dimensions[2] * 100, bag.dimensions[1] * 100)
+        return "\(bag.id == suitcaseId ? "This suitcase" : bag.name) · \(size)"
+    }
+
+    private func bagName(for id: String?) -> String {
+        guard let id else { return "Not in a suitcase" }
+        if id == suitcaseId { return "This suitcase" }
+        return suitcases.first { $0.id == id }.map(bagName) ?? "Another suitcase"
+    }
+
+    private func loadSuitcases() async {
+        if let bags = try? await API.suitcases() { suitcases = bags }
+    }
+
+    private func move(_ moving: ScannedItem, to bagId: String?) {
+        let name = moving.label ?? "item"
+        Task {
+            do {
+                let updated = try await API.move(id: moving.id, toSuitcase: bagId)
+                if let i = inventory.firstIndex(where: { $0.id == updated.id }) { inventory[i] = updated }
+                items.removeAll { $0.id == updated.id }
+                if let suitcaseId, updated.suitcaseId == suitcaseId { items.append(updated) }
+                if item?.id == updated.id { item = updated }
+                // The bag's plan predates this change; the overlay must not keep showing it.
+                if let suitcaseId, moving.suitcaseId == suitcaseId || updated.suitcaseId == suitcaseId {
+                    plan = nil
+                    status = updated.suitcaseId == suitcaseId ? "\(name) added — tap Pack to re-plan" : "\(name) taken out — tap Pack to re-plan"
+                } else {
+                    status = updated.suitcaseId == nil ? "\(name) taken out of its suitcase" : "\(name) moved"
+                }
+            } catch {
+                status = "move: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func remove(_ removing: ScannedItem) {
+        Task {
+            do { try await API.delete(itemId: removing.id) } catch {
+                status = "delete: \(error.localizedDescription)"
+                return
+            }
+            inventory.removeAll { $0.id == removing.id }
+            items.removeAll { $0.id == removing.id }
+            if item?.id == removing.id { item = nil }
+            if let suitcaseId, removing.suitcaseId == suitcaseId { plan = nil }
+            status = "Deleted \(removing.label ?? "item")"
+        }
     }
 
     // MARK: - Server calls

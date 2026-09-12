@@ -122,7 +122,7 @@ looks like and its most likely failure — the failure modes below are `FIXES.md
 3. **Pack.** Tap Pack; button is disabled while a plan is in flight
    (`Spike/SpikeApp.swift:43`, `packing` state). Most likely failure: items pack as bounding
    boxes only — no nesting into gaps or open shoes (FIXES.md 3, second bullet) — and
-   `POST /plan` itself is CPU-bound for ~3s under one uvicorn worker (FIXES.md 3, fourth
+   `POST /suitcases/{id}/plan` itself is CPU-bound for ~3s under one uvicorn worker (FIXES.md 3, fourth
    bullet), so a second Pack tap while one is running would race it if the button weren't
    disabled.
 4. **Plan sheet.** A sheet presents `PlanViewer` with a Layers | 3D picker — the 2D layer

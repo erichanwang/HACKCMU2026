@@ -404,11 +404,12 @@ class Patch(BaseModel):
     compressibility: float | None = None
     mass: float | None = None
     keepUpright: bool | None = None
+    suitcaseId: str | None = None  # present-and-null takes the item out of any bag; absent leaves it alone
 
 
 @app.patch("/items/{item_id}")
 def update_item(item_id: str, patch: Patch, user: str = Depends(current_user)):
-    owned(db.items.find_one({"_id": item_id}), user)
+    doc = owned(db.items.find_one({"_id": item_id}), user)
     if patch.rigidity is not None and patch.rigidity not in RIGIDITIES:
         raise HTTPException(422, f"rigidity must be one of {RIGIDITIES}")
     if patch.compressibility is not None and not patch.compressibility >= 1:
@@ -426,6 +427,13 @@ def update_item(item_id: str, patch: Patch, user: str = Depends(current_user)):
         fields |= {"rigidity": patch.rigidity, "rigiditySource": "user"}
     if patch.compressibility is not None:
         fields |= {"compressibility": float(patch.compressibility), "compressibilitySource": "user"}
+    if "suitcaseId" in patch.model_fields_set and patch.suitcaseId != doc.get("suitcaseId"):
+        if patch.suitcaseId is not None:
+            owned(db.suitcases.find_one({"_id": patch.suitcaseId}), user)
+        fields |= {"suitcaseId": patch.suitcaseId}
+        # Neither bag's stored plan matches its items any more. None is "no bag", not a plan id.
+        for bag in {doc.get("suitcaseId"), patch.suitcaseId} - {None}:
+            db.plans.delete_one({"_id": bag})
     doc = db.items.find_one_and_update({"_id": item_id}, {"$set": fields}, return_document=True) if fields else db.items.find_one({"_id": item_id})
     if doc is None:
         raise HTTPException(404, "no such item")

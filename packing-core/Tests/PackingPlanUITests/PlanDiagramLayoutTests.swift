@@ -72,6 +72,44 @@ final class PlanDiagramLayoutTests: XCTestCase {
         XCTAssertEqual(height, 179, accuracy: 0.5)
     }
 
+    // MARK: - The label gate
+
+    /// The gate must not be a cliff at the size a full-size label needs.
+    ///
+    /// Measured on the real scale: at 390 pt the demo carry-on draws 881 pt/m, so a
+    /// 6 × 8 cm pouch is 52.9 × 70.5 pt. The gate this replaced was 54 × 28 — two
+    /// lines of 11 pt — and that pouch lost its name outright over 1.1 pt of width
+    /// while a pouch a millimetre wider kept it. `lineLimit(2)` and a 7 pt
+    /// `minimumScaleFactor` mean the label can shrink instead, so the gate belongs
+    /// where the shrinking runs out, not where it starts.
+    func testSmallItemKeepsItsNameAtDeviceScale() throws {
+        let footprint = try PlanLoader.mockPlan().container.dimensions
+        let content = 390 - 2 * planDiagramPadding
+        let projection = FootprintProjection(
+            footprint: footprint,
+            in: CGSize(width: content, height: planDiagramHeight(footprint: footprint, width: content))
+        )
+        XCTAssertEqual(projection.scale, 881, accuracy: 1, "881 pt/m, one scale on every layer")
+
+        let pouch = projection.rect(for: BoundingBox(
+            minCorner: .zero, size: Vector3(0.06, 0.08, 0.10)
+        ))
+        XCTAssertEqual(pouch.width, 52.9, accuracy: 0.1)
+        XCTAssertEqual(pouch.height, 88.1, accuracy: 0.1)
+        XCTAssertTrue(planDiagramShowsLabel(pouch.size), "the 1.1 pt cliff is gone")
+
+        // Two 7 pt lines inside 4 pt of padding, and six 7 pt characters per line.
+        // Rounder than the view's own layout on purpose: the claim is the order of
+        // magnitude, not a pixel.
+        XCTAssertTrue(planDiagramShowsLabel(CGSize(width: 32, height: 26)))
+        XCTAssertFalse(planDiagramShowsLabel(CGSize(width: 31, height: 26)))
+        XCTAssertFalse(planDiagramShowsLabel(CGSize(width: 32, height: 25)))
+
+        // Pinned so that moving the floor means re-reading why it is 7 — the gate
+        // above is that number laid out, and the two have to move together.
+        XCTAssertEqual(planDiagramLabelFloorSize, 7)
+    }
+
     // MARK: - Nesting across layers
 
     /// The split nest: socks in the shoes' cavity, drawn one layer above the shoes.

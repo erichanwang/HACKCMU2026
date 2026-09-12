@@ -79,6 +79,7 @@ from physics.packer3d_adapter import (  # noqa: E402
     swap_yz,
     validate_packer3d,
 )
+from physics.prepack import prepare_items  # noqa: E402
 
 RNG_SEED = 20260912
 TABLE_Y = 0.80          # world height of the table plane, metres
@@ -770,6 +771,37 @@ def footprint_gate_flip_check(driver: Path, base: str) -> None:
                                     {"id": "pebble", "keep_upright": False, "priority": 1.0}]}
         with_fp = validate_packer3d(synthetic_result, items=items_with)
         without_fp = validate_packer3d(synthetic_result, items=items_without)
+
+        # If anyone wires the hull through the cavity branch, DILATE IT FIRST. Measured on a
+        # 40x40 cm grid: for a 45-degree convex wedge the 4x4 block decomposition covers 1.93x
+        # the true area while the 16-vertex hull covers 0.94x -- and below 1.0 is the unsafe
+        # direction. An over-approximating footprint only wastes space; an under-approximating
+        # one lets the solver put a neighbour where the real object already is, and the gate
+        # blesses it. The cause is structural: `decimateHull` (Spike/Geometry.swift:152) scales
+        # outward to contain every point the SAMPLED hull had, but a hull of samples sits inside
+        # the true outline by about the sample spacing, and `ScannedItem.footprint(from:)`
+        # deliberately applies no padding (Geometry.swift:308-314 -- jitter tolerance lives in
+        # the box's `padding`/`trimmedRange`). Harmless while nothing grades against it. A
+        # consumer would need the polygon dilated by `paddingMeters` plus a sample-spacing term,
+        # then re-clamped to the box. For a concave shape the hull is not an option at all: it
+        # fills the notch by definition, which is the space nesting exists to use.
+        #
+        # The two dicts above omit `heights`, and that is the key that decides everything:
+        # `_objects_from_placement` takes its cavity branch whenever an item has a height grid,
+        # and that branch builds its Objects with no footprint at all. `POST /items` REQUIRES
+        # heights and `server/planner.py` passes `prepare_items(docs)` straight through, so on
+        # the real path the footprint is never the thing being graded. Grade the production
+        # shape too and say so, rather than let the flip above imply otherwise.
+        prod_items = prepare_items([doc]) + [{"id": "pebble", "keep_upright": False, "priority": 1.0}]
+        prod_stripped = [{k: v for k, v in it.items() if k != "footprint"} for it in prod_items]
+        prod_with = validate_packer3d(synthetic_result, items={"items": prod_items})
+        prod_without = validate_packer3d(synthetic_result, items={"items": prod_stripped})
+        if ({v["type"] for v in prod_with["violations"]}
+                == {v["type"] for v in prod_without["violations"]}):
+            warn("footprint inert", "the flip above uses metadata without `heights`; with the "
+                                     "height grid the server really sends, deleting the footprint "
+                                     "changes no verdict -- the cavity branch grades the grid, "
+                                     "not the hull")
         with_types = {v["type"] for v in with_fp["violations"]}
         without_types = {v["type"] for v in without_fp["violations"]}
         if "OBJECT_COLLISION" not in without_types:
@@ -781,13 +813,15 @@ def footprint_gate_flip_check(driver: Path, base: str) -> None:
                  f"footprint should clear the pebble (it's in the cut-away notch), got "
                  f"violations={with_fp['violations']}")
         print(f"[footprint-gate] orientation {orientation!r} (suitcase forced for {wanted!r}): "
-              f"collides without footprint, clean with it -- verdict flips through the real /plan path")
+              f"collides without footprint, clean with it -- "
+              f"the mapping is right; see the footprint inert WARN for what production grades")
 
     if set(exercised) != {"xyz", "yxz"}:
         warn("footprint gate orientations", f"could only exercise {sorted(set(exercised))}, not "
              f"both xyz and yxz -- asserted the flip for whichever orientation(s) were obtained")
     else:
-        print("[footprint-gate] both xyz and yxz exercised end-to-end through the real /plan path")
+        print("[footprint-gate] both xyz and yxz exercised on real /plan placements; the "
+              "footprint itself is graded only when an item has no height grid")
 
 
 def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item_fits: list[dict],
@@ -1025,6 +1059,19 @@ def _drift_corner_err(true_out: dict, drifted_out: dict, placements: list[dict])
     return max_err
 
 
+# How much of the plan overlay's ARAnchor-tracked horizontal/rotational world drift is modelled as
+# corrected by the time the overlay is drawn. Not 1.0 (full correction): the table plane is
+# re-observed against live depth data every frame, so a fresh read of it is close to ground truth
+# regardless of how much the world has drifted -- but a plain ARAnchor at the bag's origin has no
+# equivalent (nothing re-observes "the bag" the way ARKit re-observes the table), so it only gets
+# whatever *partial* correction ARKit's generic pose-graph revision happens to apply. tests/swift/
+# drift Section 4d sweeps this fraction and finds a break-even point per scenario; 0.8 is the same
+# deliberately non-idealised point picked there for its gate, kept identical here so both checks
+# assert against the same claim about real hardware -- see that section for the sweep and why 1.0
+# would just restate the assumption as a result.
+ANCHOR_CORRECTION_FRACTION = 0.8
+
+
 def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, placements: list[dict]) -> None:
     """World-origin drift + plane error between scan time and overlay time, at the mid/worst
     magnitudes tests/swift/drift/main.swift itself characterised. `placements` must come from a
@@ -1037,31 +1084,35 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
     `session.add(anchor:)` and lets ARKit correct that anchor's transform as it refines its
     world-tracking pose graph (showPlan). tests/swift/drift's own before/after (Sections 4 and 4d)
     model these as: `vertical_cm` (the table's estimated height drifting between scan and overlay)
-    corrected by the first fix, and `axis_deg`/`horizontal_cm` (world-frame rotation/translation
-    drift over the same window) corrected by the second. Neither fix touches `plane_cm` -- one
-    instant's plane-fit noise, present the moment either anchor is (re-)read, not something that
-    "drifted" afterwards. Modelled the same way here: `plane_cm` is kept in both rows unreduced;
-    `vertical_cm`, `axis_deg` and `horizontal_cm` are zeroed for "today" and kept for "frozen".
-    Whether ARKit's anchor-transform correction is in practice as complete as this model assumes
-    -- there is no live re-observation of "the bag" the way the table plane gets one every frame --
-    is NOT verified here; that needs a real device."""
+    fully corrected by the first fix -- the plane is re-observed against live depth every frame, so
+    a fresh read is close to ground truth regardless of drift -- and `axis_deg`/`horizontal_cm`
+    (world-frame rotation/translation drift over the same window) only PARTIALLY corrected by the
+    second, at `ANCHOR_CORRECTION_FRACTION`: a plain ARAnchor has no live re-observation of "the
+    bag" backing it, only ARKit's own pose-graph revision, so claiming full correction there would
+    be the modelling assumption restated as a result, not a measurement. Neither fix touches
+    `plane_cm` -- one instant's plane-fit noise, present the moment either anchor is (re-)read, not
+    something that "drifted" afterwards. Modelled the same way here: `plane_cm` is kept in both
+    rows unreduced; `vertical_cm` is zeroed for "today"; `axis_deg`/`horizontal_cm` are scaled by
+    `(1 - ANCHOR_CORRECTION_FRACTION)` for "today" and kept in full for "frozen"."""
     pivot = np.array([SUITCASE_ARGS["cx"], SUITCASE_ARGS["cz"]])
     print("== drift: world-origin drift + plane/axis error between scan and overlay ==")
-    print("(planeY is re-resolved live -- Spike/ScanView.swift's refreshPlaneY -- and the plan "
-          "overlay is now anchored to a tracked ARAnchor -- showPlan -- so vertical, horizontal and "
-          "rotational world drift are all modelled as corrected; only the one-instant plane-fit "
-          "noise below is not)")
+    print(f"(planeY is re-resolved live -- Spike/ScanView.swift's refreshPlaneY -- fully correcting "
+          f"vertical world drift; the plan overlay's tracked ARAnchor -- showPlan -- is modelled as "
+          f"correcting only {ANCHOR_CORRECTION_FRACTION * 100:.0f}% of horizontal/rotational world "
+          f"drift, since nothing re-observes the bag the way the plane is re-observed every frame; "
+          f"plane-fit noise is corrected by neither)")
     print(f"{'scenario':<58} {'corner err (today/frozen)':<28} {'escape (today/frozen)':<28} fits? (today)")
-    worst_esc, worst_label = 0.0, ""
+    worst_esc, worst_label, worst_corner_err = 0.0, "", 0.0
     for label, (plane_cm, vertical_cm, axis_deg, horizontal_cm) in (
             ("mid-range", DRIFT_MID), ("worst realistic", DRIFT_WORST)):
         # The real table never moves -- what drifts is ARKit's world-frame belief about its
         # height/rotation/position, i.e. purely an *input* error to the overlay, not a change in
         # the points LiDAR would see. frozen bakes in the tap-time reading noise (plane_cm) and
         # everything the world frame has since drifted by (vertical_cm, axis_deg, horizontal_cm);
-        # today re-reads/re-anchors live, so only the reading noise -- present at any instant --
-        # survives.
-        today = _drift_fit(driver, true_suitcase_points, pivot, 0.0, 0.0,
+        # today re-reads/re-anchors live, so vertical_cm is fully gone and axis_deg/horizontal_cm
+        # only partially are -- the reading noise (plane_cm), present at any instant, always survives.
+        residual = 1 - ANCHOR_CORRECTION_FRACTION
+        today = _drift_fit(driver, true_suitcase_points, pivot, axis_deg * residual, horizontal_cm * residual,
                             TABLE_Y + plane_cm / 100, placements)
         frozen = _drift_fit(driver, true_suitcase_points, pivot, axis_deg, horizontal_cm,
                              TABLE_Y + plane_cm / 100 + vertical_cm / 100, placements)
@@ -1079,16 +1130,21 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
                     f"{axis_deg:.0f}deg axis, {horizontal_cm:.0f}cm horizontal drift)")
         print(f"{scenario:<58} {corner_err * 100:5.2f} / {frozen_corner_err * 100:5.2f} cm         "
               f"{max_esc * 100:5.2f} / {frozen_esc * 100:5.2f} cm ({escaped} corners)   {verdict}")
-        if max_esc > worst_esc:
-            worst_esc, worst_label = max_esc, label
-    if worst_esc > 1e-4:
-        warn("drift escape", f"worst {worst_esc * 100:.2f} cm at {worst_label} drift, "
-                              f"live-planeY and tracked-ARAnchor corrected (plane-fit noise is not, "
-                              f"and the ARAnchor correction itself is unverified without a device)")
-    print("note: with vertical/horizontal/rotational drift all modelled as corrected, what's left "
-          "in the today column is plane_cm's own fit noise (present the instant the anchors are "
-          "read, not something either fix can re-derive); the frozen column keeps the full "
-          "pre-fix exposure for contrast.")
+        if max_esc >= worst_esc:
+            worst_esc, worst_label, worst_corner_err = max_esc, label, corner_err
+    # Always fires (unless the residual happens to be exactly zero): at less-than-100% anchor
+    # correction there is always something left over to report, and a WARN that can structurally
+    # never print is exactly the "row that cannot appear" problem a gate should not have.
+    warn("drift residual", f"worst {worst_corner_err * 100:.2f} cm corner error / {worst_esc * 100:.2f} cm escape "
+                            f"at {worst_label} drift, modelling the plan overlay's ARAnchor at only "
+                            f"{ANCHOR_CORRECTION_FRACTION * 100:.0f}% horizontal/rotational correction "
+                            f"(plane-fit noise is corrected by neither fix; the {ANCHOR_CORRECTION_FRACTION * 100:.0f}% "
+                            f"figure itself is a modelling choice, not a device measurement -- see tests/swift/drift "
+                            f"Section 4d for the full sweep and break-even points)")
+    print("note: vertical world drift is modelled as fully corrected (live plane re-fit); horizontal "
+          f"and rotational drift are modelled as only {ANCHOR_CORRECTION_FRACTION * 100:.0f}% corrected "
+          "(tracked ARAnchor, no live ground truth); plane-fit noise is corrected by neither. The "
+          "frozen column keeps the full pre-fix exposure for contrast.")
     print("")
 
 
@@ -1245,7 +1301,20 @@ def main() -> int:
             items_by_id[doc["id"]] = Item.from_scanned_heightmap(doc)
             fp_note = f"footprint {len(fit['footprint'])}v" if fit.get("footprint") is not None else "footprint none"
             print(f"      + {it['name']:<12} {doc['dimensions'][0]:.3f}x{doc['dimensions'][1]:.3f}x"
-                  f"{doc['dimensions'][2]:.3f} m  label={resp['label']}  {fp_note}")
+                  f"{doc['dimensions'][2]:.3f} m  label={resp['label']} "
+                  f"[{resp.get('labelStatus')}]  {fp_note}")
+            # This run strips XAI_API_KEY/ANTHROPIC_API_KEY, so no model is configured and the
+            # server must report the terminal "unidentified" state with a hint saying so -- not
+            # "done" with a bogus "unknown" guess. Spike/ScanValidation.swift's
+            # labelStatusMessage shows identifyHint verbatim, so a wrong hint here is what the
+            # user reads at the booth. Nothing else asserts this wire contract.
+            if resp.get("labelStatus") != "unidentified":
+                fail(f"{it['name']}: labelStatus is {resp.get('labelStatus')!r} with no model "
+                     f"configured; expected 'unidentified' (server/main.py's status_for)")
+            hint = resp.get("identifyHint")
+            if not hint or "labelling is off" not in hint:
+                fail(f"{it['name']}: identifyHint is {hint!r}; with no model configured the "
+                     f"server should say labelling is off, not advise rotating or rescanning")
 
         # 4) POST /plan
         status, plan_doc = post_json(f"{base}/suitcases/{suitcase_doc['id']}/plan", {})

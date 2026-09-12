@@ -33,13 +33,16 @@ func ringSpin(ring: Int, at t: Double) -> Double {
 #if !PACKAR_TEST_ONLY
 /// The inventory as concentric rings of circles, one per item, drifting over the camera view.
 /// Tapping a circle makes it the panel's current item (so ItemEditor shows and edits it);
-/// tapping the backdrop closes the overlay. Reduce Motion freezes the rings in place.
+/// holding one opens `menu` (put in a suitcase, delete); tapping the backdrop closes the
+/// overlay. Reduce Motion freezes the rings in place.
 /// ponytail: past ~36 items on a phone the circles overlap; the ring cap would need a
 /// zoom or a page if a real inventory gets that big.
-struct InventoryRings: View {
+struct InventoryRings<MenuContent: View>: View {
     let items: [ScannedItem]
     var select: (ScannedItem) -> Void
     var dismiss: () -> Void
+    /// The long-press menu for one circle; the caller owns the suitcase list and the actions.
+    @ViewBuilder var menu: (ScannedItem) -> MenuContent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -87,6 +90,7 @@ struct InventoryRings: View {
                 .foregroundStyle(.white)
         }
         .buttonStyle(.plain)
+        .contextMenu { menu(item) }
         .accessibilityLabel(String(format: "%@, %.1f by %.1f by %.1f centimetres", label,
                                    item.width * 100, item.depth * 100, item.height * 100))
     }

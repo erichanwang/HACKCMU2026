@@ -531,6 +531,9 @@ struct DiagramLayout {
     /// heights, because the room they take is the finding: left blank, the band
     /// reads as a rendering bug rather than as screen the diagram does not get.
     var chrome: [(label: String, y: Float, height: Float)] = []
+    /// Where the bottom of the screen falls on this page. Below it the device has
+    /// content but no screen: it is reached by scrolling, not by looking.
+    var fold: Float?
     /// Font sizes: the item label inside its rect, the dimensions line under it,
     /// the bare step number, and body text. The desktop numbers are this tool's;
     /// the phone's are the view's own (`.caption2` = 11, `.system(size: 9)`).
@@ -550,6 +553,7 @@ let desktopLayout = DiagramLayout(
     origin: SIMD2<Float>(20, 10),
     legendX: 600,
     band: nil,
+    fold: nil,
     label: 12, size: 10, step: 11, body: 13, title: 14, pad: 6
 )
 
@@ -567,11 +571,44 @@ var layout = desktopLayout
 /// and it has to be read off `layout.label`, not a constant: `--device` draws the
 /// label at the view's 11 pt rather than this page's 12, so a hardcoded width
 /// would call a label too wide for a box it actually fits.
-func labelFits(_ r: CGRect, _ label: String) -> Bool {
-    r.width >= 54 && r.height >= 28
-        && Float(label.count) * layout.label * 0.55 <= Float(r.width) - 2 * layout.pad
-}
 func sizeFits(_ r: CGRect) -> Bool { r.width >= 74 && r.height >= 44 }
+
+/// How the label goes into its rectangle, or nil for "it does not, draw the step
+/// number".
+///
+/// This is `PlanDiagramView`'s `.lineLimit(2).minimumScaleFactor(planDiagramLabelFloorSize / 11)`,
+/// i.e. shrink to a 7 pt floor before giving up, expressed
+/// as the two things SVG `<text>` can actually do: one line at full size, or two
+/// at 75%. Before this existed the picture fell back to a bare step number
+/// wherever one line overflowed, which on the demo plan meant drawing `2` for the
+/// toiletry kit while the phone was showing "2. Toiletry kit" over two lines —
+/// the picture under-reporting the device on the very item the scale question is
+/// about.
+// Copies of `PlanDiagramView`'s label rules, which are `internal` to PackingPlanUI and so
+// cannot be linked. They were 54/28 and 0.75 until the floor landed: the gate is now the size
+// two 7 pt lines need, and the shrink runs down to that 7 pt floor instead of stopping at
+// 0.75 x 11 = 8.25 pt. Keep these three in step with PlanDiagramView or this tool's `view:`
+// column lies about the device -- which it did, for exactly one item, until this was updated.
+let LABEL_GATE_W: CGFloat = 32
+let LABEL_GATE_H: CGFloat = 26
+let LABEL_FLOOR_PT: Float = 7
+let LABEL_MIN_SCALE: Float = 7.0 / 11.0
+
+func labelLayout(_ r: CGRect, _ label: String) -> (lines: [String], size: Float)? {
+    // The view's own gate. Under this it draws the step number and nothing else,
+    // however short the label is.
+    guard r.width >= LABEL_GATE_W, r.height >= LABEL_GATE_H else { return nil }
+    let room = Float(r.width) - 2 * layout.pad
+    if Float(label.count) * layout.label * 0.55 <= room { return ([label], layout.label) }
+
+    let shrunk = max(LABEL_FLOOR_PT, layout.label * LABEL_MIN_SCALE)
+    let lines = wrapped(label, max(1, Int(room / (shrunk * 0.55))))
+    guard lines.count <= 2,
+          lines.allSatisfy({ Float($0.count) * shrunk * 0.55 <= room }),
+          Float(lines.count) * (shrunk + 1) + layout.pad <= Float(r.height)
+    else { return nil }
+    return (lines, shrunk)
+}
 
 /// What the device puts inside an item's rectangle, and what this SVG puts there.
 ///
@@ -581,9 +618,10 @@ func sizeFits(_ r: CGRect) -> Bool { r.width >= 74 && r.height >= 44 }
 /// number. Reported as two columns rather than papered over — `svg` is what you
 /// are looking at, `view` is what the judge sees.
 func legibility(_ r: CGRect, _ label: String) -> (view: String, svg: String) {
-    let view = (r.width >= 54 && r.height >= 28) ? (sizeFits(r) ? "label+size" : "label") : "step only"
-    let svg = labelFits(r, label) ? (sizeFits(r) ? "label+size" : "label") : "step only"
-    return (view, svg)
+    let view = (r.width >= LABEL_GATE_W && r.height >= LABEL_GATE_H) ? (sizeFits(r) ? "label+size" : "label") : "step only"
+    guard let fit = labelLayout(r, label) else { return (view, "step only") }
+    let wrap = fit.lines.count > 1 ? "*" : ""
+    return (view, (sizeFits(r) ? "label+size" : "label") + wrap)
 }
 
 // MARK: - Device scale (--device)
@@ -597,12 +635,20 @@ func legibility(_ r: CGRect, _ label: String) -> (view: String, svg: String) {
 /// at. `PlanDiagramView` is presented as a `.sheet` (`Spike/SpikeApp.swift`), and a
 /// `.large` detent leaves the presenter's status bar showing, so the card starts
 /// below the top safe inset plus a small peek.
+///
+/// **`padding` and `diagramHeight` are copies.** `PlanDiagramView` declares both
+/// outside its SwiftUI guard, precisely so a Linux build can check them —
+/// `planDiagramPadding` and `planDiagramHeight(footprint:width:)` — but both are
+/// `internal` to `PackingPlanUI`, and plan3d is a different module. So they are
+/// restated here and named, the same way the 5 mm layer rule is stated twice in
+/// the library. If the view's numbers move, these have to move with them; the run
+/// asserts the one relationship that catches a formula got backwards.
 enum Phone {
     static let screen = SIMD2<Float>(390, 844)
     static let safeTop: Float = 47       // status bar / notch, non-Dynamic-Island
     static let safeBottom: Float = 34    // home indicator
     static let sheetPeek: Float = 10     // .large detent's gap above the card
-    static let padding: Float = 16       // SwiftUI `.padding()` default on iOS
+    static let padding: Float = 16       // = planDiagramPadding, explicit in the view
     static let spacing: Float = 14       // PlanDiagramView's VStack spacing
     static let legendSpacing: Float = 6  // its legend VStack spacing
 
@@ -615,11 +661,22 @@ enum Phone {
     static let swatch: Float = 18        // legend step circle
     static let bannerPad: Float = 8      // PlanIssueBanner's padding, top and bottom
 
-    /// The column inside the view's own `.padding()`.
+    /// The column inside the view's own padding — what `planDiagramHeight` is fed.
     static var content: Float { screen.x - 2 * padding }
 
     /// The height the view's outer `VStack` is given.
     static var frame: Float { screen.y - safeTop - sheetPeek - safeBottom }
+
+    /// `planDiagramHeight(footprint:width:)`, restated: the footprint is drawn to
+    /// scale, so its height is its width times the bag's depth-over-width ratio.
+    ///
+    /// **A function of width alone**, which is the whole point of it — the diagram
+    /// takes its height before anything else is measured, so no amount of chrome
+    /// can negotiate it down. Everything that does not fit scrolls.
+    static func diagramHeight(_ footprint: Vector3) -> Float {
+        guard footprint.x > 0, footprint.z > 0 else { return 0 }
+        return content * (footprint.z / footprint.x)
+    }
 }
 
 /// Characters that fit `points` of width at `size`, at ~0.55 em each — the same
@@ -651,18 +708,18 @@ func viewLegendHeight(_ placements: [Placement], _ protrusions: [Placement]) -> 
 
 /// The page the device actually gives one layer, and the arithmetic that got there.
 ///
-/// `PlanDiagramView`'s body is a `VStack` with **no `ScrollView`**, so the diagram
-/// is not sized by the picture it wants to be — it is handed whatever height is
-/// left after the header, the two issue banners, the layer picker, the caption, the
-/// legend and the collapsed details row have taken theirs. Two consequences the
-/// desktop page cannot show: the scale is **per layer**, because a layer with four
-/// chatty items has a taller legend than one with a single item; and a plan with
-/// enough items in one layer squeezes the diagram towards nothing with nowhere to
-/// scroll.
+/// `PlanDiagramView`'s body is a `GeometryReader` over a `VStack` whose first
+/// three rows — header, layer picker, layer caption — are fixed chrome that never
+/// scrolls, and whose fourth is a `ScrollView` holding the two issue banners, the
+/// diagram, the legend and the collapsed details row.
 ///
-/// `aspectRatio(.fit)` then fits the footprint's 0.4064 : 0.6096 inside that box,
-/// which is what `GeometryReader` reports and what `FootprintProjection` divides
-/// by — so the fitted box is returned, not the raw one, and the footprint fills it.
+/// **The diagram is not the residual.** It takes `planDiagramHeight`, a function
+/// of the content width alone, before anything else is measured; nothing can
+/// negotiate it down and the overflow scrolls instead. So the scale is one number
+/// for a given footprint and screen width — the same on every layer, banners or no
+/// banners — and what the chrome costs is no longer picture, it is *scrolling*.
+/// The two things worth reporting are therefore the scale, and how far down the
+/// bottom of the bag starts.
 func phoneLayout(
     _ plan: PackingPlan,
     layer: PlanLayer,
@@ -672,7 +729,7 @@ func phoneLayout(
     caption: String,
     issues: [String],
     stability: [String]
-) -> (layout: DiagramLayout, rows: [(String, Float)], scale: Float) {
+) -> (layout: DiagramLayout, rows: [(String, Float)], scale: Float, scrollToSeeItAll: Float) {
     func banner(_ list: [String]) -> Float {
         guard !list.isEmpty else { return 0 }
         let body = list.prefix(3).reduce(Float(0)) {
@@ -682,73 +739,76 @@ func phoneLayout(
         return 2 * Phone.bannerPad + Phone.caption + 2 + body
     }
 
-    // Named in the order the VStack stacks them. A zero row is a view that is not
-    // there at all — it costs no spacing either, which is why the count matters.
-    var above: [(String, Float)] = [
+    // The diagram, first and unconditionally.
+    let diagram = SIMD2(Phone.content, Phone.diagramHeight(plan.container.dimensions))
+    let scale = diagram.x / Float(plan.container.dimensions.x)
+    // The one relationship worth asserting: a height that is width × depth/width
+    // makes `FootprintProjection`'s two candidate scales equal, so the footprint
+    // fills its box exactly. If this trips, the formula has been copied backwards.
+    let byHeight = diagram.y / Float(plan.container.dimensions.z)
+    precondition(abs(scale - byHeight) < 0.5, "diagramHeight does not preserve the footprint ratio")
+
+    // Fixed chrome: the rows above the ScrollView. These never scroll away.
+    var fixed: [(String, Float)] = [
         ("top padding", Phone.padding),
         ("header", Phone.headline + 2
             + Float(wrapped(header, fits(Phone.content, 12)).count) * Phone.caption),
-        ("geometry banner", banner(issues)),
-        ("stability banner", banner(stability)),
         ("layer picker", layers > 1 ? Phone.picker : 0),
         ("layer caption", Float(wrapped(caption, fits(Phone.content, 12)).count) * Phone.caption),
     ]
-    var below: [(String, Float)] = [
+    // One gap per boundary between rows that exist, plus the one before the
+    // ScrollView itself.
+    let fixedRows = fixed.dropFirst().filter { $0.1 > 0 }.count
+    let band = fixed.reduce(0) { $0 + $1.1 } + Float(fixedRows) * Phone.spacing
+    let viewport = Phone.frame - band - Phone.padding
+
+    // The scrolling column, in the order the inner VStack stacks it.
+    var scrolling: [(String, Float)] = [
+        ("geometry banner", banner(issues)),
+        ("stability banner", banner(stability)),
+        ("diagram (fixed height)", diagram.y),
         ("legend", viewLegendHeight(layer.placements, protrusions)),
         ("details row", Phone.details),
-        ("bottom padding", Phone.padding),
     ]
 
-    // One gap per boundary between views that exist. The two paddings are not
-    // stack children, and `Spacer(minLength: 0)` is one that contributes no height
-    // but does take a gap.
-    let children = above.dropFirst().filter { $0.1 > 0 }.count
-        + 1  // the diagram
-        + below.dropLast().count
-        + 1  // Spacer(minLength: 0)
-    let gaps = Float(children - 1) * Phone.spacing
-    let spent = (above + below).reduce(0) { $0 + $1.1 } + gaps
-    let free = Phone.frame - spent
+    // How far down the scroll column the picture starts, and whether its bottom
+    // is on screen before you touch it.
+    var top: Float = 0
+    var blocks: [(String, Float, Float)] = []
+    for (name, size) in scrolling where size > 0 && name.hasSuffix("banner") {
+        blocks.append((name, band + top, size))
+        top += size + Phone.spacing
+    }
+    let hidden = max(0, top + diagram.y - viewport)
 
-    // aspectRatio(.fit): the footprint's own ratio inside the free box.
-    let ratio = Float(plan.container.dimensions.x / plan.container.dimensions.z)
-    let box = SIMD2(Phone.content, max(1, free))
-    let fitted = box.x / box.y <= ratio
-        ? SIMD2(box.x, box.x / ratio)
-        : SIMD2(box.y * ratio, box.y)
-
-    // Everything above the picture, including the gap that separates the caption
-    // from it — the SVG's header band is exactly this tall, so the proportions on
-    // the page are the proportions on the screen.
-    let rowsAbove = above.dropFirst().filter { $0.1 > 0 }.count
-    let band = above.reduce(0) { $0 + $1.1 } + Float(rowsAbove) * Phone.spacing
-
-    // Walk the same rows again to find where the three the tool does not draw
-    // land, so they can be blocked out at full height in the band.
-    let undrawn = ["geometry banner", "stability banner", "layer picker"]
-    var chrome: [(String, Float, Float)] = []
+    // The picker is fixed chrome, so its y is absolute; the banners were placed
+    // above relative to the band. Both get blocked out at full height.
     var cursor = Phone.padding
-    for (name, size) in above.dropFirst() where size > 0 {
-        if undrawn.contains(name) { chrome.append((name, cursor, size)) }
+    for (name, size) in fixed.dropFirst() where size > 0 {
+        if name == "layer picker" { blocks.insert((name, cursor, size), at: 0) }
         cursor += size + Phone.spacing
     }
 
-    above.append(("spacing", gaps))
-    below.append(("diagram (what is left)", free))
+    let gaps = Float(max(0, scrolling.filter { $0.1 > 0 }.count - 1)) * Phone.spacing
+    fixed.append(("fixed chrome subtotal", band))
+    scrolling.append(("spacing", gaps))
+    scrolling.append(("scroll viewport", viewport))
 
     let page = DiagramLayout(
         canvas: Phone.screen.x,
-        diagram: CGSize(width: CGFloat(fitted.x), height: CGFloat(fitted.y)),
-        // y is relative to the band, which the SVG has already translated past.
-        origin: SIMD2(Phone.padding + (Phone.content - fitted.x) / 2, 0),
+        diagram: CGSize(width: CGFloat(diagram.x), height: CGFloat(diagram.y)),
+        // y is relative to the band, which the SVG has already translated past:
+        // the banners sit between the two.
+        origin: SIMD2(Phone.padding, top),
         legendX: nil,
         band: band,
-        chrome: chrome,
+        chrome: blocks,
+        fold: band + viewport,
         // The view's own type sizes: `.caption2` in the rect, `.system(size: 9)`
         // for the dimensions line and for the bare step number.
         label: 11, size: 9, step: 9, body: 11, title: 11, pad: 4
     )
-    return (page, above + below, fitted.x / Float(plan.container.dimensions.x))
+    return (page, fixed + scrolling, scale, hidden)
 }
 
 /// A projected rect as SVG attributes, shifted into the diagram column.
@@ -824,12 +884,14 @@ func layerSVG(
         let x = Float(r.minX) + layout.origin.x + layout.pad
         let y = Float(r.minY) + layout.origin.y + layout.label + layout.pad
         let label = "\(placement.step). \(placement.label)"
-        if labelFits(r, label) {
-            out += text(x, y, label, size: layout.label, fill: colour)
+        if let fit = labelLayout(r, label) {
+            for (i, line) in fit.lines.enumerated() {
+                out += text(x, y + Float(i) * (fit.size + 1), line, size: fit.size, fill: colour)
+            }
             if sizeFits(r) {
                 let size = "\(wholeCentimetres(placement.size.x)) × \(wholeCentimetres(placement.size.z))"
-                out += text(x, y + layout.size + 4, size, size: layout.size, fill: "#c9ced6",
-                            family: "monospace")
+                let below = y + Float(fit.lines.count - 1) * (fit.size + 1) + layout.size + 4
+                out += text(x, below, size, size: layout.size, fill: "#c9ced6", family: "monospace")
             }
         } else {
             out += text(x, y, "\(placement.step)", size: layout.step, fill: colour, family: "monospace")
@@ -922,17 +984,41 @@ func layerSVG(
     }
     page += text(12, band - 6, caption, size: layout.body, fill: "#e8d654")
     if layout.legendX == nil {
-        // The top of the picture, so the chrome the device spends above it is
-        // something you can see rather than a number in the log.
+        // Where the fixed chrome stops and the scrolling column starts.
         page += String(
             format: "<line x1=\"12\" y1=\"%.1f\" x2=\"%.1f\" y2=\"%.1f\" ",
             band - 1, layout.canvas - 12, band - 1
         )
         page += "stroke=\"#2c3038\" stroke-width=\"1\"/>\n"
     }
+    // The bottom of the screen. Everything under it is real and reachable, but
+    // only by scrolling — which is the shape of the new layout, and the one thing
+    // a still picture would otherwise hide. Drawn after the group, not before it:
+    // in the band it came out behind the container and the first big item, which
+    // is exactly where it needs to be visible.
+    var edge = ""
+    if let fold = layout.fold {
+        edge += String(
+            format: "<line x1=\"0\" y1=\"%.1f\" x2=\"%.1f\" y2=\"%.1f\" ",
+            fold, layout.canvas, fold
+        )
+        edge += "stroke=\"#e8d654\" stroke-width=\"1.5\" stroke-dasharray=\"8 5\"/>\n"
+        // On a chip, because the fold lands wherever it lands — over the bag on a
+        // plan with banners, in the middle of the legend without them — and a
+        // caption sitting on someone else's sentence is how a picture stops being
+        // evidence.
+        let note = "bottom of the screen — scroll below here"
+        let chip = Float(note.count) * 9 * 0.55 + 10
+        edge += String(
+            format: "<rect x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"13\" rx=\"3\" ",
+            layout.canvas - 12 - chip, fold - 15, chip
+        )
+        edge += "fill=\"#16181c\" stroke=\"#e8d654\" stroke-opacity=\"0.5\"/>\n"
+        edge += text(layout.canvas - 17, fold - 5, note, size: 9, fill: "#e8d654", anchor: "end")
+    }
     page += "<g transform=\"translate(0,\(Int(band)))\">\n"
 
-    return page + out + "</g>\n</svg>\n"
+    return page + out + "</g>\n" + edge + "</svg>\n"
 }
 
 // MARK: - The rest of the server document
@@ -1185,8 +1271,9 @@ if wantLayers {
             + "\(Int(Phone.frame)) pt of frame height (sheet at .large: "
             + "\(Int(Phone.screen.y)) − \(Int(Phone.safeTop)) top safe − \(Int(Phone.sheetPeek)) peek "
             + "− \(Int(Phone.safeBottom)) home indicator)")
-        print("device: banners cost the diagram height — "
-            + "\(issues.count) geometry, \(stability.count) stability")
+        print("device: banners push the diagram down the scroll column — "
+            + "\(issues.count) geometry, \(stability.count) stability — they scroll, "
+            + "they no longer shrink the picture (packing-core af90f89)")
     }
 
     for layer in layers {
@@ -1218,10 +1305,11 @@ if wantLayers {
             print("layer \(layer.index + 1) budget: "
                 + phone.rows.filter { $0.1 > 0 }.map { "\($0.0) \(Int($0.1))" }
                     .joined(separator: ", "))
-            if Float(layout.diagram.height) < 1 {
-                print("layer \(layer.index + 1): WARNING the chrome and legend use the whole "
-                    + "screen — the diagram is squeezed to nothing and the view has no ScrollView")
-            }
+            print("layer \(layer.index + 1) scroll: "
+                + (phone.scrollToSeeItAll <= 0
+                    ? "the whole diagram is on screen at rest"
+                    : "\(Int(phone.scrollToSeeItAll)) pt of the diagram is below the fold — "
+                        + "the bag is full size, you scroll to reach the bottom of it"))
         }
         // Per item: the rectangle the projection gives it, and what text survives in
         // it. This is the whole question `--device` exists to answer, so it is a

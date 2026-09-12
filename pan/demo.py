@@ -30,7 +30,15 @@ from pan.evaluate import compose_side_by_side, evaluate_rollout, save_png
 from pan.observation import observation_from_scene, save_observation
 from pan.rollouts import RolloutManager
 from pan.solver_bridge import candidates_from_packer3d, first_divergence
-from pan.types import CandidateSequence, PackingAction, Scene, SimulationResult, apply_action, apply_sequence
+from pan.types import (
+    CandidateSequence,
+    PackingAction,
+    Scene,
+    SimulationResult,
+    apply_action,
+    apply_sequence,
+    honesty_note,
+)
 from pan.world_model import get_world_model
 from tests.fixtures import valid_packed_scene
 
@@ -156,9 +164,11 @@ def build_solver_state(
 
 
 def persist_result(result: SimulationResult, out_dir: str | Path) -> SimulationResult:
-    """Write frame_00.png..frame_NN.png + rollout.gif into `out_dir` (mirrors
-    `MockPanBackend.persist`, but works for any backend's result). Returns a
-    copy of `result` with `video_path`/`final_frame_path` filled in."""
+    """Write frame_00.png..frame_NN.png + rollout.gif + backend.txt into
+    `out_dir` (mirrors `MockPanBackend.persist`, but works for any backend's
+    result). `backend.txt` travels with the assets so nobody opening the GIF on
+    its own mistakes it for a real PAN prediction. Returns a copy of `result`
+    with `video_path`/`final_frame_path` filled in."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if not result.frames:
@@ -174,6 +184,9 @@ def persist_result(result: SimulationResult, out_dir: str | Path) -> SimulationR
     images = [Image.fromarray(np.asarray(f, dtype=np.uint8)) for f in result.frames]
     images[0].save(gif_path, save_all=True, append_images=images[1:], duration=150, loop=0)
 
+    (out_dir / "backend.txt").write_text(
+        f"world model: {result.backend} -- {honesty_note(result.backend, result.metadata)}\n"
+    )
     return replace(result, video_path=str(gif_path), final_frame_path=str(frame_paths[-1]))
 
 
@@ -192,21 +205,30 @@ def _relativize_reports(dicts: list[dict], base: Path) -> None:
             d[key] = _relativize(d.get(key), base)
 
 
-def _write_summary(out_dir: Path, rollups: list, note: Optional[str] = None) -> None:
+def _write_summary(out_dir: Path, rollups: list, backend_line: str, note: Optional[str] = None) -> None:
     """PAN.md sec 20 judge-readable block, exact shape:
+
+        world model: cache(mock) -- synthetic frames drawn by the mock, ...
 
         Candidate A  shoe first
           physics: valid   PAN: complete   execution risk: low
+          world model: mock -- synthetic frames drawn by the mock, ...
           action: ...
 
-    `note` (the solver path's divergence line) is prepended when given.
+    `backend_line` names the run's world model; the per-candidate copy repeats
+    it with that rollout's own `metadata["note"]`, so no status/risk line is
+    ever read as a visual PAN prediction. `note` (the solver path's divergence
+    line) is prepended when given.
     """
     lines: list[str] = []
     if note:
-        lines += [note, ""]
+        lines.append(note)
+    lines += [backend_line, ""]
     for r in rollups:
         lines.append(f"Candidate {r.candidate_id}  {r.label}")
         lines.append(f"  physics: {r.physics_status}   PAN: {r.simulation_status}   execution risk: {r.execution_risk or 'n/a'}")
+        if r.backend:
+            lines.append(f"  world model: {r.backend} -- {r.backend_note}")
         lines.append(f"  action: {r.action_text}")
         lines.append("")
     (out_dir / "summary.txt").write_text("\n".join(lines).rstrip() + "\n")
@@ -296,7 +318,8 @@ def run_demo(
             still = observation_from_scene(state, viewpoint).image
             first_img, last_img = still, still
         comparison_panels.append((f"{cand.candidate_id} {cand.label}", [first_img, last_img, expected_img]))
-    comparison = compose_side_by_side(comparison_panels, frame_indices=(0, 1, 2))
+    backend_line = f"world model: {world_model.name} -- {honesty_note(world_model.name)}"
+    comparison = compose_side_by_side(comparison_panels, frame_indices=(0, 1, 2), banner=backend_line)
     save_png(comparison, out_dir / "comparison.png")
 
     candidate_rollups = batch.candidate_reports()
@@ -307,6 +330,7 @@ def run_demo(
 
     payload = {
         "backend": world_model.name,
+        "backend_note": honesty_note(world_model.name),
         "pan_available": world_model.available(),
         "returned_after_ms": returned_after_ms,
         "candidates": candidate_dicts,
@@ -315,7 +339,7 @@ def run_demo(
     if note:
         payload["divergence"] = note
     (out_dir / "candidates.json").write_text(json.dumps(payload, indent=2))
-    _write_summary(out_dir, candidate_rollups, note=note)
+    _write_summary(out_dir, candidate_rollups, backend_line, note=note)
 
     manager.shutdown(wait=False)
     return payload

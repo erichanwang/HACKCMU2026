@@ -27,12 +27,13 @@ against the code on `loop` today (grep or read), not carried over from the morni
   labeller in both processes (double attempts, double Grok billing) unless items are claimed
   atomically. `make server` and `docs/DEMO_SCRIPT.md` agree on one worker with `--host 0.0.0.0`.
   Add the atomic claim in `server/main.py::relabel_pending` before ever adding `--workers`.
-- **Demo plans are not reproducible run-to-run.** `server/planner.py:74` calls `pack_optimized`
-  with `time_budget_s=per_run` only (never `max_iterations`), and `packer3d/packer3d/search.py`'s
-  annealing loop exits on `time.perf_counter() - t0 >= budget_t` — so the same seed does a
-  different amount of search, and can return a different plan, depending on machine load.
-  `packer3d/ALGORITHM.md` section 5 already documents the fix (`time_budget_s=0,
-  max_iterations=N` for a byte-identical rerun); nothing in the server/demo path uses it.
+- **Plans are reproducible only in fixed-iteration mode.** `PLAN_ITERATIONS=N` (892a914) makes
+  `server/planner.py` run `pack_optimized` with `time_budget_s=0, max_iterations=N`, so the same
+  scan gives the same plan on stage; unset, the wall-clock budget stays (a judge's wait is
+  bounded, the plan is not). Calibrate N from `stats.sa_iterations` of a normal run on the demo
+  laptop. Measured on this box: the annealing tail improves nothing on a 5-item plan
+  (`sa_improvements: 0`, `search_objective == greedy_objective`); the 18-run multistart does the
+  work, so fixed mode costs less than it looks.
 - **`scripts/ar_sim.py:1002`'s comment is now wrong.** It says the reality checks below it
   "never call `fail()`", but `lid_open_true_interior_check` (line 856, `fail()` at line 871,
   added in today's `59721c0`) does call it when escape exceeds 1cm. Not dangerous — the gate is

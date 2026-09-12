@@ -9,6 +9,7 @@ Same wiring as `server/planner.py`: `packer3d.pack_naive` / `pack_optimized` on 
     python3 tools/packbench/packbench.py                        # run the corpus
     python3 tools/packbench/packbench.py --json run.json         # save it
     python3 tools/packbench/packbench.py --baseline baseline.json  # per-scenario delta
+    python3 tools/packbench/packbench.py --quick --baseline baseline.json --check  # pre-commit gate
 
 Determinism: the default candidate budget is an SA *iteration* cap, so two runs with
 the same seeds print byte-identical tables and a `--baseline` against the first is all
@@ -16,9 +17,15 @@ zeros. (Only the wall-clock numbers move: they are reported and saved, never com
 `--time` switches to the wall-clock budget the server actually uses, which is NOT
 reproducible - the iteration count follows the clock - so use it to see production
 behaviour, not to compare two solver revisions.
+
+Every run stamps itself with the commit it measured, whether the tree was dirty, the
+flags and the clock, so a saved run says what it is. `--check` turns the delta into an
+exit code; the regression definition lives in `regressions()` and README.md.
 """
 import argparse
+import datetime
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -35,6 +42,12 @@ from planner import rank  # noqa: E402  - the production ranking, not a copy
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 DEFAULT_ITERS = 40  # ~8 min for the 7-fixture corpus; the solver decodes at ~0.5-2 s per iteration
+# --quick: packing pressure + a heightmap cavity + fragility-as-binding-constraint, and
+# nothing over ~21 s. Why these three: see README.md.
+QUICK = ("adversarial_exact_fit.json", "camera_kit_fragile.json", "upright_bottles.json")
+# A utilisation drop this large (fraction, not points) while packing the SAME items is
+# the one utilisation change the gate treats as a regression. See regressions().
+UTIL_DROP = 0.05
 
 
 def run_scenario(scenario: dict, candidates, iters, time_budget):
@@ -67,13 +80,14 @@ def row(candidate: dict, items_given: int) -> dict:
             "seconds": candidate["seconds"]}
 
 
-def bench(fixtures: Path, candidates, iters, time_budget) -> dict:
+def bench(fixtures: Path, candidates, iters, time_budget, only=None) -> dict:
     manifest = {}
     mpath = fixtures / "manifest.json"
     if mpath.exists():
         manifest = json.loads(mpath.read_text())
     results = []
-    for path in sorted(p for p in fixtures.glob("*.json") if p.name != "manifest.json"):
+    for path in sorted(p for p in fixtures.glob("*.json")
+                       if p.name != "manifest.json" and (only is None or p.name in only)):
         meta = manifest.get(path.name, {})
         entry = {"file": path.name, "name": meta.get("name", path.stem), "notes": meta.get("notes", "")}
         try:
@@ -107,6 +121,56 @@ def aggregate(results) -> dict:
             "violations": sum(r["best"]["violations"] for r in ok),
             "mean_com_offset": sum(r["best"]["com_lateral_offset"] for r in ok) / len(ok),
             "seconds": sum(c["seconds"] for r in ok for c in r["candidates"])}
+
+
+def git_state() -> dict:
+    """`{"commit", "dirty"}` for the tree the solver was imported from, or nulls outside git."""
+    def g(*a):
+        return subprocess.run(("git", "-C", str(ROOT)) + a, capture_output=True, text=True,
+                              timeout=15).stdout
+    try:
+        commit = g("rev-parse", "HEAD").strip() or None
+        # whole-tree dirt, not just the solver: any uncommitted edit makes the numbers
+        # unattributable to `commit`, which is the whole point of recording it.
+        dirty = bool(g("status", "--porcelain").strip())
+    except (OSError, subprocess.SubprocessError):
+        return {"commit": None, "dirty": None}
+    return {"commit": commit, "dirty": dirty}
+
+
+def stamp_run(run: dict, args, started, elapsed) -> dict:
+    """Record what this run actually measured, so a saved run is self-describing."""
+    run["run"] = dict(git_state(),
+                      started_at=started.replace(microsecond=0).isoformat(),
+                      wall_clock_s=round(elapsed, 2),
+                      flags={"fixtures": str(args.fixtures), "quick": bool(args.quick),
+                             "strategy": args.strategy, "seed": args.seed,
+                             "iters": None if args.time else args.iters,
+                             "time": args.time or None})
+    return run
+
+
+def print_header(run: dict) -> None:
+    m = run.get("run")
+    if not m:
+        print("packbench  (unstamped run - no commit/flags recorded)")
+        print()
+        return
+    f = m["flags"]
+    commit = (m["commit"] or "?")[:12]
+    if m["dirty"]:
+        commit += "-dirty"
+    print(f"packbench  commit  {commit}")
+    if m["dirty"]:
+        print("           *** DIRTY TREE: measured against uncommitted changes, "
+              "not attributable to that commit ***")
+    elif m["dirty"] is None:
+        print("           (not a git checkout: commit and dirty state unknown)")
+    budget = f"--time {f['time']}" if f["time"] else f"--iters {f['iters']}"
+    print(f"           flags   {budget} --seed {f['seed']} --strategy {f['strategy']}"
+          f"{' --quick' if f['quick'] else ''}")
+    print(f"           clock   {m['started_at']}  {m['wall_clock_s']:.1f}s wall")
+    print()
 
 
 HDR = f"{'scenario':<26} {'packed':>9} {'util':>7} {'phys':>5} {'viol':>5} {'com(mm)':>8}  chosen"
@@ -164,14 +228,91 @@ def print_delta(run: dict, base: dict) -> None:
               f"{(n['volume_utilization'] - b['volume_utilization']) * 100:>+7.1f}% {phys:>+7d} "
               f"{n['violations'] - b['violations']:>+7d} "
               f"{(n['com_lateral_offset'] - b['com_lateral_offset']) * 1000:>+10.1f}")
+    subset = run.get("run", {}).get("flags", {}).get("quick")
     for f in sorted(set(old) - {r["file"] for r in run["scenarios"]}):
-        print(f"{old[f]['name'][:26]:<26} {'GONE':>9}")
+        print(f"{old[f]['name'][:26]:<26} {'not run' if subset else 'GONE':>9}")
     a, ab = run["aggregate"], base["aggregate"]
     print("-" * len(DHDR))
+    if a.get("scenarios") != ab.get("scenarios"):
+        # aggregates over different corpora are not comparable; the per-fixture rows are.
+        print(f"{'AGGREGATE':<26} {'n/a':>9}  ({a.get('scenarios')} scenarios vs "
+              f"{ab.get('scenarios')} in the baseline)")
+        return
     print(f"{'AGGREGATE':<26} {a['items_packed'] - ab['items_packed']:>+9d} "
           f"{(a['mean_utilization'] - ab['mean_utilization']) * 100:>+7.1f}% "
           f"{a['physics_valid'] - ab['physics_valid']:>+7d} {a['violations'] - ab['violations']:>+7d} "
           f"{(a['mean_com_offset'] - ab['mean_com_offset']) * 1000:>+10.1f}")
+
+
+def regressions(run: dict, base: dict):
+    """`(regressions, warnings)` for `--check`, per-scenario on the chosen ("best") plan.
+
+    A REGRESSION (fails the gate) is, for a fixture measured by both runs:
+      * fewer items packed than the baseline;
+      * a new physics violation - `violations` higher than the baseline;
+      * physics flipping valid -> invalid;
+      * the fixture erroring out when the baseline solved it;
+      * volume utilisation falling by more than UTIL_DROP while packing the SAME number
+        of items - the one utilisation change that is unambiguously worse.
+    NOT a regression, deliberately, because a gate that fires on these gets switched off:
+      * utilisation moving by less than UTIL_DROP, or moving at all when the item count
+        changed (packing one more awkward item legitimately costs utilisation);
+      * centre of mass moving in any direction by any amount - it is reported, never gated;
+      * wall clock;
+      * a fixture the baseline does not have, or one this run did not measure (`--quick`);
+      * anything in the aggregate row: over a `--quick` subset it compares different
+        corpora, so the gate is per-fixture only.
+    """
+    old = {r["file"]: r for r in base["scenarios"]}
+    new = {r["file"]: r for r in run["scenarios"]}
+    regs, warns = [], []
+    for f in sorted(new):
+        r, o = new[f], old.get(f)
+        if o is None:
+            warns.append(f"{f}: not in the baseline, nothing to compare (not gated)")
+            continue
+        if "best" not in o:
+            warns.append(f"{f}: baseline has no result for it (not gated)")
+            continue
+        if "best" not in r:
+            regs.append(f"{f}: errored this run ({r.get('error', '?')}); "
+                        f"baseline packed {o['best']['items_packed']}")
+            continue
+        n, b = r["best"], o["best"]
+        if n["items_packed"] < b["items_packed"]:
+            regs.append(f"{f}: packed {n['items_packed']} of {n['items_given']}, "
+                        f"baseline packed {b['items_packed']}")
+        if n["violations"] > b["violations"]:
+            regs.append(f"{f}: physics violations {b['violations']} -> {n['violations']}")
+        if b["physics_valid"] and not n["physics_valid"]:
+            regs.append(f"{f}: physics valid -> INVALID")
+        if (n["items_packed"] == b["items_packed"]
+                and n["volume_utilization"] < b["volume_utilization"] - UTIL_DROP):
+            regs.append(f"{f}: utilisation {b['volume_utilization'] * 100:.1f}% -> "
+                        f"{n['volume_utilization'] * 100:.1f}% on the same "
+                        f"{n['items_packed']} items (allowed drop {UTIL_DROP * 100:.0f} pts)")
+    for f in sorted(set(old) - set(new)):
+        warns.append(f"{f}: in the baseline, not measured by this run (not gated)")
+    if run["config"] != base["config"]:
+        warns.append(f"config differs from the baseline ({json.dumps(run['config'], sort_keys=True)} "
+                     f"vs {json.dumps(base['config'], sort_keys=True)}) - the deltas compare "
+                     "two different measurements")
+    if run.get("run", {}).get("dirty"):
+        warns.append("this run measured a DIRTY tree; a pass here does not clear the commit")
+    if base.get("run", {}).get("dirty"):
+        warns.append("the baseline was measured on a DIRTY tree; it is not a commit-attributable bar")
+    return regs, warns
+
+
+def print_check(regs, warns) -> None:
+    for w in warns:
+        print(f"warn: {w}")
+    if regs:
+        print(f"FAIL: {len(regs)} regression(s) against the baseline")
+        for r in regs:
+            print(f"  - {r}")
+    else:
+        print("PASS: no regressions against the baseline")
 
 
 def main(argv=None) -> int:
@@ -187,6 +328,12 @@ def main(argv=None) -> int:
     ap.add_argument("--json", type=Path, help="write the full run here")
     ap.add_argument("--baseline", type=Path, help="print a per-scenario delta against a saved run")
     ap.add_argument("--times", action="store_true", help="also print wall clock per candidate")
+    ap.add_argument("--quick", action="store_true",
+                    help=f"only the fast subset ({', '.join(f.split('.')[0] for f in QUICK)}); "
+                         "~35 s instead of ~7 min, for running before a commit")
+    ap.add_argument("--check", action="store_true",
+                    help="exit 1 if the run is WORSE than --baseline (see regressions() for "
+                         "exactly what counts); requires --baseline")
     args = ap.parse_args(argv)
 
     seeds = [int(s) for s in args.seed.split(",") if s.strip() != ""]
@@ -199,16 +346,38 @@ def main(argv=None) -> int:
         print(f"no fixture directory: {args.fixtures}", file=sys.stderr)
         return 2
 
-    run = bench(args.fixtures, candidates, args.iters, args.time)
+    if args.check and not args.baseline:
+        print("--check needs --baseline", file=sys.stderr)
+        return 2
+    only = None
+    if args.quick:
+        only = set(QUICK)
+        missing = sorted(f for f in only if not (args.fixtures / f).is_file())
+        if missing:
+            print(f"--quick fixtures missing from {args.fixtures}: {', '.join(missing)}", file=sys.stderr)
+            return 2
+
+    started = datetime.datetime.now().astimezone()
+    t0 = time.perf_counter()
+    run = bench(args.fixtures, candidates, args.iters, args.time, only)
+    stamp_run(run, args, started, time.perf_counter() - t0)
+    print_header(run)
     print_table(run)
     if args.times:
         print_times(run)
     if args.json:
         args.json.write_text(json.dumps(run, indent=2, sort_keys=True) + "\n")
-    if args.baseline:
-        print()
-        print_delta(run, json.loads(args.baseline.read_text()))
-    return 0
+    if not args.baseline:
+        return 0
+    base = json.loads(args.baseline.read_text())
+    print()
+    print_delta(run, base)
+    if not args.check:
+        return 0
+    regs, warns = regressions(run, base)
+    print()
+    print_check(regs, warns)
+    return 1 if regs else 0
 
 
 if __name__ == "__main__":

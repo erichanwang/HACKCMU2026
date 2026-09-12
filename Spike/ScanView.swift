@@ -73,6 +73,13 @@ struct ScanView: UIViewRepresentable {
         /// One tap at a time: set while a scan's geometry is off on a background thread.
         var scanning = false
         var planOverlay: AnchorEntity?
+        /// The real ARKit anchor `planOverlay` tracks (see `showPlan`). Kept so a later rebuild
+        /// can remove it from the session instead of leaking a stale anchor into every frame.
+        var planARAnchor: ARAnchor?
+        /// Child of `planOverlay` that carries only the live planeY correction (see `refreshPlaneY`).
+        /// A plain `Entity`, not itself ARKit-tracked, so setting its position every frame can't
+        /// race against RealityKit's own sync of `planOverlay`'s transform from `planARAnchor`.
+        var planYOffset: Entity?
         var shownPlan: PackingPlan?
         /// One axis fit per suitcase-mode tap. Averaged (see PlanAnchor.averageAxis) so a single
         /// noisy `minAreaRect` fit doesn't set the bag's rotation for the whole session.
@@ -274,13 +281,38 @@ struct ScanView: UIViewRepresentable {
             shownPlan = plan
             planOverlay?.removeFromParent()
             planOverlay = nil
+            planYOffset = nil
+            // Drop the old tracked anchor from the session too, or a rebuild leaks a stale one
+            // into every subsequent frame update.
+            if let old = planARAnchor { view.session.remove(anchor: old) }
+            planARAnchor = nil
             guard let plan, let suitcase else { return }
-            // planeY: 0 here — the floor height is baked into the anchor's own position below,
-            // not into these local (bag-frame) coordinates, so refreshPlaneY can move the whole
-            // overlay by updating one number instead of rebuilding every box.
-            let frame = PlanAnchor(interior: suitcase.interior, planeY: 0)
-            let orientation = simd_quatf(from: SIMD3<Float>(1, 0, 0), to: suitcase.interior.axis)
-            let anchor = AnchorEntity(world: SIMD3<Float>(0, 0, 0))
+            // A real ARAnchor, not a frozen `AnchorEntity(world:)` snapshot: ARKit keeps correcting
+            // any anchor's `transform` as it refines its world-tracking pose graph (the same
+            // mechanism `currentPlaneY` already leans on for ARPlaneAnchor specifically — see
+            // https://developer.apple.com/documentation/arkit/aranchor,
+            // https://developer.apple.com/documentation/arkit/arsessiondelegate/session(_:didupdate:)-2i91y),
+            // so parenting the overlay to it corrects horizontal (x/z) origin drift and axis/yaw
+            // drift accumulated between the suitcase tap and now — see tests/swift/drift Section 4d.
+            // It does NOT correct the one-tap axis/plane/dimension *fit* noise baked into `suitcase`
+            // before this anchor is ever created (averageAxis already covers axis fit noise
+            // separately by re-tapping); nor is it as strongly grounded as the live plane re-fit
+            // below, since nothing re-observes "the bag" the way ARKit re-observes the table —
+            // unverified without a device, see the report.
+            let bagFrame = PlanAnchor(interior: suitcase.interior, planeY: suitcase.planeY)
+            let arTransform = simd_float4x4(columns: (
+                SIMD4<Float>(bagFrame.axis, 0),
+                SIMD4<Float>(0, 1, 0, 0),
+                SIMD4<Float>(bagFrame.perp, 0),
+                SIMD4<Float>(bagFrame.origin, 1)))
+            let arAnchor = ARAnchor(transform: arTransform)
+            view.session.add(anchor: arAnchor)
+            let anchor = AnchorEntity(anchor: arAnchor)
+            // Carries only the live planeY correction (see `refreshPlaneY`) as an offset on top of
+            // whatever y ARKit reports for `arAnchor` — a plain Entity, so it's not fighting
+            // RealityKit's own sync of `anchor`'s transform from the tracked ARAnchor.
+            let yOffset = Entity()
+            anchor.addChild(yOffset)
             for p in plan.placements {
                 let size = SIMD3<Float>(p.size.x, p.size.y, p.size.z)
                 let color = Self.stepColors[(p.step - 1) % Self.stepColors.count]
@@ -288,13 +320,15 @@ struct ScanView: UIViewRepresentable {
                 let entity = ModelEntity(
                     mesh: mesh,
                     materials: [SimpleMaterial(color: color.withAlphaComponent(0.4), isMetallic: false)])
-                entity.orientation = orientation
-                entity.position = frame.worldCenter(
-                    position: SIMD3<Float>(p.position.x, p.position.y, p.position.z), size: size)
-                anchor.addChild(entity)
+                // No rotation here — `arAnchor`'s own transform already carries the bag's axis.
+                entity.position = SIMD3<Float>(
+                    p.position.x + size.x / 2, p.position.y + size.y / 2, p.position.z + size.z / 2)
+                yOffset.addChild(entity)
             }
             view.scene.addAnchor(anchor)
             planOverlay = anchor
+            planARAnchor = arAnchor
+            planYOffset = yOffset
             refreshPlaneY()
         }
 
@@ -312,11 +346,12 @@ struct ScanView: UIViewRepresentable {
         }
 
         /// Re-anchors the plan overlay's height to the table plane ARKit reports *right now*,
-        /// called every AR frame via `ARSessionDelegate`. Only `planOverlay`'s own position
-        /// moves (cheap); the boxes underneath keep the bag-frame coordinates `showPlan` built.
+        /// called every AR frame via `ARSessionDelegate`. Only `planYOffset`'s local y moves
+        /// (cheap); the boxes underneath keep the bag-frame coordinates `showPlan` built, and
+        /// `planOverlay`'s own x/z + rotation are left for ARKit to correct via `planARAnchor`.
         func refreshPlaneY() {
-            guard let planOverlay, let suitcase else { return }
-            planOverlay.position.y = currentPlaneY() ?? suitcase.planeY
+            guard let planYOffset, let suitcase else { return }
+            planYOffset.position.y = (currentPlaneY() ?? suitcase.planeY) - suitcase.planeY
         }
     }
 }

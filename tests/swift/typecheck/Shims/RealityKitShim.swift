@@ -52,6 +52,7 @@ public protocol HasAnchoring: AnyObject {}
 
 @MainActor
 open class Entity {
+    public init() {}
     public var position: SIMD3<Float> = .zero
     public var orientation: simd_quatf = simd_quatf()
     public func addChild(_ child: Entity) {}
@@ -61,6 +62,7 @@ open class Entity {
 @MainActor
 public final class AnchorEntity: Entity, HasAnchoring {
     public init(world position: SIMD3<Float>) { super.init() }
+    public init(anchor: ARAnchor) { super.init() }
 }
 
 public protocol Material {}

@@ -45,7 +45,7 @@ assert(flat.filter { $0 > 0 }.allSatisfy { approx($0, 0.05, 0.005) }, "L-shape h
 let tri = densify(SIMD3(0, 0, 0), SIMD3(0.1, 0, 0), SIMD3(0, 0, 0.1), spacing: 0.01)
 assert(tri.count == 66, "densify \(tri.count)")
 
-print(ScannedItem(lFit, heights: lhm, cell: 0.01).asciiMap)
-let encoded = String(data: try! JSONEncoder().encode(ScannedItem(fit, heights: hm, cell: 0.01)), encoding: .utf8)!
+print(ScannedItem(lFit, heights: lhm, cell: 0.01, suitcaseId: "s1").asciiMap)
+let encoded = String(data: try! JSONEncoder().encode(ScannedItem(fit, heights: hm, cell: 0.01, suitcaseId: "s1")), encoding: .utf8)!
 assert(encoded.contains("\"dimensions\"") && !encoded.contains("\"label\""), encoded)
 print("geometry ok: \(dims.map { $0 * 100 }) cm footprint, \(fit.height * 100) cm tall")

@@ -26,9 +26,12 @@ Runs on port 8000. Endpoints:
 
 | | |
 |---|---|
+| `POST /suitcases` | JSON `{"name": …, "dimensions": [w, h, d]}` in metres. Returns the suitcase with its `id`. |
+| `GET /suitcases` | All suitcases, newest first. |
+| `GET /suitcases/{id}` | One suitcase **with its `items`** — the solver's input. |
 | `POST /items` | multipart: `item` (ScannedItem JSON) + `image` (JPEG). Labels via Grok, stores, returns the item. |
 | `PATCH /items/{id}` | JSON `{"label": …, "rigidity": "rigid"\|"soft"\|"fragile"}` — user override. |
-| `GET /items` | All scanned items. This is what the solver and 3D viewer read. |
+| `GET /items?suitcaseId=…` | Scanned items, optionally filtered by suitcase. |
 
 Optional env: `MONGO_DB` (default `suitcase`), `GROK_MODEL` (default `grok-4`). Without `SUITCASE_MONGODB_URI` it uses a local `mongodb://localhost:27017`.
 
@@ -51,7 +54,7 @@ Gotchas:
 - If Xcode says the bundle identifier is not available, change `bundleIdPrefix` in `project.yml` to something unique to you and re-run `xcodegen generate`.
 - First run on a phone: enable **Settings → Privacy & Security → Developer Mode**, then trust your certificate under **Settings → General → VPN & Device Management**.
 
-Using it: point at an object on a table, pan for a couple of seconds until the mesh overlay covers it, tap the object. The Xcode console prints an ASCII heightmap and the JSON; the screen shows dimensions and the label/rigidity guess, both editable.
+Using it: create or pick a suitcase (interior dimensions in cm), then point at an object on a table, pan for a couple of seconds until the mesh overlay covers it, tap the object. The Xcode console prints an ASCII heightmap and the JSON; the screen shows dimensions and the label/rigidity guess, both editable.
 
 ## Geometry self-check
 

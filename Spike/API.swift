@@ -31,11 +31,29 @@ enum API {
         return try await send(req)
     }
 
-    private static func send(_ req: URLRequest) async throws -> ScannedItem {
+    static func createSuitcase(name: String, dimensions: [Float]) async throws -> Suitcase {
+        var req = URLRequest(url: base.appending(path: "suitcases"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(["name": AnyEncodable(name), "dimensions": AnyEncodable(dimensions)])
+        return try await send(req)
+    }
+
+    static func listSuitcases() async throws -> [Suitcase] {
+        try await send(URLRequest(url: base.appending(path: "suitcases")))
+    }
+
+    private static func send<T: Decodable>(_ req: URLRequest) async throws -> T {
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
             throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "server error"])
         }
-        return try JSONDecoder().decode(ScannedItem.self, from: data)
+        return try JSONDecoder().decode(T.self, from: data)
     }
+}
+
+struct AnyEncodable: Encodable {
+    let encode: (Encoder) throws -> Void
+    init<T: Encodable>(_ v: T) { encode = { try v.encode(to: $0) } }
+    func encode(to encoder: Encoder) throws { try encode(encoder) }
 }

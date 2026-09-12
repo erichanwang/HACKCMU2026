@@ -118,6 +118,7 @@ func heightMap(points: [SIMD3<Float>], box: BoxFit, planeY: Float, cell: Float) 
 /// depth) — the object's real shape as seen from above. Label/rigidity are filled in by the server.
 struct ScannedItem: Codable, Identifiable {
     var id = UUID().uuidString
+    var suitcaseId: String
     var dimensions: [Float]
     var cellSize: Float
     var heights: [[Float]]
@@ -127,7 +128,8 @@ struct ScannedItem: Codable, Identifiable {
     var rigiditySource: String?
     var createdAt: String?
 
-    init(_ box: BoxFit, heights: [[Float]], cell: Float) {
+    init(_ box: BoxFit, heights: [[Float]], cell: Float, suitcaseId: String) {
+        self.suitcaseId = suitcaseId
         dimensions = [box.width, box.height, box.depth]
         cellSize = cell
         self.heights = heights
@@ -144,4 +146,11 @@ struct ScannedItem: Codable, Identifiable {
             String(row.map { ramp[min(ramp.count - 1, Int($0 / top * Float(ramp.count - 1)))] })
         }.joined(separator: "\n")
     }
+}
+
+/// The container being packed. Dimensions [width, height, depth] in metres; typed in by the user for now.
+struct Suitcase: Codable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var dimensions: [Float]
 }

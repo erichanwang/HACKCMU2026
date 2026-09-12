@@ -4,7 +4,7 @@ import SwiftUI
 /// One scanned item on its own — no suitcase, no other placements — so the
 /// heightmap mesh can be inspected before it goes into a plan.
 ///
-/// It reuses `PlanSceneView` by wrapping the scan in a one-item plan whose
+/// It reuses `LayeredPlanSceneView` by wrapping the scan in a one-item plan whose
 /// container is exactly the grid's own extent. That keeps the scale factor at 1,
 /// so what you orbit around is the shape the scanner recorded rather than a
 /// version stretched to fit somebody's packed box.
@@ -14,7 +14,7 @@ struct ScannedItemScene: View {
     private static let soloItemID = "scanned-item"
 
     var body: some View {
-        PlanSceneView(plan: Self.soloPlan(for: item), scans: [Self.soloItemID: item])
+        LayeredPlanSceneView(plan: Self.soloPlan(for: item), scans: [Self.soloItemID: item])
     }
 
     static func soloPlan(for item: ScannedItem) -> PackingPlan {

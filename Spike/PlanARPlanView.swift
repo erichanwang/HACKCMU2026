@@ -454,7 +454,7 @@ struct PlanARPlanView: View {
             BagPlaneContainer(controller: controller).ignoresSafeArea()
 
             if !controller.arEnabled {
-                PlanSceneView(plan: plan, scans: scans, topLayer: $topLayer)
+                LayeredPlanSceneView(plan: plan, scans: scans, topLayer: $topLayer)
                     .ignoresSafeArea()
             }
 

@@ -65,7 +65,10 @@ public struct PlanViewer: View {
             case .layers:
                 PlanDiagramView(plan: plan)
             case .scene:
-                PlanSceneView(plan: plan)
+                // Open on the packed bag. `initialStep` defaults to 0, which is
+                // the *empty* bag by design — correct for a step-through, wrong
+                // for a viewer whose header has just said "6 items".
+                PlanSceneView(plan: plan, initialStep: plan.placements.count)
             }
         }
     }

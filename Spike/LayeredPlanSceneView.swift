@@ -15,7 +15,7 @@ private let startDistanceFactor: Float = 2.2
 private let maxPitch: Float = 1.4
 
 @MainActor
-final class PlanSceneController: ObservableObject {
+final class LayeredPlanSceneController: ObservableObject {
     let arView = ARView(frame: .zero, cameraMode: .nonAR, automaticallyConfigureSession: false)
 
     /// Number of layers the plan groups into — the slider's range.
@@ -98,8 +98,8 @@ final class PlanSceneController: ObservableObject {
 
 
 
-private struct PlanSceneContainer: UIViewRepresentable {
-    let controller: PlanSceneController
+private struct LayeredPlanSceneContainer: UIViewRepresentable {
+    let controller: LayeredPlanSceneController
 
     func makeUIView(context: Context) -> ARView { controller.arView }
     func updateUIView(_ uiView: ARView, context: Context) {}
@@ -108,8 +108,13 @@ private struct PlanSceneContainer: UIViewRepresentable {
 /// A packing plan as a rotatable 3D scene: container wireframe, one translucent
 /// labelled box per placement, and a slider that peels the layers apart.
 /// Non-AR — runs in the simulator with no camera.
-struct PlanSceneView: View {
-    @StateObject private var controller: PlanSceneController
+///
+/// Distinct from `PackingPlanUI.PlanSceneView`, which steps through placements
+/// one at a time. This one peels by *layer* and shares its index with the 2D
+/// diagram and the AR overlay; it also renders scanned heightmap meshes. Both
+/// were called `PlanSceneView` after the merge, which is why this one is not.
+struct LayeredPlanSceneView: View {
+    @StateObject private var controller: LayeredPlanSceneController
     /// Used when the caller does not supply a binding.
     @State private var ownTopLayer: Int
     /// Set when an owner drives the selection — see `PlanSheet`.
@@ -146,7 +151,7 @@ struct PlanSceneView: View {
     ///     and starts with every layer visible.
     init(plan: PackingPlan, scans: [String: ScannedItem] = [:], topLayer: Binding<Int>? = nil) {
         self.plan = plan
-        let controller = PlanSceneController(plan: plan, scans: scans)
+        let controller = LayeredPlanSceneController(plan: plan, scans: scans)
         _controller = StateObject(wrappedValue: controller)
         externalTopLayer = topLayer
         _ownTopLayer = State(initialValue: controller.layerCount - 1)
@@ -154,7 +159,7 @@ struct PlanSceneView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            PlanSceneContainer(controller: controller)
+            LayeredPlanSceneContainer(controller: controller)
                 .ignoresSafeArea()
                 .gesture(
                     DragGesture()
@@ -282,7 +287,7 @@ struct PlanSheet: View {
             case .flat:
                 PlanDiagramView(plan: plan, selectedLayer: $selectedLayer)
             case .scene:
-                PlanSceneView(plan: plan, scans: scans, topLayer: $selectedLayer)
+                LayeredPlanSceneView(plan: plan, scans: scans, topLayer: $selectedLayer)
             }
         }
         .fullScreenCover(isPresented: $showingAR) {
@@ -410,7 +415,7 @@ extension ScannedItem {
 #Preview("Mock plan") {
     NavigationStack {
         if let plan = try? PlanLoader.mockPlan() {
-            PlanSceneView(plan: plan)
+            LayeredPlanSceneView(plan: plan)
         } else {
             Text("Could not load the bundled mock plan.")
         }
@@ -420,7 +425,7 @@ extension ScannedItem {
 #Preview("Mock plan with a scanned item") {
     NavigationStack {
         if let plan = try? PlanLoader.mockPlan() {
-            PlanSceneView(plan: plan, scans: ["shoes-pair": .previewShoe()])
+            LayeredPlanSceneView(plan: plan, scans: ["shoes-pair": .previewShoe()])
         } else {
             Text("Could not load the bundled mock plan.")
         }

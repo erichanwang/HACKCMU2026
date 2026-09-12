@@ -133,15 +133,11 @@ def pack_optimized(container: Container, items, config: Optional[OptimizerConfig
         return evaluate_state(st, items_by_id, total_pv, weights)
 
     # ---- layer 2a: multi-start greedy, time-capped, keeps the best few as restart points --
-    # ``pack_naive``'s exact genome goes first: it is the one arrangement the caller can always
-    # get for free, so evaluating it here is what makes pack_optimized unable to lose to it -- on
-    # a corpus of mostly-soft garments the input order plus first-fit placement beats every
-    # sorted order, and without this start the search never even sees that arrangement.
-    starts = [(list(range(n)), [0] * n, NAIVE_PARAMS)]
+    starts = []
     if config.multi_start:
-        # then one shuffled sweep of every sort key per CoM weight, not a flat shuffle: a
-        # truncated budget still sees all six orderings.  The shuffle is seeded, so which starts
-        # fit in the budget and how ties between equally good starts break differ per seed.
+        # one shuffled sweep of every sort key per CoM weight, not a flat shuffle: a truncated
+        # budget still sees all six orderings.  The shuffle is seeded, so which starts fit in the
+        # budget and how ties between equally good starts break differ per seed.
         grid = list(config.com_weight_grid)
         rng.shuffle(grid)
         for sweep, w in enumerate(grid):
@@ -153,6 +149,12 @@ def pack_optimized(container: Container, items, config: Optional[OptimizerConfig
             starts += [(sorted_sequence(items, k), None, replace(base, w_com=w)) for k in keys]
     else:
         starts.append((sorted_sequence(items, "volume"), None, base))
+    # ``pack_naive``'s exact genome last: on inputs where the input order plus first-fit placement
+    # beats every sorted order (a bag of mostly-soft garments) the search would otherwise never
+    # see that arrangement at all.  Last rather than first because its decode is as expensive as
+    # any other, and under a short wall-clock budget it would displace a sorted start that packs
+    # more -- there the caller still has ``pack_naive`` itself, which the server runs anyway.
+    starts.append((list(range(n)), [0] * n, NAIVE_PARAMS))
     greedy_deadline = t0 + GREEDY_BUDGET_FRACTION * config.time_budget_s
     pool: list[_Cand] = []
     for seq, seed_orient, params in starts:

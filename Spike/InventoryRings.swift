@@ -39,6 +39,10 @@ func ringSpin(ring: Int, at t: Double) -> Double {
 /// zoom or a page if a real inventory gets that big.
 struct InventoryRings<MenuContent: View>: View {
     let items: [ScannedItem]
+    /// The bag on screen: its items get the tinted ring and the suitcase glyph, loose ones stay neutral.
+    var currentSuitcaseId: String?
+    /// The panel's current item, drawn with a solid white ring so tapping visibly lands somewhere.
+    var selectedId: String?
     var select: (ScannedItem) -> Void
     var dismiss: () -> Void
     /// The long-press menu for one circle; the caller owns the suitcase list and the actions.
@@ -57,10 +61,19 @@ struct InventoryRings<MenuContent: View>: View {
             ZStack {
                 Color.black.opacity(0.45).ignoresSafeArea().onTapGesture(perform: dismiss)
                 if items.isEmpty {
-                    Text("Nothing scanned yet")
-                        .font(.body)
-                        .foregroundStyle(.white)
-                        .position(center)
+                    VStack(spacing: 6) {
+                        Image(systemName: "backpack").font(.title2)
+                        Text("Nothing scanned yet").font(.body.weight(.medium))
+                        Text("Switch to Item and tap something next to the bag.").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white)
+                    .position(center)
+                } else {
+                    Text(caption)
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.75))
+                        .position(x: center.x, y: center.y + step * CGFloat(rings) + diameter / 2 + 22)
                 }
                 TimelineView(.animation(paused: reduceMotion)) { context in
                     let t = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
@@ -75,24 +88,49 @@ struct InventoryRings<MenuContent: View>: View {
         }
     }
 
+    /// "3 in this suitcase · 4 loose", the one number the rings' colouring encodes.
+    private var caption: String {
+        let inBag = currentSuitcaseId.map { id in items.filter { $0.suitcaseId == id }.count } ?? 0
+        let loose = items.count - inBag
+        switch (inBag, loose) {
+        case (0, _): return "\(items.count) scanned, none in this suitcase yet"
+        case (_, 0): return "all \(inBag) in this suitcase"
+        default: return "\(inBag) in this suitcase · \(loose) loose"
+        }
+    }
+
     private func circle(_ item: ScannedItem, diameter: CGFloat) -> some View {
-        let label = item.labelStatus == "pending" ? "labelling…" : (item.label ?? "unlabelled")
+        let label = item.label ?? "unlabelled"
+        let pending = item.labelStatus == "pending"
+        let inBag = currentSuitcaseId != nil && item.suitcaseId == currentSuitcaseId
+        let selected = item.id == selectedId
         return Button { select(item) } label: {
-            Text(label)
-                .font(.caption2.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-                .padding(6)
-                .frame(width: diameter, height: diameter)
-                .background(.black.opacity(0.6), in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.3), lineWidth: 1))
-                .foregroundStyle(.white)
+            VStack(spacing: 2) {
+                if pending {
+                    ProgressView().controlSize(.mini).tint(.white)
+                    Text("labelling").font(.caption2)
+                } else {
+                    if inBag { Image(systemName: "suitcase.fill").font(.system(size: 9)) }
+                    Text(label)
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
+                }
+            }
+            .multilineTextAlignment(.center)
+            .padding(6)
+            .frame(width: diameter, height: diameter)
+            .background(inBag ? Color.indigo.opacity(0.55) : Color.black.opacity(0.6), in: Circle())
+            .overlay(Circle().stroke(selected ? Color.white : Color.white.opacity(inBag ? 0.6 : 0.3), lineWidth: selected ? 2 : 1))
+            .foregroundStyle(.white)
+            .scaleEffect(selected ? 1.08 : 1)
+            .animation(.snappy(duration: 0.2), value: selected)
         }
         .buttonStyle(.plain)
         .contextMenu { menu(item) }
-        .accessibilityLabel(String(format: "%@, %.1f by %.1f by %.1f centimetres", label,
-                                   item.width * 100, item.depth * 100, item.height * 100))
+        .accessibilityLabel(String(format: "%@, %.1f by %.1f by %.1f centimetres%@%@", pending ? "labelling" : label,
+                                   item.width * 100, item.depth * 100, item.height * 100,
+                                   inBag ? ", in this suitcase" : "", selected ? ", selected" : ""))
     }
 }
 #endif

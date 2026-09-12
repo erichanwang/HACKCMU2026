@@ -9,7 +9,7 @@ struct SpikeApp: App {
 
 struct ContentView: View {
     @State private var item: ScannedItem?
-    @State private var status = "Point at your open suitcase on the floor, then tap it"
+    @State private var status = "Close the suitcase, lay it flat on the floor, then tap it"
     @State private var suitcaseId: String?
     @State private var mode = ScanMode.suitcase
     /// The plan the solver actually produced. Outlives the sheet: closing the diagram is how the
@@ -39,9 +39,10 @@ struct ContentView: View {
         ZStack {
             ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
             if showingInventory {
-                InventoryRings(items: inventory, select: { item = $0 }, dismiss: { showingInventory = false },
+                InventoryRings(items: inventory, currentSuitcaseId: suitcaseId, selectedId: item?.id,
+                               select: { item = $0 }, dismiss: { showingInventory = false },
                                menu: { itemMenu($0) })
-                    .transition(.opacity)
+                    .transition(.opacity.combined(with: .scale(scale: 0.94)))
             }
             VStack(spacing: 0) {
                 topBar
@@ -56,7 +57,8 @@ struct ContentView: View {
             .environment(\.colorScheme, .dark)
         }
         .tint(.indigo)
-        .animation(.easeOut(duration: 0.2), value: showingInventory)
+        .animation(.spring(duration: 0.3, bounce: 0.15), value: showingInventory)
+        .sensoryFeedback(.impact(weight: .light), trigger: showingInventory)
         .sheet(isPresented: $showingItems) { itemList }
         .sheet(isPresented: $showSettings) { SettingsSheet(serverURL: $serverURL, authToken: $authToken) }
         .sheet(isPresented: $showingDiagram) {
@@ -343,7 +345,7 @@ struct ContentView: View {
             plan = nil
             items = []
             mode = .suitcase
-            status = "Point at your open suitcase on the floor, then tap it"
+            status = "Close the suitcase, lay it flat on the floor, then tap it"
         }
     }
 

@@ -5,7 +5,9 @@ Schema (all keys except ``container.dims`` and ``items`` optional):
   "container": {"id", "shape": "box|cylinder", "dims": [L,W,H], "gravity": true, "max_mass": 23,
                 "min_support": 0.7, "com_target": [x,y,z], "com_axis_weights": [1,1,0.5],
                 "obstacles": [{"id", "position": [x,y,z], "dims": [dx,dy,dz]}]},
-  "items": [{"id", "shape": "box", "dims": [l,w,h], "mass", "fragile", "keep_upright", "priority", "count"},
+  "items": [{"id", "shape": "box", "dims": [l,w,h], "mass", "fragile", "keep_upright", "priority", "count",
+             "rigidity": "soft", "compressibility": 2.0},   <- soft items pack at height / k (Item.compressed);
+                                                              "rigidity": "fragile" / "keepUpright" (server docs) also work
             {"id", "shape": "box|cylinder", "length", "depth", "height", ...}   <- lidar payload form
             {"id", "shape": "cylinder", "radius", "height", "mass", "keep_upright", "allow_lay_down", ...}],
   "optimizer": {"time_budget_s": 5, "max_iterations": null, "seed": 0},
@@ -32,11 +34,14 @@ def _item_from_dict(d: dict) -> list:
     # fragile/keep_upright are passed through only when explicitly present; otherwise None, so
     # from_scan/from_scanned_heightmap's own "irregular defaults to fragile+upright" logic applies
     # even when the scenario comes from JSON (a definite bool here would silently override it).
-    fragile = d["fragile"] if "fragile" in d else None
-    keep_upright = d["keep_upright"] if "keep_upright" in d else None
+    # Server documents (SCAN_OUTPUT.md) say `rigidity: "fragile"` and `keepUpright` instead.
+    fragile = d["fragile"] if "fragile" in d else (True if d.get("rigidity") == "fragile" else None)
+    keep_upright = d["keep_upright"] if "keep_upright" in d else d.get("keepUpright")
     count = int(d.get("count", 1))
     if count < 1:
         raise ValueError(f"item {d['id']!r}: count must be >= 1, got {count}")
+    # compressibility k (SCAN_OUTPUT.md) only means something for soft items; a stray k on a rigid one is ignored.
+    comp_k = float(d.get("compressibility", 1.0)) if d.get("rigidity", "soft") == "soft" else 1.0
     ids = [d["id"]] if count == 1 else [f"{d['id']}_{k + 1}" for k in range(count)]
     out = []
     for iid in ids:
@@ -64,7 +69,7 @@ def _item_from_dict(d: dict) -> list:
                                      allow_lay_down=bool(d.get("allow_lay_down", True)), **common))
         else:
             raise ValueError(f"unknown item shape {shape!r}")
-    return out
+    return [it.compressed(comp_k) for it in out]
 
 
 def load_scenario(src):

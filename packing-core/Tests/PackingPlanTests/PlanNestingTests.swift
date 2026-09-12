@@ -12,7 +12,7 @@ final class PlanNestingTests: XCTestCase {
     private let tolerance: Float = 1e-6
 
     private func loadNestedPlan() throws -> PackingPlan {
-        try PlanLoader.plan(resourceNamed: "nested-plan", in: .module)
+        try PlanLoader.plan(resourceNamed: "nested-plan", in: PlanResources.bundle)
     }
 
     /// Rebuilds the plan with `cup` moved and/or re-nested. Everything else is the

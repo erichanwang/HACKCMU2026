@@ -16,6 +16,9 @@ targets:
         product: PackingPlan
       - package: PackingPlan
         product: PackingPlanUI
+    configFiles:
+      Debug: Spike.xcconfig
+      Release: Spike.xcconfig
     info:
       path: Spike/Info.plist
       properties:

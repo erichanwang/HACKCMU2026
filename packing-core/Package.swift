@@ -30,7 +30,8 @@ let package = Package(
         ),
         .testTarget(
             name: "PackingPlanTests",
-            dependencies: ["PackingPlan"]
+            dependencies: ["PackingPlan"],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "PackingPlanUITests",

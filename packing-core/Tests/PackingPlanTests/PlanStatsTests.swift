@@ -154,7 +154,7 @@ final class PlanStatsTests: XCTestCase {
     /// a 0.34 × 0.20 × 0.50 = 0.034 m³ interior — 12.14%, not the 13.46% the sum
     /// of the boxes claims.
     func testNestedFixtureFillCountsTheSharedVolumeOnce() throws {
-        let stats = PlanStats(plan: try PlanLoader.plan(resourceNamed: "nested-plan", in: .module))
+        let stats = PlanStats(plan: try PlanLoader.plan(resourceNamed: "nested-plan", in: PlanResources.bundle))
 
         XCTAssertEqual(stats.packedVolume, 0.004128, accuracy: 1e-7)
         XCTAssertEqual(stats.fillFraction, 0.1214118, accuracy: accuracy)
@@ -170,7 +170,7 @@ final class PlanStatsTests: XCTestCase {
     /// above the cup). What does change is the share: 0.034 − 0.004128 = 0.029872 m³
     /// is free, so 0.017 is 56.9% of it, not the 57.8% an over-counted fill implies.
     func testNestedFixtureFreeBlockIsMeasuredAgainstTheTrueFreeSpace() throws {
-        let stats = PlanStats(plan: try PlanLoader.plan(resourceNamed: "nested-plan", in: .module))
+        let stats = PlanStats(plan: try PlanLoader.plan(resourceNamed: "nested-plan", in: PlanResources.bundle))
         let gap = try XCTUnwrap(stats.largestGap)
 
         XCTAssertEqual(gap.minCorner.z, 0.25, accuracy: accuracy)

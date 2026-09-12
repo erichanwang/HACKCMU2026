@@ -1,0 +1,19 @@
+// Shared build settings for the Spike app.
+//
+// Signing is per-developer: a team ID is personal, and the bundle identifier can
+// only be registered to one team at a time, so `com.suitcase.Spike` belongs to
+// whoever claimed it first. Everyone else needs their own.
+//
+// Put yours in Local.xcconfig (gitignored) next to this file:
+//
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.suitcase
+//
+// Find your team with:  security find-identity -v -p codesigning
+// (the ID is the OU field of the certificate, not the name in brackets)
+
+PRODUCT_BUNDLE_IDENTIFIER = com.suitcase.Spike
+
+// Last include wins, so Local.xcconfig overrides everything above. The `?` makes
+// it optional: a clone without one still builds for the simulator.
+#include? "Local.xcconfig"

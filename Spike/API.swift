@@ -65,7 +65,7 @@ func networkErrorMessage(_ code: URLError.Code) -> String {
 /// must share a Wi-Fi network. The PACKAR_SERVER environment variable (an Xcode scheme variable) is the
 /// default when nothing has been typed in. The bearer token is optional: sent only when it is set.
 enum API {
-    static let defaultBase = ProcessInfo.processInfo.environment["PACKAR_SERVER"] ?? "http://172.26.48.172:8000"
+    static let defaultBase = ProcessInfo.processInfo.environment["PACKAR_SERVER"] ?? ServerSettings.shippedDefault
 
     static var base: URL {
         resolveServerURL(typed: UserDefaults.standard.string(forKey: "serverURL") ?? "", fallback: defaultBase)

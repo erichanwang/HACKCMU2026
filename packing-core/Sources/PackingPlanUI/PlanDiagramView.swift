@@ -26,14 +26,34 @@ public struct PlanDiagramView: View {
     private let stats: PlanStats
     private let nesting: PlanNesting
 
-    @State private var selection: Int = 0
+    /// Used when the caller does not supply a binding.
+    @State private var ownSelection: Int
+
+    /// Set when an owner drives the selection — the plan sheet shares one layer
+    /// index between the 2D and 3D views so toggling between them does not reset
+    /// what you were looking at.
+    private let externalSelection: Binding<Int>?
+
+    /// Whichever of the two is in charge.
+    private var selection: Binding<Int> { externalSelection ?? $ownSelection }
 
     /// - Parameter initialLayer: which layer to show first. Useful for previews
     ///   and for returning the user to the layer they were last working on.
     public init(plan: PackingPlan, initialLayer: Int = 0) {
+        self.init(plan: plan, initialLayer: initialLayer, externalSelection: nil)
+    }
+
+    /// - Parameter selectedLayer: a layer index owned by the caller, so it can be
+    ///   shared with another view of the same plan.
+    public init(plan: PackingPlan, selectedLayer: Binding<Int>) {
+        self.init(plan: plan, initialLayer: selectedLayer.wrappedValue, externalSelection: selectedLayer)
+    }
+
+    private init(plan: PackingPlan, initialLayer: Int, externalSelection: Binding<Int>?) {
         self.plan = plan
         self.layers = plan.layers()
-        self._selection = State(initialValue: initialLayer)
+        self._ownSelection = State(initialValue: initialLayer)
+        self.externalSelection = externalSelection
         // Computed once: a plan does not change while it is on screen, and the
         // 2D view is exactly where a bad plan should become visible.
         self.issues = plan.geometryIssues()
@@ -43,7 +63,8 @@ public struct PlanDiagramView: View {
     }
 
     private var currentLayer: PlanLayer? {
-        layers.indices.contains(selection) ? layers[selection] : layers.first
+        let index = selection.wrappedValue
+        return layers.indices.contains(index) ? layers[index] : layers.first
     }
 
     /// Header, layer picker and layer caption stay put; everything below them
@@ -69,7 +90,10 @@ public struct PlanDiagramView: View {
                 header
 
                 if layers.count > 1 {
-                    Picker("Layer", selection: $selection) {
+                    // `selection` rather than `$selection`: it is the shared layer
+                    // index, so the picker, the 3D slider and the AR overlay all
+                    // drive the same value.
+                    Picker("Layer", selection: selection) {
                         ForEach(layers) { layer in
                             Text("Layer \(layer.index + 1)").tag(layer.index)
                         }

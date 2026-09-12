@@ -8,6 +8,63 @@ struct SpikeApp: App {
 }
 
 struct ContentView: View {
+    @AppStorage(ServerSettings.baseURLKey) private var serverURLText =
+        ServerSettings.defaultBaseURL.absoluteString
+
+    /// What `API` will actually use, which is the default whenever the typed text
+    /// cannot address a host.
+    private var effectiveURL: URL { ServerSettings.url(from: serverURLText) ?? ServerSettings.defaultBaseURL }
+
+    private var typedTextIsUsable: Bool { ServerSettings.url(from: serverURLText) != nil }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    NavigationLink("Scan a box") { ScanScreen() }
+                    NavigationLink("Plan views (mock)") { MockPlanScreen() }
+                    NavigationLink("Scanned item") { ScannedItemScreen() }
+                }
+
+                Section {
+                    TextField("http://host:port", text: $serverURLText)
+                        .font(.system(.body, design: .monospaced))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .submitLabel(.done)
+
+                    if !typedTextIsUsable {
+                        Label(
+                            "Not a usable address — using \(ServerSettings.defaultBaseURL.absoluteString)",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    }
+
+                    Button("Reset to default") {
+                        serverURLText = ServerSettings.defaultBaseURL.absoluteString
+                    }
+                    .disabled(serverURLText == ServerSettings.defaultBaseURL.absoluteString)
+                } header: {
+                    Text("Server")
+                } footer: {
+                    // The address the app is actually talking to, spelled out: a
+                    // stale IP here is otherwise invisible until requests fail.
+                    Text("Talking to \(effectiveURL.absoluteString)")
+                        .font(.footnote.monospaced())
+                        .textSelection(.enabled)
+                }
+            }
+            .navigationTitle("Spike")
+        }
+    }
+}
+
+/// The original scan screen, unchanged apart from moving off the app's root so
+/// only one ARSession is ever live.
+struct ScanScreen: View {
     @State private var item: ScannedItem?
     @State private var status = "Point at your open suitcase on the floor, then tap it"
     @State private var suitcaseId: String?
@@ -15,7 +72,6 @@ struct ContentView: View {
     /// The plan the solver actually produced. Outlives the sheet: closing the diagram is how the
     /// user gets back to the AR overlay, so dismissing it must not throw the plan away.
     @State private var plan: PackingPlan?
-    @State private var showingDiagram = false
     /// A POST /plan is in flight; a second one would race the first and last write would win.
     @State private var packing = false
     /// Everything scanned into this suitcase, as of the last time the Items sheet was opened.
@@ -34,10 +90,25 @@ struct ContentView: View {
     @AppStorage("serverURL") private var serverURL = API.defaultBase
     @AppStorage("authToken") private var authToken = ""
     @State private var showSettings = false
+    /// Set when `plan` is the bundled mock rather than the server's, and why.
+    @State private var planNotice: String?
+    /// The one plan viewer the app presents — 2D/3D flip and the AR overlay.
+    /// Both routes to it, packing and the cube button, set this same flag.
+    /// `PackingPlanUI.PlanViewer` still exists but is no longer presented here.
+    @State private var showingPlanSheet = false
+    /// True while that sheet's AR overlay owns the camera; ScanView stands down
+    /// so two ARSessions never compete for it.
+    @State private var planARActive = false
 
     var body: some View {
         ZStack {
-            ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
+            if planARActive {
+                // The plan's AR overlay has the camera. Anything here would be
+                // hidden behind it anyway, and a live ScanView would fight it.
+                Color.black.ignoresSafeArea()
+            } else {
+                ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
+            }
             if showingInventory {
                 InventoryRings(items: inventory, select: { item = $0 }, dismiss: { showingInventory = false },
                                menu: { itemMenu($0) })
@@ -59,8 +130,8 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.2), value: showingInventory)
         .sheet(isPresented: $showingItems) { itemList }
         .sheet(isPresented: $showSettings) { SettingsSheet(serverURL: $serverURL, authToken: $authToken) }
-        .sheet(isPresented: $showingDiagram) {
-            if let plan { PlanViewer(plan: plan).presentationDragIndicator(.visible) }
+        .sheet(isPresented: $showingPlanSheet) {
+            if let plan { PlanSheet(plan: plan, notice: planNotice, arActive: $planARActive) }
         }
         .confirmationDialog("Delete this suitcase? Scanned items stay in your inventory.",
                             isPresented: $confirmingReset, titleVisibility: .visible) {
@@ -198,6 +269,10 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .disabled(suitcaseId == nil)
                 .accessibilityLabel("Items in this suitcase: \(items.count)")
+            Button { showingPlanSheet = true } label: { Image(systemName: "cube.transparent") }
+                .buttonStyle(.bordered)
+                .disabled(plan == nil)
+                .accessibilityLabel("2D, 3D and AR plan views")
             Button(role: .destructive) { confirmingReset = true } label: { Image(systemName: "trash") }
                 .buttonStyle(.bordered)
                 .disabled(suitcaseId == nil)
@@ -356,13 +431,21 @@ struct ContentView: View {
             do {
                 let (fetchedPlan, unpacked, pendingLabels) = try await API.plan(suitcaseId: suitcaseId)
                 plan = fetchedPlan
-                showingDiagram = true
+                planNotice = nil
+                showingPlanSheet = true
                 status = unpacked.isEmpty
                     ? "Packed \(fetchedPlan.placements.count) items"
                     : "Packed \(fetchedPlan.placements.count), didn't fit: \(unpacked.map(\.label).joined(separator: ", "))"
                 if pendingLabels > 0 { status += ", \(pendingLabels) still labelling" }
             } catch {
-                status = "plan: \(error.localizedDescription)"
+                // The mock stands in so the views are still usable, but never
+                // silently: the sheet says it is a mock and why.
+                let reason = PlanFallback.message(for: error)
+                status = "plan: \(reason)"
+                if let mock = PlanFallback.mockPlan() {
+                    planNotice = reason
+                    plan = mock
+                }
             }
         }
     }

@@ -133,6 +133,38 @@ class TestScannedItem(unittest.TestCase):
         obj = object_from_scanned_item(item)
         _assert_point_sets_close(self, obj.footprint, fx.SHOE_FOOTPRINT)
 
+    def test_phone_document_form_dimensions_in_meters(self):
+        # The current phone/server document (see SCAN_OUTPUT.md): metres
+        # `dimensions`, plus `cellSize`/`heights` and label/rigidity fields
+        # this adapter doesn't use -- must not KeyError on any of them.
+        item = {
+            "id": "6F3A",
+            "dimensions": [0.213, 0.084, 0.121],
+            "cellSize": 0.01,
+            "heights": [[0.084, 0.084, 0.0], [0.084, 0.082, 0.0]],
+            "label": "running shoe",
+            "labelSource": "auto",
+            "mass": 0.3,
+            "keepUpright": False,
+            "rigidity": "soft",
+            "compressibility": 2.0,
+        }
+        obj = object_from_scanned_item(item)
+        self.assertEqual(obj.id, "6F3A")
+        self.assertAlmostEqual(obj.dimensions[0], 0.213, places=9)
+        self.assertAlmostEqual(obj.dimensions[1], 0.084, places=9)
+        self.assertAlmostEqual(obj.dimensions[2], 0.121, places=9)
+        self.assertIsNone(obj.footprint)
+
+    def test_phone_document_form_footprint_already_in_meters(self):
+        item = {
+            "id": "shoe-1",
+            "dimensions": [0.29, 0.11, 0.12],
+            "footprint": [[x, z] for x, z in fx.SHOE_FOOTPRINT],
+        }
+        obj = object_from_scanned_item(item)
+        _assert_point_sets_close(self, obj.footprint, fx.SHOE_FOOTPRINT)
+
 
 class TestBoxFitOrientation(unittest.TestCase):
     """Numerically verify the BoxFit -> quaternion formula rather than trust it:

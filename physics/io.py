@@ -154,27 +154,36 @@ def object_from_scanned_item(
     id: Optional[str] = None,
     **fields: Any,
 ) -> Object:
-    """Adapt a `ScannedItem` JSON dict (no pose) into an `Object`.
+    """Adapt a scanned item JSON dict (no pose) into an `Object`. Accepts both
+    shapes the scanner has used: the original `ScannedItem`
+    (`width`/`depth`/`height` in CENTIMETRES) and the current phone/server
+    document (`dimensions: [width_m, height_m, depth_m]` in METRES, plus
+    `cellSize`/`heights` for the heightmap -- ignored here, see
+    `packer3d.packer3d.models.Item.from_scanned_heightmap` for that side).
 
-    Metre `dimensions` as the phone sends them, or the old cm keys (/100); `dimensions = (width_m, height_m, depth_m)` so the
-    scanner's width lands on local x, height on local y (vertical, unrotated),
-    depth on local z -- matching `physics.schema`'s axis convention.
+    `dimensions = (width_m, height_m, depth_m)` so the scanner's width lands
+    on local x, height on local y (vertical, unrotated), depth on local z --
+    matching `physics.schema`'s axis convention.
 
     The scanner never has a pose for the item, so `position`/`rotation`
     default to the origin/identity; pass real values once a solver or
     `apply_placements` has placed it. Extra `Object` fields (`mass_kg`,
     `constraints`, `rigidity`, `compressibility_k`, ...) go through **fields.
 
-    `item["footprint"]`, if present, is a list of `[x_cm, z_cm]` points in the
+    `item["footprint"]`, if present, is a list of `[x, z]` points in the
     item's LOCAL frame (relative to the box centre, width along +x, depth
-    along +z) -- cm -> m (/100), passed straight to `Object.footprint`.
+    along +z), in the same units as `width`/`height`/`depth` (cm for the
+    `ScannedItem` form, m for the `dimensions` form) -- scaled to metres and
+    passed straight to `Object.footprint`.
     """
     if "dimensions" in item:  # the phone's form (SCAN_OUTPUT.md): [width, height, depth] in metres
         width_m, height_m, depth_m = (float(v) for v in item["dimensions"])
+        scale = 1.0  # dimensions/footprint already in metres
     else:  # the original spike: width/depth/height in centimetres
-        width_m = float(item["width"]) / 100.0
-        depth_m = float(item["depth"]) / 100.0
-        height_m = float(item["height"]) / 100.0
+        scale = 1.0 / 100.0
+        width_m = float(item["width"]) * scale
+        depth_m = float(item["depth"]) * scale
+        height_m = float(item["height"]) * scale
     kwargs: dict[str, Any] = dict(
         id=id if id is not None else item["id"],
         dimensions=(width_m, height_m, depth_m),
@@ -183,7 +192,7 @@ def object_from_scanned_item(
     )
     item_footprint = item.get("footprint")
     if item_footprint is not None:
-        kwargs["footprint"] = [(float(x) / 100.0, float(z) / 100.0) for x, z in item_footprint]
+        kwargs["footprint"] = [(float(x) * scale, float(z) * scale) for x, z in item_footprint]
     kwargs.update(fields)
     return Object(**kwargs)
 

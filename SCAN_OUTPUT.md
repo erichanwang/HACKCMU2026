@@ -34,7 +34,7 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 |---|---|
 | `id` | UUID string, unique per scan; also the Mongo `_id`. |
 | `suitcaseId` | Id of the suitcase this item was scanned into. Required by `POST /items` (the server rejects an item with none); the suitcase must already exist and belong to the requesting user. |
-| `dimensions` | `[width, height, depth]` of the minimum-area bounding box. Width and depth are the footprint on the table; height is the tallest point above it. Includes a small padding (default 0.5 cm) because LiDAR reads slightly inside true edges. |
+| `dimensions` | `[width, height, depth]` of the minimum-area bounding box. Width and depth are the footprint on the table; height is its surface above the table (a 98th-percentile extent on every axis, so LiDAR jitter and stray mesh spikes do not inflate it). Includes a small padding (default 0.5 cm) because LiDAR reads slightly inside true edges. |
 | `cellSize` | Side length of one heightmap cell (default 0.01 m). |
 | `heights` | 2D grid, `ceil(width / cellSize)` rows × `ceil(depth / cellSize)` columns. `heights[i][j]` is the height of the object's surface above the table at that cell. `0` means nothing is there. |
 | `label` | Short name of the object. Guessed from the photo by Grok (`labelSource: "auto"`) or typed by the user (`"user"`). |
@@ -90,7 +90,7 @@ Tuning constants live at the top of `Spike/ScanView.swift`: `paddingMeters`, `mi
 2. The tap raycasts onto the object to get a seed point.
 3. Mesh triangles near the seed and above the table are sampled densely into a point cloud.
 4. Points are flood-filled from the seed through a 2 cm grid so neighbouring objects are excluded.
-5. A minimum-area rectangle is fitted to the footprint → `width`, `depth`; the tallest point → `height`.
+5. A minimum-area rectangle is fitted to the footprint → `width`, `depth`; the trimmed (98th-percentile) extents → `width`, `depth`, `height`.
 6. Each point is dropped into its cell and the maximum height per cell is kept → `heights`.
 7. The camera view is cropped to the object and sent with the JSON to `POST /items`; the server asks Grok for `label`, `description`, `rigidity`, `compressibility`, `mass` and `keepUpright`, stores the document, and returns it. Edits in the app go to `PATCH /items/{id}`.
 

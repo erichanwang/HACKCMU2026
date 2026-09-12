@@ -111,9 +111,9 @@ final class PlanStatsTests: XCTestCase {
 
         XCTAssertEqual(stats.packedVolume, 0.125, accuracy: accuracy)
         XCTAssertEqual(stats.fillFraction, 0.125, accuracy: accuracy)
-        // The plan's own fraction still sums the boxes, so the two now differ by
-        // exactly the shared volume. Whoever compares them should know why.
-        XCTAssertEqual(nested.packedVolumeFraction, 0.133, accuracy: accuracy)
+        // The plan's own fraction subtracts the same shared volume, so there is one
+        // "how full" number with two spellings, not two that disagree.
+        XCTAssertEqual(nested.packedVolumeFraction, 0.125, accuracy: accuracy)
     }
 
     /// Only the shared part is discounted. The guest spans y 0.4...0.6 and the host

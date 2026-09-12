@@ -233,6 +233,76 @@ final class PackingPlanGeometryTests: XCTestCase {
         XCTAssertEqual(AxisRotation.zyx.bagExtent(ofLocalSize: Vector3(1, 2, 3)), Vector3(3, 2, 1))
     }
 
+    // MARK: - Packed volume fraction
+    //
+    // Every figure below is the box arithmetic done by hand from the positions and
+    // sizes in the fixture JSON, never read back out of the implementation.
+
+    /// Nothing nests in the bundled plan, so counting the shared volume once is a
+    /// no-op there and the number every `#Preview` renders does not move:
+    /// 0.005175 + 0.00224 + 0.004095 + 0.002898 + 0.00216 + 0.002556 = 0.019124 m³
+    /// in a 0.4064 × 0.1524 × 0.6096 = 0.0377557955 m³ interior = 50.65%.
+    func testBundledPlanFractionIsUnaffectedByTheNestingAdjustment() throws {
+        let plan = try loadMockPlan()
+
+        XCTAssertTrue(plan.placements.allSatisfy { $0.nestedIn == nil })
+        XCTAssertEqual(plan.nestedOverlapVolume(), 0, accuracy: 1e-9)
+        XCTAssertEqual(plan.packedVolumeFraction, 0.5065182, accuracy: 1e-6)
+        // Same thing said the other way: the plain sum of the boxes, which is what
+        // this property used to be, is still exactly what it returns here.
+        let sum = plan.placements.reduce(Float(0)) { $0 + $1.box.volume }
+        XCTAssertEqual(plan.packedVolumeFraction, sum / plan.container.interior.volume, accuracy: 1e-9)
+    }
+
+    /// The bowl-and-cup fixture: bowl 0.2 × 0.1 × 0.2 = 0.004 m³, cup
+    /// 0.08 × 0.09 × 0.08 = 0.000576 m³, and the two boxes coincide over
+    /// x 0.10...0.18, y 0.03...0.10, z 0.10...0.18 = 0.08 × 0.07 × 0.08 =
+    /// 0.000448 m³. Those cubic metres are in the bag once, so 0.004128 m³ of a
+    /// 0.34 × 0.20 × 0.50 = 0.034 m³ interior — 12.14%, not the 13.46% the plain
+    /// sum claims.
+    func testNestedFixtureCountsTheSharedVolumeOnce() throws {
+        let plan = try PlanLoader.plan(resourceNamed: "nested-plan", in: .module)
+
+        XCTAssertEqual(plan.nestedOverlapVolume(), 0.000448, accuracy: 1e-9)
+        XCTAssertEqual(plan.packedVolumeFraction, 0.1214118, accuracy: 1e-6)
+
+        let sum = plan.placements.reduce(Float(0)) { $0 + $1.box.volume }
+        XCTAssertEqual(sum / plan.container.interior.volume, 0.1345882, accuracy: 1e-6)
+        // The one number the whole app should agree on: PlanStats measures its
+        // free-space figures against this same union, and no longer differs from it.
+        XCTAssertEqual(plan.packedVolumeFraction, PlanStats(plan: plan).fillFraction, accuracy: 1e-6)
+    }
+
+    /// A `nestedIn` the plan cannot honour buys no discount: `honouredNesting()`
+    /// drops a host that is not in the plan, so the shared volume is counted twice
+    /// again — deliberately, because a producer bug must not read as a fuller bag.
+    func testDanglingNestingHostDiscountsNothing() throws {
+        let plan = try PlanLoader.plan(resourceNamed: "nested-plan", in: .module)
+        var placements = plan.orderedPlacements
+        let cup = placements[1]
+        placements[1] = Placement(
+            step: cup.step,
+            itemID: cup.itemID,
+            label: cup.label,
+            zone: cup.zone,
+            position: cup.position,
+            size: cup.size,
+            rotation: cup.rotation,
+            note: cup.note,
+            nestedIn: Nesting(itemID: "no-such-bowl", cavity: try XCTUnwrap(cup.nestedIn).cavity)
+        )
+        let dangling = PackingPlan(
+            version: plan.version,
+            units: plan.units,
+            container: plan.container,
+            placements: placements
+        )
+
+        XCTAssertTrue(dangling.honouredNesting().isEmpty)
+        XCTAssertEqual(dangling.nestedOverlapVolume(), 0, accuracy: 1e-9)
+        XCTAssertEqual(dangling.packedVolumeFraction, 0.1345882, accuracy: 1e-6)
+    }
+
     func testMalformedJSONIsRejected() {
         let missingUnits = Data(#"{"version":1,"container":{},"placements":[]}"#.utf8)
         XCTAssertThrowsError(try PlanLoader.plan(from: missingUnits))

@@ -218,7 +218,7 @@ def validate_layout(scene: Scene, *, floating_threshold: float = DEFAULT_FLOATIN
                 })
             continue
         denom = max(1e-9, min(min(a.dimensions), min(b.dimensions)))
-        violations.append({
+        entry = {
             "type": "OBJECT_COLLISION",
             "objects": pair,
             "penetration_depth_m": effective_depth,
@@ -227,7 +227,17 @@ def validate_layout(scene: Scene, *, floating_threshold: float = DEFAULT_FLOATIN
             "contact_point": _vec3(r.contact_point),
             "axis": _vec3(r.axis),
             "severity": _clamp01(effective_depth / denom),
-        })
+        }
+        # Scanned-footprint pairs: the narrow phase used and the true contact patch.
+        narrow = getattr(r, "narrow_phase", "sat_obb")
+        if narrow != "sat_obb":
+            entry["narrow_phase"] = narrow
+            if getattr(r, "approximate", False):
+                entry["approximate"] = True
+            poly = getattr(r, "contact_polygon", None)
+            if poly is not None and len(poly) >= 3:
+                entry["contact_polygon"] = [[float(p[0]), float(p[1])] for p in poly]
+        violations.append(entry)
 
     # --- Support / static stability ---
     for s in check_support(scene, floating_threshold=floating_threshold, geom=geom):

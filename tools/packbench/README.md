@@ -130,6 +130,23 @@ nobody learns which change did it. That is exactly the hole this rule and
 is: the count only moves when the solver's own nesting decision changes, so 1 → 0 is a
 fact, not churn.
 
+Measured, so it is not an argument from principle. Take `nested_foam_cutout` in a 4 cm wider
+bag (so the guest also fits on the floor beside the case) and shift its cut-out one grid row,
+which is enough to knock it off `solid_boxes`' 4x4 block boundary and pool it away — the case
+then has no cavity at all. Same items, same seed, `optimized:0`:
+
+| | packed | util | physics | violations | `nested` |
+|---|---|---|---|---|---|
+| cut-out block-aligned | 11/11 | 78.4% | valid | 0 | **1** |
+| cut-out shifted one row | 11/11 | 78.4% | valid | 0 | **0** |
+
+Every other number in the table is identical. The cavity path died and `nested` is the only
+column that says so.
+
+In the shipped fixture the guest fits *nowhere* else, so a lost nest also costs an item and
+the item-count rule fires too — belt and braces, and the `nested` line is what names the
+cause instead of leaving "−1 item" to be bisected.
+
 Two honest limits on it:
 
 - **Only `nested_foam_cutout` contributes a non-zero count today.** `carryon_weekend` and

@@ -21,6 +21,8 @@ public struct PlanViewer: View {
     }
 
     private let plan: PackingPlan
+    private let issues: [GeometryIssue]
+    private let stability: [GeometryIssue]
 
     @State private var mode: Mode
 
@@ -28,6 +30,8 @@ public struct PlanViewer: View {
     ///   the fallback path, and it is the one that works at any size.
     public init(plan: PackingPlan, initialMode: Mode = .layers) {
         self.plan = plan
+        self.issues = plan.geometryIssues()
+        self.stability = plan.stabilityIssues()
         self._mode = State(initialValue: initialMode)
     }
 
@@ -40,6 +44,22 @@ public struct PlanViewer: View {
             }
             .pickerStyle(.segmented)
             .padding([.horizontal, .top])
+
+            // Only over the 3D scene. `PlanDiagramView` raises these itself, so
+            // showing them here too would double every banner in Layers mode;
+            // `PlanSceneView` reports nothing, so without this a plan that is
+            // wrong or tips over looks perfectly fine in 3D.
+            if mode == .scene {
+                VStack(spacing: 8) {
+                    if !issues.isEmpty {
+                        PlanIssueBanner(kind: .geometry, issues: issues)
+                    }
+                    if !stability.isEmpty {
+                        PlanIssueBanner(kind: .stability, issues: stability)
+                    }
+                }
+                .padding([.horizontal, .top])
+            }
 
             switch mode {
             case .layers:
@@ -67,5 +87,11 @@ public struct PlanViewer: View {
     } else {
         Text("Could not load the bundled mock plan.")
     }
+}
+
+/// The banner over the 3D scene, which has no issue reporting of its own.
+/// Switching to Layers must show it once, not twice.
+#Preview("Unstable plan — 3D banner") {
+    PlanViewer(plan: unstableDemoPlan(), initialMode: .scene)
 }
 #endif  // canImport(SwiftUI) -- SwiftUI is Apple-only; the view vanishes on Linux so `swift test` can run

@@ -87,7 +87,10 @@ with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "pos
     assert main.relabel_pending() == 1
     assert main.relabel_pending() == 0, "a labelled item is no longer pending"
 d = c.get("/items/t1b").json()
-assert d["labelStatus"] == "done" and d["label"] == "wool scarf" and d["mass"] == 0.2, d
+# "Wool scarf", not "wool scarf": a model's label is sentence-cased on the way in, so it
+# reads as a name in the app's lists (see _clean_label). A label the user types is theirs
+# and is left exactly as typed.
+assert d["labelStatus"] == "done" and d["label"] == "Wool scarf" and d["mass"] == 0.2, d
 assert d["rigidity"] == "fragile", "the sweep must not overwrite a rigidity the user set"
 assert "photo" not in d, d
 
@@ -132,15 +135,15 @@ def route(grok_mock, claude_mock):
 
 with patch.dict(os.environ, {"XAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}), patch.object(main.httpx, "post", route(grok, claude_says("wool scarf"))):
     r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1h"})}, files=img)
-assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["label"] == "wool scarf", "agreement: either answer, item is done"
+assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["label"] == "Wool scarf", "agreement: either answer, item is done"
 
 with patch.dict(os.environ, {"XAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}), patch.object(main.httpx, "post", route(grok, claude_says("hiking boot"))):
     r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1i"})}, files=img)
-assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["label"] == "hiking boot", "disagreement: Claude wins"
+assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["label"] == "Hiking boot", "disagreement: Claude wins"
 
 with patch.dict(os.environ, {"XAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}), patch.object(main.httpx, "post", route(grok_says("unknown"), claude_says("umbrella"))):
     r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1j"})}, files=img)
-assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["label"] == "umbrella", "one model declining is not a disagreement"
+assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["label"] == "Umbrella", "one model declining is not a disagreement"
 
 with patch.dict(os.environ, {"XAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}), patch.object(main.httpx, "post", route(grok_says("unknown"), claude_says("unknown"))):
     r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1k"})}, files=img)
@@ -159,7 +162,7 @@ with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "pos
 assert r.status_code == 200 and r.json()["labelStatus"] == "pending", r.text
 assert r.json()["label"] == "unknown" and r.json()["labelAttempts"] == 0, r.json()
 d = c.get("/items/t1f").json()
-assert d["labelStatus"] == "done" and d["label"] == "wool scarf", d
+assert d["labelStatus"] == "done" and d["label"] == "Wool scarf", d
 
 # a failed background label leaves the item pending, with the attempt counted, for the sweep
 with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "post", side_effect=httpx.ConnectError("down")):
@@ -170,7 +173,7 @@ assert d["labelStatus"] == "pending" and d["labelAttempts"] == 1, d
 with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "post", grok):
     assert main.relabel_pending() == 1, "the sweep finishes what the background task could not"
 d = c.get("/items/t1g").json()
-assert d["labelStatus"] == "done" and d["label"] == "wool scarf" and d["labelAttempts"] == 1, d
+assert d["labelStatus"] == "done" and d["label"] == "Wool scarf" and d["labelAttempts"] == 1, d
 
 assert c.delete("/items/t1f").json() == {"deleted": "t1f"}
 assert c.delete("/items/t1g").json() == {"deleted": "t1g"}

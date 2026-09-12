@@ -159,6 +159,12 @@ def make_plan(server: str, suitcase: dict, items: list[dict], out: Path) -> dict
         f"volume utilisation {metrics['volume_utilization']:.1%}, "
         f"physics valid={validation['valid']} violations={len(validation['violations'])}"
     )
+    chosen = doc["chosen"]
+    print(f"      physics picked {chosen['strategy']}"
+          f"{'' if chosen['seed'] is None else ' seed ' + str(chosen['seed'])} of {len(doc['alternatives'])} candidates: "
+          + ", ".join(f"{a['strategy']}{'' if a['seed'] is None else a['seed']}="
+                      f"{a['items_packed']}pk/{a['volume_utilization']:.0%}/{'ok' if a['physics_valid'] else 'X'}"
+                      for a in doc["alternatives"]))
     return doc
 
 

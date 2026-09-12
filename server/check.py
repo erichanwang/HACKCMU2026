@@ -71,6 +71,8 @@ plan = r.json()
 assert plan["suitcaseId"] == sc["id"] and "_id" not in plan and plan["createdAt"], plan
 assert plan["solver"]["metrics"]["items_packed"] >= 1, plan["solver"]["metrics"]
 assert "valid" in plan["validation"] and "adapter" in plan["validation"], plan["validation"]
+assert plan["chosen"]["strategy"] == plan["solver"]["strategy"] == plan["alternatives"][0]["strategy"], plan["chosen"]
+assert len(plan["alternatives"]) >= 2 and all("physics_valid" in a for a in plan["alternatives"]), plan["alternatives"]
 p = plan["plan"]
 assert p["units"] == "meters" and p["container"]["dimensions"] == {"x": 0.55, "y": 0.22, "z": 0.35}, p["container"]
 assert p["placements"], p

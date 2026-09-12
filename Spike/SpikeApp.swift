@@ -18,6 +18,10 @@ struct ContentView: View {
     @State private var showingDiagram = false
     /// A POST /plan is in flight; a second one would race the first and last write would win.
     @State private var packing = false
+    /// Everything scanned into this suitcase, as of the last time the Items sheet was opened.
+    @State private var items: [ScannedItem] = []
+    @State private var showingItems = false
+    @State private var confirmingReset = false
     /// Where the server is and how to authenticate; typed on the phone, kept across launches.
     @AppStorage("serverURL") private var serverURL = API.defaultBase
     @AppStorage("authToken") private var authToken = ""
@@ -40,7 +44,16 @@ struct ContentView: View {
                     if item.label != nil { ItemEditor(item: Binding($item)!) }
                 }
                 Text(status).font(.footnote)
-                Button("Pack") { pack() }.disabled(suitcaseId == nil || packing)
+                HStack(spacing: 16) {
+                    Button("Pack") { pack() }.disabled(suitcaseId == nil || packing)
+                    Button("Items (\(items.count))") { showingItems = true }.disabled(suitcaseId == nil)
+                    Button("Reset") { confirmingReset = true }.disabled(suitcaseId == nil)
+                }
+                .sheet(isPresented: $showingItems) { itemList }
+                .confirmationDialog("Delete this suitcase and everything scanned into it?",
+                                    isPresented: $confirmingReset, titleVisibility: .visible) {
+                    Button("Reset", role: .destructive) { reset() }
+                }
                 Button(serverURL) { showSettings = true }.font(.caption2).lineLimit(1)
             }
                 .font(.system(.title2, design: .monospaced))
@@ -63,6 +76,53 @@ struct ContentView: View {
         }
     }
 
+    /// What is in the suitcase right now, re-read from the server each time the sheet opens.
+    private var itemList: some View {
+        List {
+            ForEach(items) { scanned in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(scanned.labelStatus == "pending" ? "labelling…" : (scanned.label ?? "unlabelled"))
+                    Text(String(format: "%.1f × %.1f × %.1f cm · %@",
+                                scanned.width * 100, scanned.depth * 100, scanned.height * 100,
+                                scanned.rigidity ?? "?"))
+                        .font(.caption)
+                }
+            }
+            .onDelete { offsets in
+                let ids = offsets.map { items[$0].id }
+                items.remove(atOffsets: offsets)
+                Task {
+                    for id in ids {
+                        do { try await API.delete(itemId: id) } catch { status = "delete: \(error.localizedDescription)" }
+                    }
+                }
+            }
+        }
+        .task { await loadItems() }
+    }
+
+    private func loadItems() async {
+        guard let suitcaseId else { return }
+        do { items = try await API.items(suitcaseId: suitcaseId) }
+        catch { status = "items: \(error.localizedDescription)" }
+    }
+
+    private func reset() {
+        guard let suitcaseId else { return }
+        Task {
+            do { try await API.deleteSuitcase(id: suitcaseId) } catch {
+                status = "reset: \(error.localizedDescription)"
+                return
+            }
+            self.suitcaseId = nil
+            item = nil
+            plan = nil
+            items = []
+            mode = .suitcase
+            status = "Point at your open suitcase on the floor, then tap it"
+        }
+    }
+
     private func pack() {
         guard let suitcaseId else { return }
         status = "Packing…"
@@ -70,12 +130,13 @@ struct ContentView: View {
         Task {
             defer { packing = false }
             do {
-                let (fetchedPlan, unpacked) = try await API.plan(suitcaseId: suitcaseId)
+                let (fetchedPlan, unpacked, pendingLabels) = try await API.plan(suitcaseId: suitcaseId)
                 plan = fetchedPlan
                 showingDiagram = true
                 status = unpacked.isEmpty
                     ? "Packed \(fetchedPlan.placements.count) items"
                     : "Packed \(fetchedPlan.placements.count), didn't fit: \(unpacked.map(\.label).joined(separator: ", "))"
+                if pendingLabels > 0 { status += ", \(pendingLabels) still labelling" }
             } catch {
                 status = "plan: \(error.localizedDescription)"
             }

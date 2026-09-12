@@ -96,33 +96,38 @@ enum API {
         let label: String
     }
 
-    /// The document's top-level `unpacked` field. Tolerated as absent (an older server).
-    private struct Unpacked: Decodable {
+    /// The document's top-level `unpacked` and `pendingLabels` fields. Both tolerated as absent
+    /// (an older server).
+    private struct PlanExtras: Decodable {
         let unpacked: [UnpackedItem]?
+        let pendingLabels: Int?
     }
 
     /// Runs the solver server-side and returns what it actually produced, plus any items it
-    /// couldn't fit. Throws with the server's message ("suitcase has no scanned items to pack")
+    /// couldn't fit and how many were packed while still waiting for a label.
+    /// Throws with the server's message ("suitcase has no scanned items to pack")
     /// when there is nothing to pack.
     /// Timeout is 15s: the solver itself budgets 3s of CPU (server/planner.py TIME_BUDGET_S), so
     /// this leaves generous margin without matching URLSession's silent 60s default.
-    static func plan(suitcaseId: String) async throws -> (plan: PackingPlan, unpacked: [UnpackedItem]) {
+    static func plan(suitcaseId: String) async throws -> (plan: PackingPlan, unpacked: [UnpackedItem], pendingLabels: Int) {
         let req = request("suitcases/\(suitcaseId)/plan", "POST", timeout: 15)
         let data = try await body(of: req)
         let plan = try PlanLoader.plan(fromServerDocument: data)
-        let unpacked = (try? JSONDecoder().decode(Unpacked.self, from: data))?.unpacked ?? []
-        return (plan, unpacked)
+        let extras = try? JSONDecoder().decode(PlanExtras.self, from: data)
+        return (plan, extras?.unpacked ?? [], extras?.pendingLabels ?? 0)
     }
 
     #if canImport(UIKit)
-    /// Timeout is 40s: Grok labelling on the server runs synchronously with its own 30s upstream
-    /// timeout (server/main.py), so this must not cut off a legitimately slow but successful call.
+    /// `async=1`: the server saves the scan and labels it in the background, so the reply comes back
+    /// with `labelStatus: "pending"` and ScanView's polling fills the label in.
+    /// Timeout stays 40s — it now only covers sending the photo over Wi-Fi.
     static func upload(_ item: ScannedItem, image: UIImage) async throws -> ScannedItem {
         guard let jpeg = image.jpegData(compressionQuality: 0.7) else {
             throw URLError(.cannotCreateFile, userInfo: [NSLocalizedDescriptionKey: "couldn't encode the photo"])
         }
         let boundary = "suitcase-\(UUID().uuidString)"
         var req = request("items", "POST", timeout: 40)
+        req.url = req.url?.appending(queryItems: [URLQueryItem(name: "async", value: "1")])
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         var body = Data()
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"item\"\r\n\r\n".data(using: .utf8)!)
@@ -138,6 +143,23 @@ enum API {
     /// The public item document, re-read while the server retries a failed Grok call.
     static func get(id: String) async throws -> ScannedItem {
         try await send(request("items/\(id)", "GET"))
+    }
+
+    /// Everything scanned into one suitcase, for the Items sheet.
+    static func items(suitcaseId: String) async throws -> [ScannedItem] {
+        var req = request("items", "GET")
+        req.url = req.url?.appending(queryItems: [URLQueryItem(name: "suitcaseId", value: suitcaseId)])
+        return try JSONDecoder().decode([ScannedItem].self, from: try await body(of: req))
+    }
+
+    /// Removes one item (and the suitcase's stored plan, which no longer matches).
+    static func delete(itemId: String) async throws {
+        _ = try await body(of: request("items/\(itemId)", "DELETE"))
+    }
+
+    /// Removes a suitcase with its items and plan — the app's Reset.
+    static func deleteSuitcase(id: String) async throws {
+        _ = try await body(of: request("suitcases/\(id)", "DELETE"))
     }
 
     static func update(id: String, label: String?, rigidity: String?) async throws -> ScannedItem {

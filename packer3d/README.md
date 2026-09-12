@@ -11,7 +11,7 @@ python3 -m venv .venv && .venv/bin/pip install numpy pytest matplotlib   # numpy
 source .venv/bin/activate
 PYTHONPATH=. python -m packer3d.cli examples/dragon_resupply.json --time 6 --compare --gap --out result.json
 PYTHONPATH=. python -m packer3d.visualize result.json out.png optimized   # debug render (matplotlib)
-PYTHONPATH=. python -m pytest tests -q                                   # 42 edge-case tests
+PYTHONPATH=. python -m pytest tests -q                                   # 104 tests
 ```
 
 Measured on this machine (6 s budget, seed 0):
@@ -80,7 +80,7 @@ with `"count": n` expands into `id_1 .. id_n` — convenient for lidar-scanned b
 entry can also carry the server's scan-document fields (`SCAN_OUTPUT.md`) directly:
 `"rigidity": "soft"/"fragile"/"rigid"`, `"keepUpright"`, and `"compressibility": k` — a soft
 item is packed at `height / k` via `Item.compressed(k)` (`compressibility_k` on the resulting
-`Item`; `k == 1` is a no-op).
+`Item`; `k == 1` is a no-op). A `"heights"` key routes the item through `Item.from_scanned_heightmap`.
 
 ### Output JSON contract (what the frontend consumes)
 
@@ -227,8 +227,8 @@ gap_report(result, items)   # distance to provable bounds (also: cli --gap)
 
 ## Tuning knobs
 
-* `OptimizerConfig(time_budget_s, max_iterations, seed, t_start, t_end, balance, com_weight_grid)` — more time ≈ better.
-* `DecoderParams(w_z, w_y, w_x, w_contact, w_com, grid_max_per_axis)` — placement heuristic.
+* `OptimizerConfig(time_budget_s, max_iterations, seed, t_start, t_end, multi_start, balance, com_weight_grid)` — more time ≈ better.
+* `DecoderParams(w_z, w_y, w_x, w_contact, w_com, grid_max_per_axis, chunk)` — placement heuristic.
 * `ObjectiveWeights(unpacked, compact, com, height)` — what "better" means. For a launch
   vehicle push `com` up (6–10); for a moving truck push `compact` up.
 * `Container(min_support, com_target, com_axis_weights)` — physics of the situation.
@@ -255,15 +255,17 @@ gap_report(result, items)   # distance to provable bounds (also: cli --gap)
 ## Layout
 ```
 packer3d/
-  models.py     Item / Container / Obstacle / Placement / PackResult + validation
-  decoder.py    extreme points, grid fallback, vectorised feasibility, scoring   (layer 1)
-  search.py     multi-start greedy + simulated annealing, pack_naive/pack_optimized (layer 2)
-  balance.py    mass-swap balancing                                             (layer 3)
-  objective.py  ObjectiveWeights, metrics
-  verify.py     independent re-check
-  bounds.py     lower bounds, gap_report, exhaustive_small
-  scenario.py   JSON scenario loader
+  models.py         Item / Container / Obstacle / Placement / PackResult + validation
+  geometry.py       shared numeric helpers (EPS, rounding)
+  decoder.py        extreme points, grid fallback, vectorised feasibility, scoring   (layer 1)
+  search.py         multi-start greedy + simulated annealing, pack_naive/pack_optimized (layer 2)
+  balance.py        mass-swap balancing                                             (layer 3)
+  objective.py      ObjectiveWeights, metrics
+  verify.py         independent re-check
+  bounds.py         lower bounds, gap_report, exhaustive_small
+  scenario.py       JSON scenario loader
+  physics_bridge.py converts packer3d output into the physics package's schema
   cli.py / visualize.py
 examples/       dragon_resupply.json, suitcase.json (+ results and renders)
-tests/          42 edge-case tests
+tests/          104 tests
 ```

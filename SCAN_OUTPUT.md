@@ -9,6 +9,7 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 ```json
 {
   "id": "6F3A…",
+  "suitcaseId": "9B2C…",
   "dimensions": [0.213, 0.084, 0.121],
   "cellSize": 0.01,
   "heights": [
@@ -32,6 +33,7 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 | Field | Meaning |
 |---|---|
 | `id` | UUID string, unique per scan; also the Mongo `_id`. |
+| `suitcaseId` | Id of the suitcase this item was scanned into. Required by `POST /items` (the server rejects an item with none); the suitcase must already exist and belong to the requesting user. |
 | `dimensions` | `[width, height, depth]` of the minimum-area bounding box. Width and depth are the footprint on the table; height is the tallest point above it. Includes a small padding (default 0.5 cm) because LiDAR reads slightly inside true edges. |
 | `cellSize` | Side length of one heightmap cell (default 0.01 m). |
 | `heights` | 2D grid, `ceil(width / cellSize)` rows × `ceil(depth / cellSize)` columns. `heights[i][j]` is the height of the object's surface above the table at that cell. `0` means nothing is there. |
@@ -94,4 +96,10 @@ Tuning constants live at the top of `Spike/ScanView.swift`: `paddingMeters`, `mi
 
 ## Server
 
-`server/main.py` — FastAPI + pymongo. Run with `cd server && uv run uvicorn main:app --host 0.0.0.0`. Environment: `SUITCASE_MONGODB_URI` (default `mongodb://localhost:27017`), `MONGO_DB` (default `suitcase`), `XAI_API_KEY` (no key → label `unknown`, rigidity `rigid`, compressibility `1`, mass `0`), `GROK_MODEL` (default `grok-4`). The phone's server address is `API.base` in `Spike/API.swift`.
+`server/main.py` — FastAPI + pymongo; it pings MongoDB at startup and exits immediately if it can't be reached (`SUITCASE_MONGODB_URI`, default `mongodb://localhost:27017` — `docker run --rm -d -p 27017:27017 mongo:7` for local dev). Run with `cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0`; nothing else loads `.env`.
+
+Environment: `SUITCASE_MONGODB_URI`, `MONGO_DB` (default `suitcase`), `XAI_API_KEY` (no key → label `unknown`, rigidity `rigid`, compressibility `1`, mass `0`), `GROK_MODEL` (default `grok-4`), `LABEL_RETRY_S` (default 10s, how often the background labeller re-sweeps `pending` items), `LABEL_MAX_ATTEMPTS` (default 5, after which a still-failing item's `labelStatus` becomes `"failed"`), `AUTH0_DOMAIN`/`AUTH0_AUDIENCE` (both unset → open mode: every request runs as one shared local user, no bearer token required).
+
+Routes beyond `POST /items` (this document's payload) and `GET /items`: `GET /items/{id}` (poll this while `labelStatus` is `"pending"`), `PATCH /items/{id}`, `DELETE /items/{id}`; `POST /suitcases` (`{name, dimensions}`), `GET /suitcases`, `GET /suitcases/{id}` (includes its items), `DELETE /suitcases/{id}` (cascades to its items and stored plan); `POST /suitcases/{id}/plan` (runs the solver and stores the result) and `GET /suitcases/{id}/plan` (the stored result, 404 until one exists).
+
+The phone's server address is `API.base` in `Spike/API.swift`.

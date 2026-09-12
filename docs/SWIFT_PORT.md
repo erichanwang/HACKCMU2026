@@ -29,15 +29,14 @@ agree with the prototype" is a test result, not a code review question.
 | `physics/constraints.py` | `Constraints.swift` | `ConstraintsTests.swift`, 17 |
 | `physics/metrics.py` | `Metrics.swift` | `MetricsTests.swift`, 12 |
 | `physics/io.py` | `IO.swift` | `IOTests.swift`, 20 |
-| `physics/validator.py` | `Validator.swift` | no dedicated test file yet; composes the already-tested modules above |
-| `physics/incremental.py` | `Incremental.swift` | no dedicated test file yet |
+| `physics/validator.py` | `Validator.swift` | `ValidatorTests.swift`, 17 |
+| `physics/incremental.py` | `Incremental.swift` | `IncrementalTests.swift`, 17 |
 | — (Swift-only: shared JSON value + `ValidationResult` shape) | `JSONValue.swift` | exercised by every module's tests |
 
 `ContractTests.swift` (4 tests) checks cross-module glue: the parity dataset
 loads, the quaternion convention matches Python's, `precompute` numbers
 match a hand-checked fixture, and malformed scenes name the right object.
-118 tests total, all passing (`swift test`, this checkout) — none of them
-exercise `validateLayout`/`validate`/`PlacementValidator` directly yet.
+178 tests total, all passing (`swift test`, this checkout).
 
 `Validator.swift`/`Incremental.swift` landed while this doc was being
 written; signatures as built: `validateLayout(_ scene: Scene,

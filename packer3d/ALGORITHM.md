@@ -401,7 +401,7 @@ physics collision check) is identical. Boxes, cylinders, and anything symmetric 
 track actual chosen rotations for asymmetric items, not just bounding-box orientation --
 noted here rather than silently working around it.
 
-## 10. Hardening pass (112 tests total, up from 40)
+## 10. Hardening pass (104 tests total, up from 40)
 
 A dedicated adversarial pass found and fixed four real bugs, plus closed several gaps that
 were silent-wrong rather than crashing:
@@ -462,6 +462,7 @@ rotations, not just bounding-box orientation, which is a larger change than a ha
 | file | responsibility |
 |---|---|
 | `models.py` | `Item`, `Container`, `Obstacle`, `Placement`, `PackResult` — data + validation + `from_scan`/`from_mesh` |
+| `geometry.py` | shared numeric helpers used by every module: `EPS` tolerance, position rounding |
 | `decoder.py` | Layer 1: extreme-point + grid-fallback constructive placement, vectorized feasibility checks |
 | `search.py` | Layer 2: multi-start greedy + simulated annealing over (item order, orientation); `pack_naive`/`pack_optimized` entry points |
 | `balance.py` | Layer 3: exact O(1) mass-swap balancing among identical-shaped items |

@@ -357,6 +357,10 @@ struct PlanSceneScreen: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+                Text(API.base.absoluteString)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
             }
         }
         .padding(10)

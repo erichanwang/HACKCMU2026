@@ -12,7 +12,16 @@ public struct PlanDiagramView: View {
     private let layers: [PlanLayer]
     private let issues: [GeometryIssue]
 
-    @State private var selection: Int = 0
+    /// Used when the caller does not supply a binding.
+    @State private var ownSelection: Int
+
+    /// Set when an owner drives the selection — the plan sheet shares one layer
+    /// index between the 2D and 3D views so toggling between them does not reset
+    /// what you were looking at.
+    private let externalSelection: Binding<Int>?
+
+    /// Whichever of the two is in charge.
+    private var selection: Binding<Int> { externalSelection ?? $ownSelection }
 
     /// - Parameter initialLayer: which layer to show first. Useful for previews
     ///   and for returning the user to the layer they were last working on.

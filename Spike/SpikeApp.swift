@@ -8,13 +8,55 @@ struct SpikeApp: App {
 }
 
 struct ContentView: View {
+    @AppStorage(ServerSettings.baseURLKey) private var serverURLText =
+        ServerSettings.defaultBaseURL.absoluteString
+
+    /// What `API` will actually use, which is the default whenever the typed text
+    /// cannot address a host.
+    private var effectiveURL: URL { ServerSettings.url(from: serverURLText) ?? ServerSettings.defaultBaseURL }
+
+    private var typedTextIsUsable: Bool { ServerSettings.url(from: serverURLText) != nil }
+
     var body: some View {
         NavigationStack {
             List {
-                NavigationLink("Scan a box") { ScanScreen() }
-                NavigationLink("Plan AR frame") { PlanARView() }
-                NavigationLink("Plan 3D scene") { PlanSceneScreen(suitcaseID: Self.demoSuitcaseID) }
-                NavigationLink("Scanned item") { ScannedItemScreen() }
+                Section {
+                    NavigationLink("Scan a box") { ScanScreen() }
+                    NavigationLink("Plan AR frame") { PlanARView() }
+                    NavigationLink("Plan 3D scene") { PlanSceneScreen(suitcaseID: Self.demoSuitcaseID) }
+                    NavigationLink("Scanned item") { ScannedItemScreen() }
+                }
+
+                Section {
+                    TextField("http://host:port", text: $serverURLText)
+                        .font(.system(.body, design: .monospaced))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .submitLabel(.done)
+
+                    if !typedTextIsUsable {
+                        Label(
+                            "Not a usable address — using \(ServerSettings.defaultBaseURL.absoluteString)",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    }
+
+                    Button("Reset to default") {
+                        serverURLText = ServerSettings.defaultBaseURL.absoluteString
+                    }
+                    .disabled(serverURLText == ServerSettings.defaultBaseURL.absoluteString)
+                } header: {
+                    Text("Server")
+                } footer: {
+                    // The address the app is actually talking to, spelled out: a
+                    // stale IP here is otherwise invisible until requests fail.
+                    Text("Talking to \(effectiveURL.absoluteString)")
+                        .font(.footnote.monospaced())
+                        .textSelection(.enabled)
+                }
             }
             .navigationTitle("Spike")
         }

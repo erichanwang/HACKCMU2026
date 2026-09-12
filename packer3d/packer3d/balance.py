@@ -1,9 +1,10 @@
 """Mass-swap balancing: exact, geometry-preserving centre-of-mass improvement.
 
-Items with identical oriented bounding boxes and identical fragile flag swap *positions*
-(never orientations).  The geometry of the packing is unchanged, so every constraint
-still holds without re-checking; only the mass distribution moves.  The moment update
-for swapping i and j is  delta = (m_i - m_j) * (c_j - c_i), evaluated in O(1).
+Interchangeable items -- same oriented bounding box, same fragile flag, and the same *real*
+shape (see ``_shape_key``) -- swap *positions* (never orientations).  The geometry of the
+packing is unchanged, so every constraint still holds without re-checking; only the mass
+distribution moves.  The moment update for swapping i and j is  delta = (m_i - m_j) *
+(c_j - c_i), evaluated in O(1).
 """
 from __future__ import annotations
 
@@ -13,6 +14,29 @@ import numpy as np
 
 from .geometry import EPS, rnd3
 from .models import Container
+
+
+def _shape_key(p):
+    """The part of the group key that stands for the item's real shape, not just its bbox.
+
+    A scanned item is not a solid box: it carries a ``height_grid`` and decomposes into
+    cavity solids (``Item.solid_boxes``), so two placements with the same oriented bounding
+    box can be a bowl and a solid block.  Exchanging those moves a cavity to where there is
+    none -- an item the decoder nested in the bowl's interior ends up inside a solid block,
+    and its ``nested_in`` cavity now describes a host that has moved away.
+
+    A ``Placement`` carries no shape detail (no grid, no solid boxes), so the only sound key
+    for a placement that might have one is a unique key: a box-shaped item that came from a
+    scan never swaps.  ``scan_shape`` is the field that means "measured, not a primitive",
+    and it is set for every heightmap scan.  Plain boxes and cylinders -- no grid geometry,
+    ``oriented_solid_boxes`` gives them their bounding box -- key exactly as they did before.
+
+    ponytail: an exact key (the grid's contents, which are already a hashable tuple) needs
+    the ``Item``s, which only the caller has; ``search.py`` would have to pass them in.  On
+    the live path that buys nothing: a group needs equal dims *and* unequal masses, and two
+    scans of two objects never produce bit-identical grids anyway.
+    """
+    return p.item_id if p.shape == "box" and p.scan_shape is not None else None
 
 
 def balance_masses(container: Container, placements, max_rounds: int = 10_000) -> int:
@@ -32,7 +56,7 @@ def balance_masses(container: Container, placements, max_rounds: int = 10_000) -
 
     groups = defaultdict(list)
     for i, p in enumerate(placements):
-        groups[(rnd3(p.dims), bool(p.fragile))].append(i)
+        groups[(rnd3(p.dims), bool(p.fragile), _shape_key(p))].append(i)
     groups = [np.array(g) for g in groups.values() if len(g) >= 2 and len(set(masses[g].round(12))) > 1]
     if not groups:
         return 0

@@ -252,25 +252,32 @@ for n in [1, 2, 3, 5] {
     print("  \(n) tap(s): median max corner err \(fmt(pctile(errs, 0.5)))m   p95 \(fmt(pctile(errs, 0.95)))m")
 }
 
-// --- Section 4d: before/after — Spike/ScanView.swift's ARAnchor plan-overlay fix -------------------
+// --- Section 4d: Spike/ScanView.swift's ARAnchor plan-overlay fix, correction modelled as PARTIAL --
 // The fix (see Spike/ScanView.swift `showPlan`) stops parenting the plan overlay to a frozen
 // `AnchorEntity(world:)` snapshot and instead adds a real `ARAnchor` at the bag's origin via
 // `session.add(anchor:)`, then hangs the overlay off `AnchorEntity(anchor:)`. ARKit updates any
 // ARAnchor's `transform` as it refines its world-tracking pose graph -- the same class of
-// correction ARPlaneAnchor already gets and that Section 4 above already exploits for planeY, just
-// without a physical surface being re-observed to ground it. Modelled the same way as Section 4:
-// horizontal (x/z) `drift` and `dAxisDeg`, used here as *post-tap world rotation drift* (not the
-// single-tap fit noise Section 4b's averageAxis already covers -- that noise is baked into the
-// anchor's transform before ARKit ever sees it, so tracking correction has nothing to re-derive it
-// from), are zeroed for "after". dPlaneY and dWidth are one-instant fit/reading noise, untouched by
-// either mechanism, and kept identical in both rows. Whether ARKit's anchor-transform correction is
-// in practice as complete as this model assumes -- there is no live re-observation of "the bag" the
-// way the table plane gets one every frame -- is NOT verified here; that needs a real device (see
-// the report).
+// correction ARPlaneAnchor already gets and that Section 4 above already exploits for planeY.
+// The two are NOT equally trustworthy, though: the table plane is re-observed against live depth
+// data every single frame, so a fresh read of it is close to ground truth regardless of how much
+// the world frame has drifted -- which is why Section 4 could model that fix as removing drift.y
+// outright. A plain `ARAnchor` at the bag's origin has no equivalent: nothing re-observes "the
+// bag" the way ARKit re-observes the table, so this anchor's transform only ever gets *whatever
+// correction ARKit's generic pose-graph revision happens to apply* -- partial, and lagging the
+// true pose by however long that revision takes. Claiming it's removed outright (as an earlier
+// version of this section did) is the assumption restated as a result, not a measurement.
+// Instead: `fraction` below stands in for "how much of the post-tap horizontal/rotational world
+// drift has actually been corrected out of the anchor's transform by the time the overlay is
+// drawn" -- 0 = no better than the old frozen anchor, 1 = the (unearned) idealisation. Swept, not
+// asserted, because the real number can only come from a device. `dPlaneY`/`dWidth` (one-instant
+// fit/reading noise, and the single-tap axis fit noise Section 4b's averageAxis already covers)
+// are untouched by either mechanism and kept identical throughout.
 print("")
-print("== before/after: anchoring the plan overlay to a tracked ARAnchor (Spike/ScanView.swift showPlan) ==")
-func anchorCorrected(_ pert: Perturbation) -> Perturbation {
-    var p = pert; p.drift.x = 0; p.drift.z = 0; p.dAxisDeg = 0; return p
+print("== sweep: plan-overlay corner error vs. ARKit's anchor-correction fraction (Spike/ScanView.swift showPlan) ==")
+func anchorPartial(_ pert: Perturbation, fraction: Float) -> Perturbation {
+    var p = pert
+    p.drift.x *= (1 - fraction); p.drift.z *= (1 - fraction); p.dAxisDeg *= (1 - fraction)
+    return p
 }
 let anchorScenarios: [(String, Perturbation)] = [
     ("2cm horizontal world drift + 2deg world-rotation drift",
@@ -280,11 +287,38 @@ let anchorScenarios: [(String, Perturbation)] = [
     ("worst realistic: 3cm plane + 5deg rotation drift + 1cm dims + 5cm horizontal drift",
      Perturbation(dPlaneY: 0.03, dAxisDeg: 5, dWidth: 0.01, drift: SIMD3(1, 0, 1) / Float(2).squareRoot() * 0.05)),
 ]
+let correctionFractions: [Float] = [0.0, 0.5, 0.8, 0.95, 1.0]
 for (label, p) in anchorScenarios {
-    let before = evaluate(p), after = evaluate(anchorCorrected(p))
     print("\(label):")
-    print("  before (frozen world anchor):  max \(fmt(before.maxErr))m  believable \(pct(before.believableFrac))")
-    print("  after  (tracked ARAnchor):      max \(fmt(after.maxErr))m  believable \(pct(after.believableFrac))")
+    let before = evaluate(p)
+    print("  before (frozen world anchor):        max \(fmt(before.maxErr))m  believable \(pct(before.believableFrac))")
+    for f in correctionFractions {
+        let r = evaluate(anchorPartial(p, fraction: f))
+        print("  tracked ARAnchor, \(String(format: "%3.0f", f * 100))% corrected:  max \(fmt(r.maxErr))m  believable \(pct(r.believableFrac))")
+    }
+}
+
+// The deliverable a device test actually needs: not "is 100% correction believable" (trivially
+// yes, by construction) but "how much correction is enough". Binary-search the minimum fraction
+// at which every corner stays under `believableThreshold` (1.5cm, the same bound the sweep above
+// already reports against).
+func breakEvenFraction(_ pert: Perturbation) -> Float? {
+    guard evaluate(anchorPartial(pert, fraction: 1)).maxErr < believableThreshold else { return nil }
+    var lo: Float = 0, hi: Float = 1
+    for _ in 0..<30 {
+        let mid = (lo + hi) / 2
+        if evaluate(anchorPartial(pert, fraction: mid)).maxErr < believableThreshold { hi = mid } else { lo = mid }
+    }
+    return hi
+}
+print("")
+print("== break-even: minimum anchor-correction fraction for every corner to stay under \(String(format: "%.1f", believableThreshold * 100))cm ==")
+for (label, p) in anchorScenarios {
+    if let be = breakEvenFraction(p) {
+        print("  \(label): needs >= \(String(format: "%.0f", be * 100))% correction")
+    } else {
+        print("  \(label): unreachable -- even 100% correction leaves plane/dimension fit noise over threshold")
+    }
 }
 
 // --- Section 5: the gate assertion -----------------------------------------------------------------
@@ -318,15 +352,20 @@ print("re-resolved, with 0.5cm plane, 1deg axis, 1cm dims, 1cm vertical drift: "
 
 // Third gate, for the ARAnchor fix: same shape as the first gate, but with `dAxisDeg` standing in
 // for post-tap world-rotation drift and `drift` for horizontal world drift rather than fit noise —
-// evaluated with `anchorCorrected` since that's what a tracked-ARAnchor plan overlay now delivers.
-// Only dPlaneY/dWidth (one-instant fit/reading noise, neither mechanism touches them) survive, so
-// the threshold tightens to just above what Section 1's planeY/dimensions sweeps alone cost.
+// evaluated at `ANCHOR_CORRECTION_FRACTION_GATE`, a deliberately non-idealised point on the Section
+// 4d curve (see the break-even numbers printed above), not at fraction 1 — asserting against the
+// idealisation would pass by construction and prove nothing about real hardware. 80% is chosen
+// because Section 4d's own break-even numbers put every scenario there well under threshold even
+// before this gate's smaller magnitudes are applied; if a device measurement later shows ARKit's
+// real anchor correction is worse than 80%, this assertion is the one that should start failing.
 print("")
+let ANCHOR_CORRECTION_FRACTION_GATE: Float = 0.8
 let anchorGate = Perturbation(dPlaneY: 0.005, dAxisDeg: 1, dWidth: 0.01, drift: SIMD3(1, 0, 0) * 0.01)
-let anchorGateResult = evaluate(anchorCorrected(anchorGate))
+let anchorGateResult = evaluate(anchorPartial(anchorGate, fraction: ANCHOR_CORRECTION_FRACTION_GATE))
 let anchorThreshold: Float = 0.013
 assert(anchorGateResult.maxErr < anchorThreshold,
-       "regression: with the plan overlay anchored via a tracked ARAnchor, 0.5cm plane + 1deg axis "
-       + "drift + 1cm dims + 1cm horizontal drift now costs \(anchorGateResult.maxErr)m, over \(anchorThreshold)m")
-print("anchored, with 0.5cm plane, 1deg rotation drift, 1cm dims, 1cm horizontal drift: "
+       "regression: with the plan overlay's ARAnchor correcting only \(Int(ANCHOR_CORRECTION_FRACTION_GATE * 100))% of "
+       + "drift, 0.5cm plane + 1deg axis drift + 1cm dims + 1cm horizontal drift now costs "
+       + "\(anchorGateResult.maxErr)m, over \(anchorThreshold)m")
+print("tracked ARAnchor at \(Int(ANCHOR_CORRECTION_FRACTION_GATE * 100))% correction, with 0.5cm plane, 1deg rotation drift, 1cm dims, 1cm horizontal drift: "
       + "max corner error \(fmt(anchorGateResult.maxErr))m < \(anchorThreshold)m — ok")

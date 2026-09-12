@@ -296,9 +296,14 @@ struct ScanView: UIViewRepresentable {
             // drift accumulated between the suitcase tap and now — see tests/swift/drift Section 4d.
             // It does NOT correct the one-tap axis/plane/dimension *fit* noise baked into `suitcase`
             // before this anchor is ever created (averageAxis already covers axis fit noise
-            // separately by re-tapping); nor is it as strongly grounded as the live plane re-fit
-            // below, since nothing re-observes "the bag" the way ARKit re-observes the table —
-            // unverified without a device, see the report.
+            // separately by re-tapping). And this correction is NOT as trustworthy as the live plane
+            // re-fit below: the table plane is re-observed against live depth data every frame, so a
+            // fresh read of it is close to ground truth regardless of how much the world has
+            // drifted; a plain ARAnchor at the bag's origin has no equivalent — nothing re-observes
+            // "the bag" the way ARKit re-observes the table — so it only gets whatever *partial*
+            // correction ARKit's generic pose-graph revision happens to apply, lagging the true pose
+            // by however long that revision takes. Modelled as a swept correction fraction, not an
+            // assumed 100%, in tests/swift/drift Section 4d; the real fraction needs a device.
             let bagFrame = PlanAnchor(interior: suitcase.interior, planeY: suitcase.planeY)
             let arTransform = simd_float4x4(columns: (
                 SIMD4<Float>(bagFrame.axis, 0),

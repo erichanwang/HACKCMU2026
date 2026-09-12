@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(simd)
 import simd
+#endif  // Linux: tests/swift/SimdShim.swift supplies the few simd functions used here
 
 struct BoxFit {
     var width: Float   // along `axis`
@@ -124,6 +126,7 @@ struct ScannedItem: Codable, Identifiable {
     var heights: [[Float]]
     var label: String?
     var labelSource: String?
+    var labelStatus: String?       // "done", or "pending" while the server retries Grok in the background
     var description: String?       // one sentence from Grok
     var mass: Double?              // estimated kg from Grok, 0 = unknown
     var keepUpright: Bool?         // must stay this side up (liquids, open containers)

@@ -310,6 +310,8 @@ def run_demo(
     for cand in candidates:
         recs = records_by_candidate.get(cand.candidate_id, [])
         rec0 = recs[0] if recs else None
+        if not cand.actions:  # 0 items, all unpacked, or a prefix candidate: nothing to imagine
+            continue
         action0 = cand.actions[0]
         expected_img = observation_from_scene(apply_action(state, action0), viewpoint).image
         if rec0 is not None and rec0.status == "complete" and rec0.result is not None and rec0.result.frames:

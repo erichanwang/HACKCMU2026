@@ -141,9 +141,9 @@ def object_from_scanned_item(
     id: Optional[str] = None,
     **fields: Any,
 ) -> Object:
-    """Adapt a `ScannedItem` JSON dict (centimetres, no pose) into an `Object`.
+    """Adapt a `ScannedItem` JSON dict (no pose) into an `Object`.
 
-    cm -> m (/100); `dimensions = (width_m, height_m, depth_m)` so the
+    Metre `dimensions` as the phone sends them, or the old cm keys (/100); `dimensions = (width_m, height_m, depth_m)` so the
     scanner's width lands on local x, height on local y (vertical, unrotated),
     depth on local z -- matching `physics.schema`'s axis convention.
 
@@ -152,9 +152,12 @@ def object_from_scanned_item(
     `apply_placements` has placed it. Extra `Object` fields (`mass_kg`,
     `constraints`, `rigidity`, `compressibility_k`, ...) go through **fields.
     """
-    width_m = float(item["width"]) / 100.0
-    depth_m = float(item["depth"]) / 100.0
-    height_m = float(item["height"]) / 100.0
+    if "dimensions" in item:  # the phone's form (SCAN_OUTPUT.md): [width, height, depth] in metres
+        width_m, height_m, depth_m = (float(v) for v in item["dimensions"])
+    else:  # the original spike: width/depth/height in centimetres
+        width_m = float(item["width"]) / 100.0
+        depth_m = float(item["depth"]) / 100.0
+        height_m = float(item["height"]) / 100.0
     kwargs: dict[str, Any] = dict(
         id=id if id is not None else item["id"],
         dimensions=(width_m, height_m, depth_m),

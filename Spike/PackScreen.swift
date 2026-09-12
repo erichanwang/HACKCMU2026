@@ -191,18 +191,21 @@ struct PackScreen: View {
     private func pack(_ bag: API.Suitcase) {
         packing = bag.id
         zip = 0
-        let shut: Duration = reduceMotion ? .zero : .milliseconds(900)
-        if reduceMotion {
-            zip = 1
-        } else {
-            withAnimation(.easeInOut(duration: 0.9)) { zip = 1 }
-        }
         Task {
             defer { packing = nil; zip = 0 }
             // The solve runs while the zip closes; whichever finishes second decides
             // when the plan opens, and the bag is never shown open mid-zip.
             async let request = API.plan(suitcaseId: bag.id)
-            try? await Task.sleep(for: shut)
+            if reduceMotion {
+                zip = 1
+            } else {
+                // One frame open before it starts closing. A view inserted and animated
+                // in the same pass has no previous value to animate from, so the bar
+                // would mount already shut and the zip would never be seen.
+                try? await Task.sleep(for: .milliseconds(60))
+                withAnimation(.easeInOut(duration: 0.9)) { zip = 1 }
+                try? await Task.sleep(for: .milliseconds(920))
+            }
             do {
                 let (solved, unpacked, pendingLabels) = try await request
                 plan = solved

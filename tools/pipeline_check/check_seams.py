@@ -33,9 +33,9 @@ time. Nothing else about the run changes: same solver, same ranking, same chosen
 
 Proving it can fail: `--perturb {escape,rotation,overlap,nest,nest_outside,step,height}` corrupts the plan
 after planning, in memory, so each assertion can be seen catching its own seam. `--perturb`
-touches the main fixture only; the two cavity fixtures below always run as planned.
+touches the main fixture only; the three cavity fixtures below always run as planned.
 
-Three fixtures, because the `nestedIn` cavity seam needs a plan that actually has a cavity:
+Four fixtures, because the `nestedIn` cavity seam needs a plan that actually has a cavity:
 
   ITEMS           the general fixture: compression, cylinders, keepUpright, an unpacked item.
                   No nesting, so the nestedIn-shape assertion reports N/A on it -- not PASS.
@@ -44,6 +44,10 @@ Three fixtures, because the `nestedIn` cavity seam needs a plan that actually ha
                   output: packer3d's `nested_in`, the y/z swap into `nestedIn`, the pair's
                   shared volume against the declared cavity, the Swift decoder (silent on the
                   nested pair, still loud on the same overlap undeclared), and the verdict.
+  MULTI_ITEMS     the same case with TWO foam cut-outs and two lenses, one per cut-out. The only
+                  fixture where a host has more than one cavity, which is the one shape that can
+                  tell "this overlap is inside the guest's own cell" apart from "this overlap is
+                  somewhere inside the host" -- see check_multi_cavity.
   NEST_GAP_ITEMS  the same seam with an open box, the shape a bowl or a shoe really scans as.
                   Reported as a GAP, with the diagnosis, and the assertions above engage on it
                   automatically the day it nests. See below.
@@ -148,18 +152,21 @@ ITEMS = [
 # ------------------------------------------------- fixture #2 and #3: plans with a real cavity
 # `nestedIn` is the one seam nothing used to reach with real solver output. These two fixtures
 # reach it (or show exactly what stops it), through `planner.plan` like every other fixture here.
-def recess_grid(rows, cols, top, floor, r0, r1, c0, c1) -> list[list[float]]:
-    """A `heights` grid with a rectangular dip: `top` everywhere, `floor` on cells
-    [r0, r1) x [c0, c1). Rows run along width, columns along depth, as everywhere else.
+def recess_grid(rows, cols, top, floor, *dips) -> list[list[float]]:
+    """A `heights` grid with rectangular dips: `top` everywhere, `floor` on the cells of each
+    `(r0, r1, c0, c1)` dip. Rows run along width, columns along depth, as everywhere else.
+    Called with four bare numbers for the one-dip case, which is how it started.
 
-    The dip has to line up with `Item.solid_boxes`' max-pooling (4 x 4 blocks, `np.array_split`
+    A dip has to line up with `Item.solid_boxes`' max-pooling (4 x 4 blocks, `np.array_split`
     of the row/col indices) or it vanishes: max-pooling takes the TALLEST cell in a block, so a
     block holding one rim cell is solid to its full height. A recess that is not a whole number
     of pooled blocks leaves the item with no cavity at all and no nest is possible -- that is a
     property of the solver's own decomposition, not of the scan.
     """
-    return [[floor if (r0 <= i < r1 and c0 <= j < c1) else top for j in range(cols)]
-            for i in range(rows)]
+    if len(dips) == 4 and not isinstance(dips[0], (tuple, list)):
+        dips = (dips,)
+    return [[floor if any(r0 <= i < r1 and c0 <= j < c1 for r0, r1, c0, c1 in dips) else top
+             for j in range(cols)] for i in range(rows)]
 
 
 # A rigid case with a foam cut-out, and a lens that fits the cut-out. The dip is 1 of the 16
@@ -189,6 +196,47 @@ NEST_GAP_ITEMS = [
          heights=recess_grid(22, 22, 0.08, 0.01, 3, 19, 3, 19)),
     scan("socks", 0.10, 0.04, 0.10, label="Socks", rigidity="soft", compressibility=1.5,
          mass=0.5, suitcaseId="gap-bag"),
+]
+
+# ------------------------------------------------- fixture #4: ONE host, TWO cavities, TWO guests
+# Every other nesting fixture in this repo has one host, one cavity, one guest -- and the cavity
+# cell travels with `nestedIn` precisely because a host can have several, and "may these two
+# overlap" has a different answer in each (packing-core/CLAUDE.md, packer3d/decoder._nested_in).
+# Nothing exercised that until this fixture.
+#
+# The geometry is forced, not tuned. `Item.solid_boxes` max-pools `heights` to 4 x 4 blocks
+# whatever the grid's resolution, so a cavity cell is always a whole block: here 1/4 of the
+# width by 1/4 of the depth, i.e. 0.10 x 0.06 m. Two recesses therefore have to be two of those
+# 16 blocks, and the block indices decide everything:
+#
+#   * two blocks adjacent along an axis read as one recess spanning both, not two cells;
+#   * a block at index 0 or 3 touches the item's own wall, so the "case" has an open notch
+#     rather than a cut-out with a rim;
+#   * index 1 and 2 are the only interior indices per axis, and they are adjacent.
+#
+# So the only way to get TWO fully-rimmed cavity cells out of a 4 x 4 pool is the diagonal pair
+# (1, 1) and (2, 2): each has solid blocks on all four sides, and the two touch only along one
+# vertical corner line, which is zero shared volume. That is not a fixture choice, it is what
+# the pooling leaves available -- three rimmed cells is not reachable at all.
+#
+# Depth is forced too: `from_scanned_heightmap` calls a shape `irregular` once true volume / bbox
+# drops below 0.9, and irregular defaults to `fragile=True`, which `packer3d/decoder.py` then
+# refuses to rest anything on (the KNOWN GAP above). Two of 16 blocks recessed by a fraction f of
+# the height gives ratio 1 - f/8, so f <= 0.8 -- and at 0.8 it lands exactly on the boundary.
+# f = 0.7 (floor 0.03 m of a 0.10 m case) keeps the ratio at 0.9125 and the case a `box`.
+MULTI_SUITCASE = {"_id": "multi-bag", "name": "Fixture two-cavity bag", "dimensions": [0.42, 0.11, 0.26]}
+MULTI_ITEMS = [
+    scan("camera-case", 0.40, 0.10, 0.24, label="Camera case with two foam cut-outs", mass=1.2,
+         keepUpright=True, suitcaseId="multi-bag",
+         heights=recess_grid(40, 24, 0.10, 0.03, (10, 20, 6, 12), (20, 30, 12, 18))),
+    # Two identical lenses against two identical 0.10 x 0.06 x 0.07 cut-outs. Each fits either
+    # cut-out and neither fits anywhere else: 1 cm of floor beside the case, 1 cm of headroom
+    # above its lid, and two of them cannot share one cut-out (0.09 m long in a 0.06 m-wide
+    # block side by side, 0.05 + 0.05 m tall in 0.07 m of depth plus 0.01 m of headroom). So the
+    # solver has exactly one packing left: one lens per cavity, which is the case this fixture
+    # exists to reach.
+    scan("lens-a", 0.09, 0.06, 0.05, label="Wide lens", mass=0.4, suitcaseId="multi-bag"),
+    scan("lens-b", 0.09, 0.06, 0.05, label="Tele lens", mass=0.4, suitcaseId="multi-bag"),
 ]
 
 
@@ -681,6 +729,128 @@ def check_nested_chain(rep: Report, doc: dict, plan: dict, ref: dict, label: str
             f"with nestedIn stripped: exit={bad_code} "
             f"{next((l for l in bad_out.splitlines() if 'geometry issue' in l or 'overlap' in l), bad_said) or '(no output)'}")
 
+        # ---- 5. the two other ways a `nestedIn` can be wrong, on the same real plan. Both are
+        # in PackingPlan.honouredNesting()'s contract and neither was exercised against solver
+        # output: a host the plan does not contain is its OWN issue (not silently ignored), and a
+        # host chain that loops is treated as not-nested, so the overlap it claimed to explain
+        # comes back. Same geometry both times -- only the declaration changes.
+        one = nested[0]
+        host_id = one["nested_in"]["item_id"]
+        dangling = json.loads(json.dumps(doc))
+        for p in dangling["plan"]["placements"]:
+            if p["itemId"] == one["item_id"]:
+                p["nestedIn"]["itemId"] = "no-such-item"
+        d_code, d_out, d_said = plan3d_run(binary, dangling)
+        cyclic = json.loads(json.dumps(doc))
+        cav = next(p["nestedIn"]["cavity"] for p in cyclic["plan"]["placements"]
+                   if p["itemId"] == one["item_id"])
+        for p in cyclic["plan"]["placements"]:
+            if p["itemId"] == host_id:
+                p["nestedIn"] = {"itemId": one["item_id"], "cavity": cav}
+        c_code, c_out, c_said = plan3d_run(binary, cyclic)
+        want = f"{one['item_id']} overlaps {host_id}"
+        rep(f"a dangling nestedIn host raises its own issue and a host cycle is not-nested ({label})",
+            "which the plan does not contain" in d_out
+            and (want in c_out or f"{host_id} overlaps {one['item_id']}" in c_out),
+            f"host retagged 'no-such-item': exit={d_code} "
+            f"{next((l for l in d_out.splitlines() if 'geometry issue' in l), d_said) or '(no output)'}"
+            f"\n        {host_id} also declared nested in {one['item_id']} (a 2-cycle): exit={c_code} "
+            f"{next((l for l in c_out.splitlines() if 'geometry issue' in l), c_said) or '(no output)'}")
+
+
+def check_multi_cavity(rep: Report, doc: dict, plan: dict, label: str) -> None:
+    """The seam only a host with SEVERAL cavities can reach: the cavity cell in `nestedIn` has to
+    be the guest's OWN cell, not "somewhere in this host".
+
+    Every other nesting fixture has one host, one cavity, one guest, and under that shape a
+    consumer that read `nestedIn` as "these two may overlap anywhere inside the host" would pass
+    every assertion in this file. packing-core/CLAUDE.md says the cell travels with the field
+    exactly because that reading is wrong once a host has two cells. Three assertions, in
+    increasing strength:
+
+      1. two guests, one host, two DIFFERENT cells;
+      2. each guest's overlap with the host is inside its OWN cell -- and, for at least one of
+         them, NOT inside the other guest's cell, so the pass is not the union of the two cells
+         quietly standing in for either;
+      3. put each guest in the other's cell and leave the declarations alone: the same two boxes,
+         the same total overlap volume, the same host. The Python pair rule and the Swift decoder
+         must BOTH report it. Under the union reading, or with one cavity per host, this plan is
+         indistinguishable from the real one -- that difference is the whole reason for the cell.
+    """
+    by_id = {p["itemId"]: p for p in plan["placements"]}
+    guests: dict[str, list[dict]] = {}
+    for p in plan["placements"]:
+        if p.get("nestedIn") and p["nestedIn"]["itemId"] in by_id:
+            guests.setdefault(p["nestedIn"]["itemId"], []).append(p)
+    host_id, crowd = max(guests.items(), key=lambda kv: len(kv[1]), default=("", []))
+    seam = f"one host carries two guests in two different cavity cells on {label}"
+    if len(crowd) < 2:
+        left = [f"{u['id']} ({u.get('reason', '?')})" for u in doc["solver"]["unpacked"]]
+        rep.gap(seam, f"the solver did not put two guests in one host: nested pairs "
+                      f"{[(p['itemId'], p['nestedIn']['itemId']) for p in plan['placements'] if p.get('nestedIn')]}, "
+                      f"unpacked {', '.join(left) or 'none'}. Every assertion below engages on "
+                      f"its own the day it does.")
+        return
+
+    host = by_id[host_id]
+    cells = {p["itemId"]: box(p["nestedIn"]["cavity"]) for p in crowd}
+    pairs = [(a["itemId"], b["itemId"]) for i, a in enumerate(crowd) for b in crowd[i + 1:]]
+    same = [f"{x}/{y}" for x, y in pairs
+            if min(min(cells[y][1][k] - cells[x][0][k], cells[x][1][k] - cells[y][0][k])
+                   for k in range(3)) > EPS]
+    rep(seam, not same,
+        f"{len(crowd)} guests in {host_id}: "
+        + "; ".join(f"{p['itemId']} cell {fmt(cells[p['itemId']][0])}..{fmt(cells[p['itemId']][1])}"
+                    for p in crowd)
+        + (f"\n        SHARE VOLUME: {', '.join(same)} -- not distinct cells" if same else ""))
+
+    # ---- 2. own cell, and demonstrably not merely the union of the cells
+    union = (tuple(min(c[0][k] for c in cells.values()) for k in range(3)),
+             tuple(max(c[1][k] for c in cells.values()) for k in range(3)))
+    bad, lines, discriminating = [], [], 0
+    for p in crowd:
+        lo, hi = shared(p, host)
+        clo, chi = cells[p["itemId"]]
+        out = tuple(max(clo[k] - lo[k], hi[k] - chi[k], 0.0) for k in range(3))
+        others = [q["itemId"] for q in crowd if q is not p
+                  and all(lo[k] >= cells[q["itemId"]][0][k] - EPS
+                          and hi[k] <= cells[q["itemId"]][1][k] + EPS for k in range(3))]
+        in_union = all(lo[k] >= union[0][k] - EPS and hi[k] <= union[1][k] + EPS for k in range(3))
+        if max(out) > EPS:
+            bad.append(f"{p['itemId']}'s overlap with {host_id} is out of its own cell by {fmt(out)} m")
+        if others:
+            bad.append(f"{p['itemId']}'s overlap also fits inside {', '.join(others)}'s cell")
+        else:
+            discriminating += 1
+        lines.append(f"{p['itemId']}/{host_id} share {fmt(lo)}..{fmt(hi)}: inside its own cell, "
+                     f"inside another guest's cell {bool(others)}, inside the union of both {in_union}")
+    rep(f"each guest's overlap with the host lies inside its OWN cavity cell, not the union, on {label}",
+        not bad and discriminating > 0,
+        f"union of the {len(cells)} cells is {fmt(union[0])}..{fmt(union[1])}, which every overlap "
+        f"fits inside -- so {discriminating} of {len(crowd)} guests tell the cell apart from the union. "
+        + "; ".join(lines) + ("\n        WRONG CELL: " + "; ".join(bad) if bad else ""))
+
+    # ---- 3. swap the guests between cells, leave `nestedIn` alone
+    swapped = json.loads(json.dumps(doc))
+    sw = {p["itemId"]: p for p in swapped["plan"]["placements"]}
+    a, b = crowd[0]["itemId"], crowd[1]["itemId"]
+    sw[a]["position"], sw[b]["position"] = dict(sw[b]["position"]), dict(sw[a]["position"])
+    caught = [f"{g}/{host_id}" for g in (a, b) if not permitted(sw[g], sw[host_id])]
+    seam = (f"a guest moved into the other guest's cell is reported, though the declarations, the "
+            f"host and the overlap volume are unchanged ({label})")
+    binary = plan3d_binary()
+    if not binary:
+        rep(seam, False, "no plan3d binary: set PLAN3D_BIN (see this file's docstring)")
+        return
+    code, out, said = plan3d_run(binary, swapped)
+    loud = "geometry issues: none" not in out
+    rep(seam, len(caught) == 2 and loud,
+        f"{a} and {b} traded positions ({fmt(vec(sw[a]['position']))} and "
+        f"{fmt(vec(sw[b]['position']))}), each still declaring the cell it left.\n        "
+        f"pair rule reports: {', '.join(caught) or 'NOTHING -- the cell was not checked'}\n        "
+        f"Swift decoder: exit={code} "
+        f"{next((l for l in out.splitlines() if 'geometry issue' in l), said) or '(no output)'}")
+
 
 # ------------------------------------------------------------------------------ perturbation
 def perturb(kind: str, doc: dict) -> str:
@@ -770,6 +940,7 @@ def main() -> int:
     # the cavity seam, on plans the real solver produced. `--perturb` only ever touches the main
     # fixture, so these two run as planned whatever it asked for.
     for name, bag, its in (("the recessed-case fixture", NEST_SUITCASE, NEST_ITEMS),
+                           ("the two-cavity fixture", MULTI_SUITCASE, MULTI_ITEMS),
                            ("the open-box fixture", NEST_GAP_SUITCASE, NEST_GAP_ITEMS)):
         d2 = planner.plan(bag, its)
         p2 = d2["plan"]
@@ -784,6 +955,8 @@ def main() -> int:
         check_steps(rep, p2)
         check_swift_decoder(rep, d2, f" ({name})")
         check_nested_chain(rep, d2, p2, ref2, name)
+        if its is MULTI_ITEMS:
+            check_multi_cavity(rep, d2, p2, name)
         if any(p.get("nested_in") for p in d2["solver"]["placements"]):
             check_decomposition(rep, d2, p2, its)
             check_physics_agrees(rep, d2, p2, bag, its)

@@ -34,6 +34,61 @@ enum ScanMode: Hashable {
     case suitcase, item
 }
 
+/// Bakes a small texture, one pixel per heightmap cell, by projecting each cell's captured
+/// top surface through `posedFrame` and sampling `sampler` — the exact camera pose and pixel
+/// buffer of the ARFrame the geometry itself came from (see `tap`'s `frame`), never a later
+/// `ARView.snapshot()`. A snapshot's completion handler fires after the box-fit background
+/// work finishes, by which point a hand-held phone has moved enough to misproject every cell
+/// onto whatever is now behind the object — background, hand, table — which is what produced
+/// mottled, non-object colours in an earlier version of this. Sampling through the original
+/// frame instead means the pose the colour comes from is, by construction, the same pose the
+/// geometry came from: the same trick `FrameSampler.swift`'s walk-around capture used, just
+/// for one frame instead of many. A free function, not a `Coordinator` method: it runs inside
+/// the detached geometry task below, off the main actor, so it must not touch `self`.
+/// Base64 PNG so it travels as one more string field on `ScannedItem`; nil if the grid is
+/// empty or every cell projects off-screen or behind the camera.
+func bakeColorMap(heights: [[Float]], box: BoxFit, planeY: Float, posedFrame: PosedFrame, sampler: PixelSampler) -> String? {
+    guard let firstRow = heights.first, !firstRow.isEmpty else { return nil }
+    let ni = heights.count, nj = firstRow.count
+    let cell = shapeCellMeters
+    let spanI = Float(ni) * cell, spanJ = Float(nj) * cell
+    let perp = SIMD3<Float>(-box.axis.z, 0, box.axis.x)
+
+    var rgba = [UInt8](repeating: 0, count: ni * nj * 4)
+    var any = false
+    for i in 0..<ni {
+        for j in 0..<nj {
+            let top = heights[i][j]
+            guard top > 0 else { continue }
+            let x = (Float(i) + 0.5) * cell - spanI / 2
+            let z = (Float(j) + 0.5) * cell - spanJ / 2
+            let world = SIMD3<Float>(
+                box.center.x + box.axis.x * x + perp.x * z,
+                planeY + top,
+                box.center.z + box.axis.z * x + perp.z * z
+            )
+            guard let px = posedFrame.project(world), let rgb = sampler.colour(at: px) else { continue }
+            let dst = (j * ni + i) * 4
+            rgba[dst] = UInt8((rgb.x * 255).rounded())
+            rgba[dst + 1] = UInt8((rgb.y * 255).rounded())
+            rgba[dst + 2] = UInt8((rgb.z * 255).rounded())
+            rgba[dst + 3] = 255
+            any = true
+        }
+    }
+    guard any,
+          let provider = CGDataProvider(data: Data(rgba) as CFData),
+          let outImage = CGImage(
+              width: ni, height: nj, bitsPerComponent: 8, bitsPerPixel: 32,
+              bytesPerRow: ni * 4, space: CGColorSpaceCreateDeviceRGB(),
+              bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+              provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+          ),
+          let png = UIImage(cgImage: outImage).pngData()
+    else { return nil }
+    return png.base64EncodedString()
+}
+
 struct ScanView: UIViewRepresentable {
     @Binding var item: ScannedItem?
     @Binding var status: String
@@ -132,6 +187,17 @@ struct ScanView: UIViewRepresentable {
                 }
             }
 
+            // This frame's pose and pixel buffer, captured now so the colour bake below reads
+            // the exact frame the geometry came from — never a later, possibly-moved-since frame.
+            // `CVPixelBuffer` is refcounted; holding this reference keeps its contents valid past
+            // `frame`'s own lifetime.
+            let posedFrame = PosedFrame(
+                viewMatrix: frame.camera.transform.inverse,
+                intrinsics: frame.camera.intrinsics,
+                imageSize: SIMD2(Float(frame.camera.imageResolution.width), Float(frame.camera.imageResolution.height))
+            )
+            let pixelBuffer = frame.capturedImage
+
             scanning = true
             status = "Measuring…"
             let mode = self.mode
@@ -140,8 +206,10 @@ struct ScanView: UIViewRepresentable {
                 // `self` (Coordinator is not Sendable), not `view`, not the ARKit buffers — their
                 // frame is gone by now. Only plain geometry comes back, and everything that touches
                 // ARKit/RealityKit/UIKit or the SwiftUI bindings stays on this side, on the main actor.
-                let (ptCount, cluster, fitted, heights) = await Task.detached(priority: .userInitiated) {
-                    () -> (Int, [SIMD3<Float>], BoxFit?, [[Float]]) in
+                // `posedFrame`/`pixelBuffer` are the exception: plain pose math and a locked pixel
+                // buffer, both safe to read off the main actor, so the colour bake can run here too.
+                let (ptCount, cluster, fitted, heights, colorMap) = await Task.detached(priority: .userInitiated) {
+                    () -> (Int, [SIMD3<Float>], BoxFit?, [[Float]], String?) in
                     var pts: [SIMD3<Float>] = []
                     for (a, b, c) in tris {
                         pts += densify(a, b, c, spacing: shapeCellMeters / 2).filter { $0.y - planeY > minHeightMeters }
@@ -150,11 +218,16 @@ struct ScanView: UIViewRepresentable {
                     // Only a bag has a lid to trim away; trimming an item truncates it (Geometry.swift).
                     guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters,
                                            trimAboveRim: mode == .suitcase) else {
-                        return (pts.count, cluster, nil, [])
+                        return (pts.count, cluster, nil, [], nil)
                     }
-                    // Suitcase mode never looks at the heightmap, so don't build one.
-                    return (pts.count, cluster, box, mode == .suitcase
-                        ? [] : heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters))
+                    // Suitcase mode never looks at the heightmap or the colour map.
+                    guard mode == .item else { return (pts.count, cluster, box, [], nil) }
+                    let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
+                    let colorMap = PixelSampler(pixelBuffer).flatMap { sampler -> String? in
+                        defer { sampler.release() }
+                        return bakeColorMap(heights: heights, box: box, planeY: planeY, posedFrame: posedFrame, sampler: sampler)
+                    }
+                    return (pts.count, cluster, box, heights, colorMap)
                 }.value
                 guard let self else { return }
                 defer { self.scanning = false }
@@ -198,6 +271,7 @@ struct ScanView: UIViewRepresentable {
                 }
                 var scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
                 scanned.suitcaseId = suitcaseId
+                scanned.colorMap = colorMap
                 self.item = scanned
                 self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
                 print(scanned.asciiMap)
@@ -268,6 +342,7 @@ struct ScanView: UIViewRepresentable {
                 .insetBy(dx: -(maxX - minX) * 0.15, dy: -(maxY - minY) * 0.15)
                 .intersection(view.bounds)
         }
+
 
         func show(_ box: BoxFit, in view: ARView) {
             overlay?.removeFromParent()

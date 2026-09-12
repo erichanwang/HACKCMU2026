@@ -131,7 +131,13 @@ struct ScanScreen: View {
         .sheet(isPresented: $showingItems) { itemList }
         .sheet(isPresented: $showSettings) { SettingsSheet(serverURL: $serverURL, authToken: $authToken) }
         .sheet(isPresented: $showingPlanSheet) {
-            if let plan { PlanSheet(plan: plan, notice: planNotice, arActive: $planARActive) }
+            if let plan {
+                PlanSheet(
+                    plan: plan, notice: planNotice,
+                    scans: Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) }),
+                    arActive: $planARActive
+                )
+            }
         }
         .confirmationDialog("Delete this suitcase? Scanned items stay in your inventory.",
                             isPresented: $confirmingReset, titleVisibility: .visible) {
@@ -429,8 +435,11 @@ struct ScanScreen: View {
         Task {
             defer { packing = false }
             do {
-                let (fetchedPlan, unpacked, pendingLabels) = try await API.plan(suitcaseId: suitcaseId)
+                async let planTask = API.plan(suitcaseId: suitcaseId)
+                async let itemsTask = API.items(suitcaseId: suitcaseId)
+                let ((fetchedPlan, unpacked, pendingLabels), fetchedItems) = try await (planTask, itemsTask)
                 plan = fetchedPlan
+                items = fetchedItems
                 planNotice = nil
                 showingPlanSheet = true
                 status = unpacked.isEmpty

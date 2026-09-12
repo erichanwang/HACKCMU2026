@@ -22,9 +22,10 @@ func tap(_ tris: [Tri], seed: SIMD3<Float>, noise: Float = 0, padding: Float = p
 }
 
 // --- 1. boxes of several sizes and angles, with noise ------------------------------------
-// fitBox takes raw extremes, so a noisy cloud reads +padding and up to +2*noise per footprint
-// dimension. Both are deliberate/known; the check is on what is left after them.
-let bias = paddingMeters + 2 * noise
+// fitBox measures a trimmed extent now, so symmetric jitter can no longer only inflate the box.
+// What is left is +padding plus the sliver of the jitter cloud a fixed 2% trim cannot reach —
+// about +2 mm a side, against the +5 mm (a whole jitter amplitude) a raw min/max used to cost.
+let bias = paddingMeters + 0.008
 for (w, d, h) in [(Float(0.20), Float(0.10), Float(0.05)),
                   (Float(0.30), Float(0.22), Float(0.12)),
                   (Float(0.08), Float(0.06), Float(0.15))] {
@@ -38,7 +39,7 @@ for (w, d, h) in [(Float(0.20), Float(0.10), Float(0.05)),
                "\(cm(want[0]))x\(cm(want[1]))x\(cm(h))",
                "\(cm(got[0]))x\(cm(got[1]))x\(cm(r.box.height))",
                "\(mm(errs[0]))/\(mm(errs[1]))/\(mm(errs[2])) mm")
-        for e in errs { check(abs(e) <= bias + 0.01, "dim error \(mm(e)) mm on \(cm(w))x\(cm(d)) @\(yaw)°") }
+        for e in errs { check(abs(e) <= bias, "dim error \(mm(e)) mm on \(cm(w))x\(cm(d)) @\(yaw)°") }
         check(abs(r.box.center.x - c.x) < 0.01 && abs(r.box.center.z - c.y) < 0.01,
               "centre \(r.box.center) off (\(c.x), \(c.y))")
         check(abs(r.box.center.y - (planeY + h / 2)) < 0.01, "centre y \(r.box.center.y)")
@@ -49,8 +50,38 @@ for (w, d, h) in [(Float(0.20), Float(0.10), Float(0.05)),
         let inner = r.hm[2..<(r.hm.count - 2)].flatMap { $0[2..<($0.count - 2)] }
         check(inner.allSatisfy { abs($0 - h) <= noise + 0.002 },
               "top face cells \(cm(inner.min()!))–\(cm(inner.max()!)) cm, want \(cm(h))")
+        // The trimmed box is smaller than the cloud, so the points it excluded clamp into the
+        // border ring. That ring must still read the object's top, not 0 and not a runaway.
+        let border = r.hm[0] + r.hm[r.hm.count - 1] + r.hm.map { $0[0] } + r.hm.map { $0[$0.count - 1] }
+        check(border.allSatisfy { $0 > 0 && $0 <= h + noise + 0.002 },
+              "border cells \(cm(border.min()!))–\(cm(border.max()!)) cm, want \(cm(h))")
     }
 }
+
+// Heavier jitter (±10 mm). The trim is a fixed share of the cloud, so the sliver it cannot
+// reach scales with the noise — but it is still the trimmed extent, not the raw extremes.
+let heavy: Float = 0.010
+let hv = tap(boxTris(0.20, 0.10, 0.05, at: SIMD2(1, 2), yaw: 20, planeY: planeY),
+             seed: SIMD3(1, planeY + 0.05, 2), noise: heavy)
+let hvGot = [hv.box.width, hv.box.depth].sorted()
+let hvErrs = [hvGot[0] - 0.10, hvGot[1] - 0.20, hv.box.height - 0.05]
+record("box 20.0x10.0x5.0 @20°, ±10 mm", "10.0x20.0x5.0",
+       "\(cm(hvGot[0]))x\(cm(hvGot[1]))x\(cm(hv.box.height))",
+       "\(mm(hvErrs[0]))/\(mm(hvErrs[1]))/\(mm(hvErrs[2])) mm")
+for e in hvErrs { check(abs(e) <= paddingMeters + 0.012, "±10 mm jitter: dim error \(mm(e)) mm") }
+
+// One mesh spike 5 cm outside the object. fitBox is handed the cloud directly: connectedCluster
+// would drop a point this far out, and the point of the check is that fitBox no longer needs it to.
+let clean = scan(boxTris(0.20, 0.10, 0.05, at: SIMD2(1, 2), yaw: 0, planeY: planeY), planeY: planeY, noise: noise)
+let cleanBox = fitBox(points: clean, planeY: planeY, padding: paddingMeters)!
+let spikeBox = fitBox(points: clean + [SIMD3(1.15, planeY + 0.10, 2.0)],
+                      planeY: planeY, padding: paddingMeters)!
+let spikeErrs = [spikeBox.width - cleanBox.width, spikeBox.depth - cleanBox.depth,
+                 spikeBox.height - cleanBox.height]
+record("one 5 cm mesh spike", "\(cm(cleanBox.width))x\(cm(cleanBox.depth))x\(cm(cleanBox.height))",
+       "\(cm(spikeBox.width))x\(cm(spikeBox.depth))x\(cm(spikeBox.height))",
+       "\(mm(spikeErrs[0]))/\(mm(spikeErrs[1]))/\(mm(spikeErrs[2])) mm")
+for e in spikeErrs { check(abs(e) < 0.001, "a single spike moved the box by \(mm(e)) mm") }
 
 // The original tests/main.swift case: an exact multiple of the cell must not grow a phantom row.
 let exact = tap(boxTris(0.10, 0.20, 0.05, at: SIMD2(1, 2), yaw: 30, planeY: planeY),
@@ -126,8 +157,8 @@ record("book 15x10x2 cm", "15.0x10.0x2.0",
        "\(cm(book.box.width))x\(cm(book.box.depth))x\(cm(book.box.height))",
        "\(mm(book.box.width - 0.15))/\(mm(book.box.depth - 0.10))/\(mm(book.box.height - 0.02)) mm")
 check(!book.cluster.isEmpty, "book cluster empty — minHeightMeters ate it")
-check(abs(book.box.height - 0.02) <= bias + 0.01, "book height \(cm(book.box.height)) cm")
-check(abs(book.box.width - 0.15) <= bias + 0.01 && abs(book.box.depth - 0.10) <= bias + 0.01,
+check(abs(book.box.height - 0.02) <= bias, "book height \(cm(book.box.height)) cm")
+check(abs(book.box.width - 0.15) <= bias && abs(book.box.depth - 0.10) <= bias,
       "book footprint \(cm(book.box.width))x\(cm(book.box.depth))")
 
 // --- 5. points exactly on the box boundary --------------------------------------------------

@@ -59,6 +59,29 @@ func minAreaRect(_ pts: [SIMD2<Float>]) -> (w: Float, d: Float, center: SIMD2<Fl
     return best.map { ($0.w, $0.d, $0.center, $0.axis) }
 }
 
+/// Share of samples dropped from each end of an extent. LiDAR jitter is symmetric, but a raw
+/// min/max can only ever be pushed outward by it, so every box used to read about one jitter
+/// amplitude too big per side (+15 mm per footprint dimension at ARKit's ±5 mm, on top of the
+/// padding) and the packer then fit fewer items than the bag holds.
+/// Calibration knob: raise it if real scans still read big, lower it if they read small.
+/// ponytail: one fixed share for every shape, so ~2 mm a side survives at ±5 mm jitter and it
+/// scales with the noise. The unbiased cut is half the share the object's own end face
+/// contributes, which ranges 5–25% per side over the simulated shapes — above ~4% a flat item's
+/// thin end face is gone and the trim starts eating real geometry. Estimate that share per side
+/// (count the points within a cell of the extreme, minus the interior density) if 2 mm matters.
+let extentTrimFraction: Float = 0.02
+
+/// Low and high ends of `xs` with `extentTrimFraction` of the samples dropped from each end —
+/// a percentile, so a handful of outward-jittered samples (or one mesh spike) cannot set the edge.
+/// A percentile rather than a mean of the outermost k, which averages exactly the samples that
+/// jittered furthest out and so sits further out still.
+/// ponytail: full sort, O(n log n); nth-element selection would be O(n) if 50 k points gets tight.
+func trimmedRange(_ xs: [Float]) -> (lo: Float, hi: Float) {
+    let s = xs.sorted()
+    let k = min((s.count - 1) / 2, Int(Float(s.count) * extentTrimFraction))
+    return (s[k], s[s.count - 1 - k])
+}
+
 /// Fit a box to world-space points sitting on a horizontal plane at `planeY`.
 /// nil when there is no 2D footprint to fit (see `minAreaRect`), so the tap reports
 /// "nothing above the table here" rather than shipping a degenerate item.
@@ -66,10 +89,16 @@ func fitBox(points: [SIMD3<Float>], planeY: Float, padding: Float) -> BoxFit? {
     guard !points.isEmpty else { return nil }
     let flat = points.map { SIMD2<Float>($0.x, $0.z) }
     guard let r = minAreaRect(flat) else { return nil }
-    let height = points.map { $0.y - planeY }.max()! + padding
+    // The hull only picks the rectangle's axis — jitter barely turns it. The extents come from
+    // every point's projection onto that axis pair, trimmed, not from the hull's own extremes.
+    let v = SIMD2<Float>(-r.axis.y, r.axis.x)
+    let (uLo, uHi) = trimmedRange(flat.map { simd_dot($0, r.axis) })
+    let (vLo, vHi) = trimmedRange(flat.map { simd_dot($0, v) })
+    let height = trimmedRange(points.map { $0.y - planeY }).hi + padding
+    let c = r.axis * ((uLo + uHi) / 2) + v * ((vLo + vHi) / 2)
     return BoxFit(
-        width: r.w + padding, depth: r.d + padding, height: height,
-        center: SIMD3<Float>(r.center.x, planeY + height / 2, r.center.y),
+        width: uHi - uLo + padding, depth: vHi - vLo + padding, height: height,
+        center: SIMD3<Float>(c.x, planeY + height / 2, c.y),
         axis: r.axis.x < 0 ? SIMD3<Float>(-r.axis.x, 0, -r.axis.y) : SIMD3<Float>(r.axis.x, 0, r.axis.y))
 }
 
@@ -115,14 +144,18 @@ func heightMap(points: [SIMD3<Float>], box: BoxFit, planeY: Float, cell: Float) 
     // and a bare ceil then ships an extra all-zero row on every exact multiple of the cell.
     func count(_ span: Float) -> Int { max(1, Int((span / cell - 1e-4).rounded(.up))) }
     let ni = count(box.width), nj = count(box.depth)
+    // Index from the grid's own span, not the box's: that ceil rounds the grid up to a whole
+    // cell, and measuring from the box edge would pile all of the rounding at the far end —
+    // a dead last row on any box whose size is not a multiple of the cell.
+    let spanI = Float(ni) * cell, spanJ = Float(nj) * cell
     var h = Array(repeating: Array(repeating: Float(0), count: nj), count: ni)
     for p in points {
         let d = p - box.center
         // Clamped, not dropped: the box is fitted to these same points, so a point on the far
         // boundary (d == +width/2) indexes one past the last cell and would otherwise zero the
         // very row that defines the box's edge.
-        let i = min(ni - 1, max(0, Int(((simd_dot(d, box.axis) + box.width / 2) / cell).rounded(.down))))
-        let j = min(nj - 1, max(0, Int(((simd_dot(d, perp) + box.depth / 2) / cell).rounded(.down))))
+        let i = min(ni - 1, max(0, Int(((simd_dot(d, box.axis) + spanI / 2) / cell).rounded(.down))))
+        let j = min(nj - 1, max(0, Int(((simd_dot(d, perp) + spanJ / 2) / cell).rounded(.down))))
         h[i][j] = max(h[i][j], p.y - planeY)
     }
     return h

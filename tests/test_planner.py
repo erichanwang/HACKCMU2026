@@ -52,6 +52,21 @@ class TestPlan(unittest.TestCase):
         self.assertAlmostEqual(min(sizes["shirts"].values()), 0.05)  # physics halved the shirts
         self.assertAlmostEqual(sizes["bottle"]["y"], 0.18)          # and kept the bottle upright
 
+    def test_plan_also_stores_the_runner_up_s_full_placements(self):
+        planner.TIME_BUDGET_S = 0.3
+        suitcase = {"_id": "s1", "name": "test", "dimensions": [0.4, 0.2, 0.3]}
+        items = [scan("shirts", 0.3, 0.1, 0.2, rigidity="soft", compressibility=2.0),
+                 scan("bottle", 0.07, 0.18, 0.07, keepUpright=True),
+                 scan("book", 0.15, 0.04, 0.2)]
+        doc = planner.plan(suitcase, items)
+        runner_up = doc["runnerUp"]
+        self.assertEqual(runner_up["chosen"]["strategy"], doc["alternatives"][1]["strategy"])
+        self.assertEqual(runner_up["chosen"]["seed"], doc["alternatives"][1]["seed"])
+        self.assertTrue(runner_up["plan"]["placements"])
+        # the winner's own document shape is unchanged
+        self.assertTrue(doc["plan"]["placements"])
+        self.assertEqual(doc["chosen"]["strategy"], doc["alternatives"][0]["strategy"])
+
 
 class TestUnpacked(unittest.TestCase):
     def test_unpacked_items_are_reported_outside_the_plan(self):

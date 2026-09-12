@@ -55,7 +55,7 @@ def summary(candidate: dict) -> dict:
 
 
 def plan(suitcase: dict, items: list[dict]) -> dict:
-    """`{"solver", "validation", "plan", "chosen", "alternatives"}` for one suitcase and its item documents."""
+    """`{"solver", "validation", "plan", "chosen", "alternatives", "unpacked", "runnerUp"}` for one suitcase and its item documents."""
     width, height, depth = (float(v) for v in suitcase["dimensions"])
     # suitcase dimensions are [width, height, depth] (app frame, Y up); packer3d's container
     # is (x = length, y = width, z = up) -> [width, depth, height].
@@ -81,15 +81,19 @@ def plan(suitcase: dict, items: list[dict]) -> dict:
             candidates.append({"strategy": strategy, "seed": seed, "solver": result_dict, "validation": validation})
     logger.info("plan total seconds=%.3f candidates=%d", time.perf_counter() - total_start, len(candidates))
     candidates.sort(key=rank, reverse=True)
-    best = candidates[0]
     items_by_id = {str(i["id"]): i for i in items}
-    return {
-        "solver": best["solver"],
-        "validation": best["validation"],
-        "plan": to_app_plan(best["solver"], suitcase, items_by_id),
-        "chosen": {"strategy": best["strategy"], "seed": best["seed"]},
-        "alternatives": [summary(c) for c in candidates],
-        # top-level, NOT inside "plan": that nested object is the iOS PackingPlan contract and must not change
-        "unpacked": [{"itemId": u["id"], "label": items_by_id.get(u["id"], {}).get("label") or u["id"]}
-                     for u in best["solver"]["unpacked"]],
-    }
+
+    def full(c: dict) -> dict:
+        return {"solver": c["solver"], "validation": c["validation"],
+                "plan": to_app_plan(c["solver"], suitcase, items_by_id),
+                "chosen": {"strategy": c["strategy"], "seed": c["seed"]}}
+
+    best = full(candidates[0])
+    doc = {**best,
+           "alternatives": [summary(c) for c in candidates],
+           # top-level, NOT inside "plan": that nested object is the iOS PackingPlan contract and must not change
+           "unpacked": [{"itemId": u["id"], "label": items_by_id.get(u["id"], {}).get("label") or u["id"]}
+                        for u in best["solver"]["unpacked"]]}
+    if len(candidates) > 1:
+        doc["runnerUp"] = full(candidates[1])
+    return doc

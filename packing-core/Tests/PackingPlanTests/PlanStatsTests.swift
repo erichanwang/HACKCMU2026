@@ -32,7 +32,8 @@ final class PlanStatsTests: XCTestCase {
         _ step: Int,
         _ id: String,
         position: Vector3,
-        size: Vector3
+        size: Vector3,
+        nestedIn: Nesting? = nil
     ) -> Placement {
         Placement(
             step: step,
@@ -42,8 +43,17 @@ final class PlanStatsTests: XCTestCase {
             position: position,
             size: size,
             rotation: .xyz,
-            note: ""
+            note: "",
+            nestedIn: nestedIn
         )
+    }
+
+    private func nesting(
+        in host: String,
+        cavity position: Vector3,
+        size: Vector3
+    ) -> Nesting {
+        Nesting(itemID: host, cavity: Nesting.Cavity(position: position, size: size))
     }
 
     // MARK: - Fill
@@ -58,9 +68,14 @@ final class PlanStatsTests: XCTestCase {
         XCTAssertEqual(stats.fillFraction, 0.25, accuracy: accuracy)
     }
 
+    /// Nothing nests in the bundled plan, so the two agree — and the figure every
+    /// `#Preview` renders is pinned: its six boxes total 0.019124 m³ in a
+    /// 0.4064 × 0.1524 × 0.6096 = 0.0377558 m³ interior.
     func testFillFractionMatchesPlanPackedVolumeFraction() throws {
         let plan = try PlanLoader.mockPlan()
         XCTAssertEqual(PlanStats(plan: plan).fillFraction, plan.packedVolumeFraction, accuracy: accuracy)
+        XCTAssertEqual(PlanStats(plan: plan).packedVolume, 0.019124, accuracy: 1e-7)
+        XCTAssertEqual(PlanStats(plan: plan).fillFraction, 0.5065182, accuracy: accuracy)
     }
 
     func testEmptyPlanIsAllOneGap() {
@@ -72,6 +87,98 @@ final class PlanStatsTests: XCTestCase {
         XCTAssertEqual(stats.floorCoverage, 0)
         XCTAssertTrue(stats.layers.isEmpty)
         XCTAssertNil(stats.firstIn)
+    }
+
+    // MARK: - Fill with nesting
+    //
+    // A nested item's box lies inside its host's, so summing both counts the same
+    // cubic metres twice. Every figure below is the box arithmetic done by hand
+    // from the positions and sizes in the test, not read off the implementation.
+
+    /// Host 0.5³ = 0.125 m³, guest 0.2³ = 0.008 m³ wholly inside it. Summing gives
+    /// 0.133; the bag holds 0.125 m³ of stuff.
+    func testNestedItemVolumeIsCountedOnce() {
+        let nested = plan([
+            item(1, "host", position: .zero, size: Vector3(0.5, 0.5, 0.5)),
+            item(
+                2, "guest",
+                position: Vector3(0.1, 0.1, 0.1),
+                size: Vector3(0.2, 0.2, 0.2),
+                nestedIn: nesting(in: "host", cavity: Vector3(0.05, 0.05, 0.05), size: Vector3(0.3, 0.3, 0.3))
+            ),
+        ])
+        let stats = PlanStats(plan: nested)
+
+        XCTAssertEqual(stats.packedVolume, 0.125, accuracy: accuracy)
+        XCTAssertEqual(stats.fillFraction, 0.125, accuracy: accuracy)
+        // The plan's own fraction still sums the boxes, so the two now differ by
+        // exactly the shared volume. Whoever compares them should know why.
+        XCTAssertEqual(nested.packedVolumeFraction, 0.133, accuracy: accuracy)
+    }
+
+    /// Only the shared part is discounted. The guest spans y 0.4...0.6 and the host
+    /// y 0...0.5, so they share 0.2 × 0.1 × 0.2 = 0.004 m³: 0.133 − 0.004 = 0.129.
+    func testOnlyTheVolumeInsideTheHostIsDiscounted() {
+        let stats = PlanStats(plan: plan([
+            item(1, "host", position: .zero, size: Vector3(0.5, 0.5, 0.5)),
+            item(
+                2, "guest",
+                position: Vector3(0.1, 0.4, 0.1),
+                size: Vector3(0.2, 0.2, 0.2),
+                nestedIn: nesting(in: "host", cavity: Vector3(0.05, 0.3, 0.05), size: Vector3(0.3, 0.3, 0.3))
+            ),
+        ]))
+
+        XCTAssertEqual(stats.packedVolume, 0.129, accuracy: accuracy)
+    }
+
+    /// Nesting the plan does not honour buys no discount: a `nestedIn` naming an
+    /// item that is not in the plan is not nesting, so the full 0.133 stands.
+    func testNestingWithAMissingHostDoesNotDiscountVolume() {
+        let stats = PlanStats(plan: plan([
+            item(1, "host", position: .zero, size: Vector3(0.5, 0.5, 0.5)),
+            item(
+                2, "guest",
+                position: Vector3(0.1, 0.1, 0.1),
+                size: Vector3(0.2, 0.2, 0.2),
+                nestedIn: nesting(in: "ghost", cavity: Vector3(0.05, 0.05, 0.05), size: Vector3(0.3, 0.3, 0.3))
+            ),
+        ]))
+
+        XCTAssertEqual(stats.packedVolume, 0.133, accuracy: accuracy)
+    }
+
+    /// The bundled bowl-and-cup fixture, worked out from its JSON:
+    /// bowl 0.2 × 0.1 × 0.2 = 0.004, cup 0.08 × 0.09 × 0.08 = 0.000576, shared
+    /// (x 0.10...0.18, y 0.03...0.10, z 0.10...0.18) = 0.000448, so 0.004128 m³ of
+    /// a 0.34 × 0.20 × 0.50 = 0.034 m³ interior — 12.14%, not the 13.46% the sum
+    /// of the boxes claims.
+    func testNestedFixtureFillCountsTheSharedVolumeOnce() throws {
+        let stats = PlanStats(plan: try PlanLoader.plan(resourceNamed: "nested-plan", in: .module))
+
+        XCTAssertEqual(stats.packedVolume, 0.004128, accuracy: 1e-7)
+        XCTAssertEqual(stats.fillFraction, 0.1214118, accuracy: accuracy)
+        // Bowl footprint 0.2 × 0.2 over a 0.34 × 0.50 floor. The cup stands inside
+        // it, covering no floor the bowl was not already over — a union, so this
+        // needed no nesting fix and does not change.
+        XCTAssertEqual(stats.floorCoverage, 0.2352941, accuracy: accuracy)
+    }
+
+    /// The free-block search needed no nesting fix either: the bowl and cup end at
+    /// z = 0.25, so the clean 0.34 × 0.20 × 0.25 = 0.017 m³ slab behind them is the
+    /// biggest empty box (the next best is the 0.34 × 0.08 × 0.50 = 0.0136 m³ space
+    /// above the cup). What does change is the share: 0.034 − 0.004128 = 0.029872 m³
+    /// is free, so 0.017 is 56.9% of it, not the 57.8% an over-counted fill implies.
+    func testNestedFixtureFreeBlockIsMeasuredAgainstTheTrueFreeSpace() throws {
+        let stats = PlanStats(plan: try PlanLoader.plan(resourceNamed: "nested-plan", in: .module))
+        let gap = try XCTUnwrap(stats.largestGap)
+
+        XCTAssertEqual(gap.minCorner.z, 0.25, accuracy: accuracy)
+        XCTAssertEqual(gap.size.x, 0.34, accuracy: accuracy)
+        XCTAssertEqual(gap.size.y, 0.20, accuracy: accuracy)
+        XCTAssertEqual(gap.size.z, 0.25, accuracy: accuracy)
+        XCTAssertEqual(stats.largestGapVolume, 0.017, accuracy: accuracy)
+        XCTAssertEqual(stats.largestGapFractionOfFree, 0.5690948, accuracy: accuracy)
     }
 
     // MARK: - Largest gap

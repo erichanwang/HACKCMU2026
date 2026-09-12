@@ -53,11 +53,24 @@ public struct PlanStats: Hashable, Sendable {
 
     /// Interior cavity volume, m³, `> 0` for any sane container.
     public let interiorVolume: Float
-    /// Sum of the placement boxes, m³, `>= 0`. Boxes, not items: an item's real
-    /// shape is smaller than the box the solver reserved for it.
+    /// Volume the placement boxes occupy, counted once, m³, `>= 0`. Boxes, not
+    /// items: an item's real shape is smaller than the box the solver reserved
+    /// for it.
+    ///
+    /// Nested items share volume with their host legitimately (see the "Nested
+    /// placements" section of CLAUDE.md), so the sum of the boxes counts the
+    /// shared part twice. The volume each honoured nesting shares with its host
+    /// is subtracted, which makes this exactly the union of the boxes — the same
+    /// solid the free-space figures below measure against. Only nesting the plan
+    /// actually honours counts; a dangling, self-referential or cyclic
+    /// `nestedIn` is not a licence to discount volume.
     public let packedVolume: Float
-    /// `packedVolume / interiorVolume`, `0...1`. This is the solver's
-    /// `fill_ratio` recomputed from the plan; the two agree to float precision.
+    /// `packedVolume / interiorVolume`, `0...1`.
+    ///
+    /// Equals the solver's `fill_ratio` to float precision for a plan with no
+    /// nesting. For a nested plan it is *lower*: `fill_ratio` (like
+    /// `PackingPlan.packedVolumeFraction`) sums the boxes and so counts the
+    /// shared volume twice.
     public let fillFraction: Float
 
     /// The largest single empty axis-aligned box left in the interior, in bag
@@ -65,6 +78,14 @@ public struct PlanStats: Hashable, Sendable {
     /// full. Exact: an empty box can always be grown until every face touches an
     /// item face or a wall, so the search over item-face planes below misses
     /// nothing.
+    ///
+    /// Nesting needs no special case here, and deliberately gets none: the search
+    /// avoids the *union* of the boxes, so a nested guest's box is avoided whether
+    /// or not its host already covered that space (the guest may stick out of the
+    /// host — a cup's rim above a bowl's — and then it is the guest's box that
+    /// blocks). A host's cavity stays solid, because the space inside a shoe is
+    /// not somewhere a plan can put another item, and treating it as free would
+    /// let a reported block straddle the cavity and the open air outside it.
     public let largestGap: BoundingBox?
     /// `largestGap` volume, m³, `>= 0`; 0 when there is none.
     public let largestGapVolume: Float
@@ -74,7 +95,8 @@ public struct PlanStats: Hashable, Sendable {
 
     /// Fraction of the bag floor's `width × depth` covered by *some* item,
     /// looking straight down, `0...1`. Union area — items stacked over the same
-    /// patch count once.
+    /// patch count once, and so do a nested item and its host, which is why
+    /// nesting needs no adjustment here.
     public let floorCoverage: Float
 
     /// Layers bottom-first. Empty only for a plan with no placements.
@@ -97,7 +119,7 @@ public struct PlanStats: Hashable, Sendable {
         let boxes = plan.placements.map(\.box)
 
         interiorVolume = interior.volume
-        packedVolume = boxes.reduce(0) { $0 + $1.volume }
+        packedVolume = max(boxes.reduce(0) { $0 + $1.volume } - PlanStats.nestedOverlapVolume(plan), 0)
         fillFraction = interiorVolume > 0 ? min(packedVolume / interiorVolume, 1) : 0
 
         let gap = PlanStats.largestEmptyBox(dimensions: dimensions, boxes: boxes)
@@ -176,6 +198,33 @@ public extension PackingPlan {
 private extension PlanStats {
     /// Overlap below this counts as no overlap (float noise on touching faces).
     static let overlapTolerance: Float = 1e-6
+
+    /// Volume counted twice by summing every placement box: the part of each
+    /// nested item's box that lies inside its host's, m³, `>= 0`.
+    ///
+    /// Which nesting counts is `honouredNesting()`'s answer and not ours — a
+    /// dangling host, a self-reference or a cycle is not nesting, and must not
+    /// buy a discount on the fill figure. The shared volume is measured against
+    /// the *host's box*, not the declared cavity: the double count is however much
+    /// of the two boxes coincides, whether or not it stays inside the cell the
+    /// producer named. Overlap outside the cell is a `.intersection` issue from
+    /// `geometryIssues()`; reporting a truthful volume for it is not endorsing it.
+    ///
+    /// ponytail: pairwise, which is exact for one guest per host and for a chain
+    /// where each guest sits inside its host's box. A guest that pokes out of its
+    /// host and into its host's host would be over-subtracted; no producer emits
+    /// that, and full inclusion–exclusion is the fix if one ever does.
+    static func nestedOverlapVolume(_ plan: PackingPlan) -> Float {
+        let boxes = Dictionary(
+            plan.placements.map { ($0.itemID, $0.box) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return plan.honouredNesting().reduce(0) { total, entry in
+            guard let guest = boxes[entry.key], let host = boxes[entry.value.itemID] else { return total }
+            let overlap = guest.overlapExtents(with: host)
+            return total + max(overlap.x, 0) * max(overlap.y, 0) * max(overlap.z, 0)
+        }
+    }
 
     static func footprintsOverlap(_ a: BoundingBox, _ b: BoundingBox) -> Bool {
         let overlap = a.overlapExtents(with: b)

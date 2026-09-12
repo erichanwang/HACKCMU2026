@@ -31,3 +31,10 @@ where `plan.json`, `solver.json`, `validation.json` and the PAN rollout assets l
 Without an `XAI_API_KEY` the server labels every item "unknown" and drops `keepUpright`;
 the script PATCHes each fixture's label/rigidity/compressibility/mass/keepUpright back in, so the plan is
 meaningful either way.
+
+`--async` posts each item with `?async=1` and polls `GET /items/{id}` every 2s until its label
+is done instead of waiting on the POST -- with `--photos` this shows Grok labelling in the
+background.
+
+If the solver leaves items out of the plan it prints "left out: <label>, <label>"; while any
+item is still being labelled it prints "N item(s) still labelling".

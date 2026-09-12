@@ -17,6 +17,7 @@ import json
 import math
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -122,13 +123,23 @@ def jpeg(fixture: dict, photos: Path | None) -> bytes:
 # --- steps -------------------------------------------------------------------
 
 
-def seed(server: str, photos: Path | None) -> tuple[dict, list[dict]]:
+def seed(server: str, photos: Path | None, is_async: bool) -> tuple[dict, list[dict]]:
     suitcase = post_json(f"{server}/suitcases", SUITCASE)
     print(f"[1/4] suitcase {suitcase['id']}  {SUITCASE['name']} {SUITCASE['dimensions']} m"
           + ("  -- photos labelled by Grok on the server" if photos else "  -- fixture labels, no Grok"))
     items = []
     for fixture in FIXTURE_ITEMS:
-        doc = post_item(f"{server}/items", scan(fixture, suitcase["id"]), jpeg(fixture, photos))
+        url = f"{server}/items?async=1" if is_async else f"{server}/items"
+        doc = post_item(url, scan(fixture, suitcase["id"]), jpeg(fixture, photos))
+        if is_async:
+            print(f"      + {fixture['name']}: posted, labelStatus={doc['labelStatus']}")
+            start = time.monotonic()
+            while doc["labelStatus"] == "pending":
+                if time.monotonic() - start > 60:
+                    die(f"item {doc['id']} still labelStatus=pending after 60s")
+                time.sleep(2)
+                doc = call(f"{server}/items/{doc['id']}")
+            print(f"        labelled {doc['label']!r} after {time.monotonic() - start:.1f}s")
         if photos is None:  # no photo worth labelling: restore what Grok would have guessed
             doc = patch_json(f"{server}/items/{doc['id']}", {k: fixture[k] for k in PATCH_FIELDS})
         elif doc["label"] == "unknown":
@@ -159,6 +170,12 @@ def make_plan(server: str, suitcase: dict, items: list[dict], out: Path) -> dict
         f"volume utilisation {metrics['volume_utilization']:.1%}, "
         f"physics valid={validation['valid']} violations={len(validation['violations'])}"
     )
+    unpacked = doc.get("unpacked")
+    if unpacked:
+        print(f"      left out: {', '.join(u['label'] for u in unpacked)}")
+    pending = doc.get("pendingLabels")
+    if pending:
+        print(f"      {pending} item(s) still labelling")
     chosen = doc["chosen"]
     print(f"      physics picked {chosen['strategy']}"
           f"{'' if chosen['seed'] is None else ' seed ' + str(chosen['seed'])} of {len(doc['alternatives'])} candidates: "
@@ -230,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--keep", action="store_true",
                    help="leave the demo suitcase on the server (default: DELETE /suitcases/{id} at the "
                         "end, which drops its items and stored plan too)")
+    p.add_argument("--async", action="store_true", dest="use_async",
+                   help="POST items with ?async=1 and poll GET /items/{id} for the label instead of "
+                        "waiting on the POST (with --photos this shows Grok labelling in the background)")
     args = p.parse_args(argv)
     if args.photos is not None:
         missing = [f["name"] for f in FIXTURE_ITEMS if not (args.photos / f"{f['name']}.jpg").is_file()]
@@ -246,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     server = args.server.rstrip("/")
 
-    suitcase, items = seed(server, args.photos)
+    suitcase, items = seed(server, args.photos, args.use_async)
     doc = make_plan(server, suitcase, items, out)
     if args.backend == "mock":
         rollout_mock(out)

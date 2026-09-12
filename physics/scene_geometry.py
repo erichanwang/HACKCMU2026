@@ -162,6 +162,27 @@ def precompute(scene: Scene) -> SceneGeometry:
     )
 
 
+def container_local_vertices(geom: SceneGeometry) -> np.ndarray:
+    """(n, 8, 3) object corners in the CONTAINER's frame: origin at the container
+    centre, axis k = container axis k. Same projection `physics.containment` uses
+    for per-wall depths, so `container.half_extents - |result|` is the remaining
+    room before each wall. One einsum, O(n)."""
+    c = geom.container_obb
+    return np.einsum("nvj,jk->nvk", geom.vertices - c.center, c.axes)
+
+
+def container_up_axis(geom: SceneGeometry) -> tuple[int, float]:
+    """`(axis_index, sign)` of the container-local axis that points most nearly
+    along world up. `sign` is +1 or -1: `sign * local_coord[axis]` grows upward.
+
+    For the usual axis-aligned container this is `(1, +1.0)` (local y = world Y).
+    Ties (a container tipped exactly 45 degrees) resolve to the lowest index --
+    arbitrary, but deterministic."""
+    world_y = geom.container_obb.axes[1, :]  # world-Y component of each local axis
+    k = int(np.argmax(np.abs(world_y)))
+    return k, (1.0 if world_y[k] >= 0.0 else -1.0)
+
+
 def aabb_candidate_pairs(geom: SceneGeometry, epsilon: float = 0.0) -> np.ndarray:
     """All (i, j), i < j, whose world AABBs overlap (padded by `epsilon`).
     Returns an (m, 2) int array. Vectorized O(n^2) broadcast -- the cheap

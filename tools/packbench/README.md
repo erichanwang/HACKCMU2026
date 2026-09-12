@@ -2,12 +2,12 @@
 
 Runs the real solver (`packer3d.pack_naive` / `pack_optimized`, graded by
 `physics.packer3d_adapter.validate_packer3d`, ranked by `planner.rank`) over the
-seven-fixture corpus in `fixtures/` and scores it. Nothing here reimplements the
+fixture corpus in `fixtures/` and scores it. Nothing here reimplements the
 solver; if the table is wrong, the solver is wrong.
 
 ```sh
 python3 tools/packbench/packbench.py                                   # full corpus, ~2.5 min
-python3 tools/packbench/packbench.py --quick                           # 3 fixtures, ~15 s
+python3 tools/packbench/packbench.py --quick                           # 4 fixtures, ~20 s
 python3 tools/packbench/packbench.py --baseline tools/packbench/baseline.json
 python3 tools/packbench/packbench.py --quick --baseline tools/packbench/baseline.json --check
 python3 tools/packbench/packbench.py --json run.json                   # save the full run
@@ -94,6 +94,7 @@ A **regression**, for a fixture that both runs measured:
 | a validity flip | baseline `physics_valid: true`, run `false` |
 | a fixture that stopped solving | the run errored where the baseline had a result |
 | utilisation collapse | `volume_utilization` more than `UTIL_DROP` (5 points) below the baseline **while packing the same number of items** |
+| a lost nest | `nested` below the baseline — fewer placements sitting in another item's scanned cavity |
 
 Explicitly **not** a regression, because a gate that fires on these gets
 switched off inside a day:
@@ -111,6 +112,49 @@ switched off inside a day:
   in the run and *fails* is a regression; a fixture that was never run cannot be.
 - **The aggregate row.** Over a `--quick` subset it sums a different corpus than
   the baseline's, so `--baseline` prints `n/a` for it rather than a fake delta.
+
+### `nested`: the one rule that is gated whatever else moved
+
+`nested` is how many of the chosen plan's placements carry `nested_in` — the decoder's own
+record that it put an item inside an already-placed item's *scanned cavity*. It is counted
+off `result.placements[].nested_in`, never derived from overlapping boxes: an overlap nobody
+declared is a collision, not a nest, and re-deriving it here would relabel the one as the
+other (`packer3d/decoder.py::_nested_in` says the same thing from the other side).
+
+Unlike utilisation, it is gated **even when the item count moved**, and that asymmetry is
+the whole point: `items_packed` cannot see a nesting regression *at all*. Stop the solver
+nesting and the guest just goes somewhere else, or drops out while some other item takes
+its place — the corpus reports the same packed count, the same validity, no violations, and
+nobody learns which change did it. That is exactly the hole this rule and
+`nested_foam_cutout` were added to close. It is also not noise-shaped the way utilisation
+is: the count only moves when the solver's own nesting decision changes, so 1 → 0 is a
+fact, not churn.
+
+Measured, so it is not an argument from principle. Take `nested_foam_cutout` in a 4 cm wider
+bag (so the guest also fits on the floor beside the case) and shift its cut-out one grid row,
+which is enough to knock it off `solid_boxes`' 4x4 block boundary and pool it away — the case
+then has no cavity at all. Same items, same seed, `optimized:0`:
+
+| | packed | util | physics | violations | `nested` |
+|---|---|---|---|---|---|
+| cut-out block-aligned | 11/11 | 78.4% | valid | 0 | **1** |
+| cut-out shifted one row | 11/11 | 78.4% | valid | 0 | **0** |
+
+Every other number in the table is identical. The cavity path died and `nested` is the only
+column that says so.
+
+In the shipped fixture the guest fits *nowhere* else, so a lost nest also costs an item and
+the item-count rule fires too — belt and braces, and the `nested` line is what names the
+cause instead of leaving "−1 item" to be bisected.
+
+Two honest limits on it:
+
+- **Only `nested_foam_cutout` contributes a non-zero count today.** `carryon_weekend` and
+  `carryon_overfilled` do nest 2 items each under first-fit (the trainers' collars), but the
+  *chosen* candidate on both is the optimiser, which nests none, and the gate only ever looks
+  at the chosen plan. So the corpus-wide baseline count is 1, and it is one fixture's 1.
+- **A baseline recorded before this rule existed carries no count.** Those print a `warn:`
+  and a `?` in the delta rather than a fabricated `+0`; re-record the baseline to gate on it.
 
 Everything the gate decides on is printed as a reason, not just folded into the
 exit code. `warn:` lines never fail the run; they say why a comparison might be
@@ -139,7 +183,7 @@ identical runs; the table and the delta are byte-identical for the same
 `--iters`/`--seed` (`--time` is a wall-clock budget and therefore *not*
 reproducible — use it to see production behaviour, never to compare revisions).
 
-## `--quick`: three fixtures, ~15 s
+## `--quick`: four fixtures, ~20 s
 
 The full corpus is ~2.5 minutes of solver time (it was ~7 before the weights fix, which
 cut `carryon_overfilled` from ~190 s to ~85 s), and `carryon_overfilled` is over half of
@@ -149,21 +193,24 @@ what is left. `--quick` runs:
 |---|---|---|
 | `adversarial_exact_fit` | 1.0 | **Packing pressure.** Five trays tile 97.7% of a Pelican 1510 with 1-2 mm slack; exactly one ordering fits. First-fit already gets 5/5, so anything below that is a real regression rather than a hard case - and it costs one second to find out. |
 | `upright_bottles` | 5.1 | **A heightmap cavity**, plus upright constraints. `packing_cube_half_full` sags from a 12 cm rim to 7 cm in the middle, so nesting a bottle base into the dip is worth real volume, and `item_metadata` squashes exactly that grid by `1/k`. Eleven `allow_lay_down: false` items and a 30.5 cm wine bottle in a 31 cm bag mean a rotation bug shows up as dropped items immediately - and after `e4590e6` those eleven upright constraints are finally being graded. |
+| `nested_foam_cutout` | 3.7 | **A nest that actually happens.** A hard camera case with one empty foam cut-out and a lens that fits the cut-out and nothing else, so the only way to pack it is inside the case's cavity - and `nested` in the table is 1 instead of 0. The corpus's only cover for the whole cavity path (`solid_boxes`' pooling, `irregular` classification, the decoder's fragile-below rule, `nested_in`); see `fixtures/manifest.json` for why every number in it is forced. |
 | `camera_kit_fragile` | 10.3 | **Fragility as the binding resource.** ~11 L of `fragile` + `keepUpright` gear that nothing may be stacked on, so floor area runs out before volume does. Deliberately has no heightmap grids, which makes the fragile constraint the only thing being measured. It also leaves 2 of 21 items behind at 42.7% utilisation, the corpus's widest gap between what the solver manages and what the fixture notes say a person manages, so it is the fixture most likely to move. |
 
-Packing pressure, a heightmap cavity and fragility for ~16 s of solver time; three
-consecutive `--quick` runs on this laptop took 12.5, 13.9 and 15.0 s wall. Treat the
-per-fixture seconds as a ratio, not a promise - they are this machine, at `--iters 40`,
-and they moved by 2x when the weights landed.
+Packing pressure, a heightmap cavity, fragility and a real nest for ~20 s of solver time;
+three consecutive `--quick` runs on this laptop took 12.5, 13.9 and 15.0 s wall before
+`nested_foam_cutout` (3.7 s) joined them. Treat the per-fixture seconds as a ratio, not a
+promise - they are this machine, at `--iters 40`, they moved by 2x when the weights landed,
+and they move again with load: the same `--quick` took 32 s wall with several other agents
+on the laptop.
 
-The four skipped fixtures are skipped for cost and redundancy: `carryon_overfilled`
+The skipped fixtures are skipped for cost and redundancy: `carryon_overfilled`
 (~85 s) and `clothes_dominated` (~32 s) are the expensive ones, `checked_heavy_light`
 (~14 s) is a second heightmap-cavity fixture, and `carryon_weekend` (~6 s) is a gentler
 version of coverage `upright_bottles` already gives. Run the full corpus before merging;
 `--quick` is for the loop between commits.
 
 `--quick` compares cleanly against the committed full-corpus `baseline.json` because the
-gate is per-fixture: the other four print `not run` in the delta and a `warn:` line under
+gate is per-fixture: the skipped ones print `not run` in the delta and a `warn:` line under
 `--check`.
 
 ## Determinism

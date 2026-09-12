@@ -216,7 +216,7 @@ struct ScanScreen: View {
             if mode == .item, suitcaseId == nil {
                 Label("Scan the suitcase first", systemImage: "suitcase")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Sheet.ink.opacity(0.5))
             }
             statusRow
             if let item {
@@ -241,48 +241,80 @@ struct ScanScreen: View {
             }
             actions
         }
-        .padding(16)
+        .padding(18)
         .background(Sheet.paper.opacity(0.94), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Sheet.hairline, lineWidth: 0.5))
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
     }
 
     /// Every in-flight status (ScanView's and this file's) ends in "…"; a failed request is
     /// "<what>: <error>". Both are conventions of the strings, not fields on a model.
     private var statusRow: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
             if status.contains("…") {
                 ProgressView().controlSize(.small)
             } else if ["server:", "plan:", "items:", "reset:", "delete:", "move:"].contains(where: { status.hasPrefix($0) }) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(Sheet.warn)
             }
-            Text(status).font(.subheadline)
+            // Wraps onto as many lines as it needs. This line carries the whole
+            // instruction for the next tap, so truncating it loses the instruction.
+            Text(status)
+                .font(.subheadline)
+                .foregroundStyle(Sheet.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private var actions: some View {
-        HStack(spacing: 10) {
+        let canPack = suitcaseId != nil && !packing
+        return HStack(spacing: 9) {
             Button { pack() } label: {
-                Label("Pack", systemImage: "shippingbox.fill").frame(maxWidth: .infinity)
+                Group {
+                    if packing {
+                        ProgressView().tint(.white)
+                    } else {
+                        Label("Pack", systemImage: "shippingbox.fill")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .background(canPack ? Sheet.accent : Sheet.ink.opacity(0.15), in: Capsule())
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(suitcaseId == nil || packing)
-            Button { showingItems = true } label: { Label("\(items.count)", systemImage: "list.bullet") }
-                .buttonStyle(.bordered)
-                .disabled(suitcaseId == nil)
-                .accessibilityLabel("Items in this suitcase: \(items.count)")
-            Button { showingPlanSheet = true } label: { Image(systemName: "cube.transparent") }
-                .buttonStyle(.bordered)
-                .disabled(plan == nil)
-                .accessibilityLabel("2D, 3D and AR plan views")
-            Button(role: .destructive) { confirmingReset = true } label: { Image(systemName: "trash") }
-                .buttonStyle(.bordered)
-                .disabled(suitcaseId == nil)
-                .accessibilityLabel("Reset suitcase")
+            .buttonStyle(.plain)
+            .disabled(!canPack)
+
+            quietAction("list.bullet", count: items.count, enabled: suitcaseId != nil,
+                        label: "Items in this suitcase: \(items.count)") { showingItems = true }
+            quietAction("cube.transparent", enabled: plan != nil,
+                        label: "2D, 3D and AR plan views") { showingPlanSheet = true }
+            quietAction("trash", enabled: suitcaseId != nil, tint: Sheet.warn,
+                        label: "Reset suitcase") { confirmingReset = true }
         }
-        .controlSize(.large)
-        .fontWeight(.semibold)
-        .monospacedDigit()
+    }
+
+    /// The quiet half of the action row: one size, one shape, one fill.
+    private func quietAction(_ symbol: String, count: Int? = nil, enabled: Bool,
+                             tint: Color = Sheet.ink, label: String,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol).font(.footnote.weight(.semibold))
+                if let count { Text("\(count)").font(.footnote.monospacedDigit().weight(.semibold)) }
+            }
+            .foregroundStyle(enabled ? tint : Sheet.ink.opacity(0.28))
+            .frame(minWidth: 46, minHeight: 46)
+            .padding(.horizontal, count == nil ? 0 : 6)
+            .background(Sheet.card, in: Capsule())
+            .overlay(Capsule().stroke(Sheet.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 
     /// What is in the suitcase right now, re-read from the server each time the sheet opens.

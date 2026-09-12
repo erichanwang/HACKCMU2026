@@ -141,53 +141,91 @@ def _claude_detect(jpeg: bytes, key: str) -> dict:
     return _parse_guess(json.loads(text), "Claude")
 
 
+def _gemini_detect(jpeg: bytes, key: str) -> dict:
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    r = httpx.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        headers={"x-goog-api-key": key, "content-type": "application/json"},
+        json={
+            "contents": [{"parts": [
+                {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(jpeg).decode()}},
+                {"text": PROMPT},
+            ]}],
+            "generationConfig": {"responseMimeType": "application/json"},
+        },
+        timeout=30,
+    )
+    r.raise_for_status()
+    text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return _parse_guess(json.loads(text), "Gemini")
+
+
 def _is_unknown(guess: dict) -> bool:
     return guess["label"].strip().lower() == "unknown"
 
 
-LABEL_MODELS = ("both", "grok", "claude")
+LABEL_MODELS = ("both", "grok", "claude", "gemini")
+
+# Ask order, which is also the tie-break order when the vote splits evenly: the model
+# most trusted on a disagreement comes first. Each entry is (choice, env key, function
+# name) — the name rather than the function, so it is resolved at call time and a
+# detector stays substitutable.
+_DETECTORS = (
+    ("claude", "ANTHROPIC_API_KEY", "_claude_detect"),
+    ("gemini", "GEMINI_API_KEY", "_gemini_detect"),
+    ("grok", "XAI_API_KEY", "_grok_detect"),
+)
 
 
 def detect(jpeg: bytes, prefer: str = "both") -> dict:
-    """Ask whichever of Grok/Claude is configured, or just the one `prefer` names.
+    """Ask every configured model, or just the one `prefer` names, and reconcile.
 
-    If only one identifies the item, use it — the other declining is not a disagreement. If both
-    identify it but name it differently, trust Claude. Only if every configured model declines (or
-    none is configured) does the result come back "unknown"; the caller turns that into a distinct,
-    terminal labelStatus, since a retry against the same stored photo cannot change a model's mind.
+    `prefer` is "both" (the mixture: ask each configured model and arbitrate) or the name
+    of a single model. It narrows which keys are consulted; it cannot conjure a key that is
+    not configured, so asking for a model with no key set reads the same as having no model
+    configured at all.
 
-    `prefer` is the caller's choice of "both" (ask each and arbitrate), "grok", or "claude". It
-    narrows which keys are consulted; it cannot conjure a key that is not configured, so asking for
-    a model with no key set reads the same as having no model configured at all.
+    Reconciling, in order: a model that declines ("unknown") yields to any model that
+    identified the item, since declining is not a disagreement. Among the rest the most
+    common label wins, and an even split goes to whichever of those models comes first in
+    `_DETECTORS` — Claude, then Gemini, then Grok. Only when every configured model
+    declines does this return "unknown"; the caller turns that into a distinct, terminal
+    labelStatus, since a retry against the same stored photo cannot change a model's mind.
     """
-    grok_key, claude_key = os.environ.get("XAI_API_KEY"), os.environ.get("ANTHROPIC_API_KEY")
-    if prefer == "grok":
-        claude_key = None
-    elif prefer == "claude":
-        grok_key = None
-    if not grok_key and not claude_key:
+    wanted = [d for d in _DETECTORS if prefer in ("both", d[0]) and os.environ.get(d[1])]
+    if not wanted:
         return dict(UNKNOWN)
-    grok_guess = grok_err = claude_guess = claude_err = None
-    if grok_key:
+
+    guesses: list[tuple[str, dict]] = []
+    first_error: Exception | None = None
+    for name, env_key, func_name in wanted:
         try:
-            grok_guess = _grok_detect(jpeg, grok_key)
+            guesses.append((name, globals()[func_name](jpeg, os.environ[env_key])))
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
-            grok_err = exc
-    if claude_key:
-        try:
-            claude_guess = _claude_detect(jpeg, claude_key)
-        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
-            claude_err = exc
-    if grok_guess is None and claude_guess is None:
-        raise grok_err or claude_err
-    if grok_guess is None or claude_guess is None:
-        return grok_guess if claude_guess is None else claude_guess
-    if _is_unknown(grok_guess) != _is_unknown(claude_guess):  # one declined, the other didn't: use the one that answered
-        return claude_guess if _is_unknown(grok_guess) else grok_guess
-    if not _is_unknown(grok_guess) and grok_guess["label"].strip().lower() != claude_guess["label"].strip().lower():
-        logger.info("label disagreement: grok=%r claude=%r, trusting claude", grok_guess["label"], claude_guess["label"])
-        return claude_guess
-    return grok_guess  # both agree (including both "unknown")
+            first_error = first_error or exc
+    if not guesses:
+        raise first_error  # every configured model's call failed; this is not a decline
+
+    answered = [g for g in guesses if not _is_unknown(g[1])]
+    if not answered:
+        return guesses[0][1]  # everyone declined
+    if len(answered) == 1:
+        return answered[0][1]
+
+    counts: dict[str, int] = {}
+    for _, guess in answered:
+        counts[guess["label"].strip().lower()] = counts.get(guess["label"].strip().lower(), 0) + 1
+    best = max(counts.values())
+    winners = {label for label, n in counts.items() if n == best}
+    if len(counts) > 1:
+        logger.info("label vote %s, taking %s",
+                    {n: g["label"] for n, g in answered}, sorted(winners))
+    # _DETECTORS order is the tie-break: the first model holding a winning label wins.
+    for name, guess in answered:
+        if guess["label"].strip().lower() in winners:
+            return guess
+    return answered[0][1]
 
 
 def identify_hint(dims: list[float], heights: list[list[float]]) -> str:
@@ -195,7 +233,7 @@ def identify_hint(dims: list[float], heights: list[list[float]]) -> str:
     that reads as a broken demo, not scan advice, so it gets its own honest message. Otherwise, the
     crop is only as good as the scan, so a degenerate scan gets "rescan" advice rather than the
     misleading "rotate it"."""
-    if not (os.environ.get("XAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
+    if not any(os.environ.get(env_key) for _, env_key, _ in _DETECTORS):
         return "labelling is off — type it in"
     flat = [h for row in heights for h in row]
     if min(dims) < 0.03 or max(flat) - min(flat) < 0.01:
@@ -388,7 +426,7 @@ def create_item(background: BackgroundTasks, item: str = Form(...), image: Uploa
     if len(jpeg) > MAX_IMAGE_BYTES:
         raise HTTPException(413, f"image must be at most {MAX_IMAGE_BYTES} bytes")
     # ?async=1: don't make the phone wait for a labelling model to answer.
-    background_label = later and bool(os.environ.get("XAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
+    background_label = later and any(os.environ.get(env_key) for _, env_key, _ in _DETECTORS)
     if background_label:
         guess, status = dict(UNKNOWN), "pending"
     else:

@@ -315,18 +315,68 @@ class ServerContractTests(unittest.TestCase):
         self.upload("i1", sc["id"])
         self.assertEqual(main.db.items.find_one({"_id": "i1"})["labelModel"], "both")
 
+    ALL_KEYS = {"XAI_API_KEY": "x", "ANTHROPIC_API_KEY": "c", "GEMINI_API_KEY": "g"}
+
     def test_detect_asks_only_the_model_it_was_told_to(self):
-        with patch.dict(os.environ, {"XAI_API_KEY": "x", "ANTHROPIC_API_KEY": "c"}, clear=False):
+        with patch.dict(os.environ, self.ALL_KEYS, clear=False):
             with patch.object(main, "_grok_detect", return_value={"label": "grok answer"}) as grok, \
-                 patch.object(main, "_claude_detect", return_value={"label": "claude answer"}) as claude:
+                 patch.object(main, "_claude_detect", return_value={"label": "claude answer"}) as claude, \
+                 patch.object(main, "_gemini_detect", return_value={"label": "gemini answer"}) as gemini:
                 self.assertEqual(main.detect(b"jpeg", "grok")["label"], "grok answer")
-                self.assertEqual(grok.call_count, 1)
-                self.assertEqual(claude.call_count, 0)
+                self.assertEqual((grok.call_count, claude.call_count, gemini.call_count), (1, 0, 0))
                 self.assertEqual(main.detect(b"jpeg", "claude")["label"], "claude answer")
-                self.assertEqual(claude.call_count, 1)
-                # "both" asks each and, on a disagreement, trusts Claude.
-                self.assertEqual(main.detect(b"jpeg", "both")["label"], "claude answer")
-                self.assertEqual(grok.call_count, 2)
+                self.assertEqual(main.detect(b"jpeg", "gemini")["label"], "gemini answer")
+                self.assertEqual((grok.call_count, claude.call_count, gemini.call_count), (1, 1, 1))
+                # "both" is the mixture: every configured model is asked.
+                main.detect(b"jpeg", "both")
+                self.assertEqual((grok.call_count, claude.call_count, gemini.call_count), (2, 2, 2))
+
+    def test_the_majority_label_wins(self):
+        with patch.dict(os.environ, self.ALL_KEYS, clear=False):
+            with patch.object(main, "_grok_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_claude_detect", return_value={"label": "teapot"}), \
+                 patch.object(main, "_gemini_detect", return_value={"label": "kettle"}):
+                # Two against one beats Claude's standing tie-break.
+                self.assertEqual(main.detect(b"jpeg", "both")["label"], "kettle")
+
+    def test_an_even_split_goes_to_claude(self):
+        with patch.dict(os.environ, {"XAI_API_KEY": "x", "ANTHROPIC_API_KEY": "c"}, clear=False):
+            with patch.object(main, "_grok_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_claude_detect", return_value={"label": "teapot"}):
+                self.assertEqual(main.detect(b"jpeg", "both")["label"], "teapot")
+
+    def test_a_decline_yields_to_a_model_that_answered(self):
+        with patch.dict(os.environ, self.ALL_KEYS, clear=False):
+            with patch.object(main, "_grok_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_claude_detect", return_value={"label": "unknown"}), \
+                 patch.object(main, "_gemini_detect", return_value={"label": "unknown"}):
+                # Declining is not a disagreement, even from two models against one.
+                self.assertEqual(main.detect(b"jpeg", "both")["label"], "kettle")
+
+    def test_everyone_declining_stays_unknown(self):
+        with patch.dict(os.environ, self.ALL_KEYS, clear=False):
+            with patch.object(main, "_grok_detect", return_value={"label": "unknown"}), \
+                 patch.object(main, "_claude_detect", return_value={"label": "unknown"}), \
+                 patch.object(main, "_gemini_detect", return_value={"label": "unknown"}):
+                self.assertTrue(main._is_unknown(main.detect(b"jpeg", "both")))
+
+    def test_a_model_with_no_key_is_skipped(self):
+        env = dict(self.ALL_KEYS)
+        env.pop("GEMINI_API_KEY")
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(main, "_grok_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_claude_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_gemini_detect") as gemini:
+                self.assertEqual(main.detect(b"jpeg", "both")["label"], "kettle")
+                gemini.assert_not_called()
+                # Asking for it by name with no key reads as nothing configured at all.
+                self.assertTrue(main._is_unknown(main.detect(b"jpeg", "gemini")))
+
+    def test_upload_accepts_gemini(self):
+        sc = self.make_suitcase()
+        r = self.client.post("/items", data={"item": scanned_item_json("i1", sc["id"]), "model": "gemini"}, files=IMG)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(main.db.items.find_one({"_id": "i1"})["labelModel"], "gemini")
 
 
 if __name__ == "__main__":

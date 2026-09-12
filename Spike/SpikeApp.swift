@@ -576,6 +576,7 @@ struct SettingsSheet: View {
                         Text("MoE").tag("both")
                         Text("Grok").tag("grok")
                         Text("Claude").tag("claude")
+                        Text("Gemini").tag("gemini")
                     }
                     .pickerStyle(.segmented)
                 } header: {
@@ -603,10 +604,11 @@ struct SettingsSheet: View {
     /// What each choice actually does on the server, in its own words.
     private var modelFooter: String {
         switch labelModel {
-        case "grok": return "Only Grok is asked. Faster, and one opinion."
+        case "grok": return "Only Grok is asked. One opinion, one round trip."
         case "claude": return "Only Claude is asked."
+        case "gemini": return "Only Gemini is asked."
         default:
-            return "Both are asked and the answers arbitrated: if one declines, the other's answer stands; if they name it differently, Claude's wins. A model with no API key set on the server is skipped."
+            return "Grok, Claude and Gemini are all asked and the answers reconciled: a model that declines yields to one that identified the item, the most common label wins, and an even split goes to Claude, then Gemini. A model with no API key set on the server is skipped."
         }
     }
 }

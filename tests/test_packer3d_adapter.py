@@ -265,6 +265,49 @@ class NestingAgreementTests(unittest.TestCase):
         self.assertIn("OBJECT_COLLISION", types)
 
 
+class FootprintAgreementTests(unittest.TestCase):
+    """An L-shaped scan (a footprint missing its top-right corner) placed next to a
+    small box that sits in the missing corner: with the footprint carried through,
+    `validate_packer3d` must NOT report a collision (the box only overlaps empty
+    space); with the footprint stripped, the L-item grades as its full bounding box
+    and the same placements DO collide -- the "before" measurement this pins."""
+
+    # A concave hexagon (bottom-left/bottom-right/top-left quadrants of a 0.2x0.2
+    # square, in metres); `footprint_local` hulls it, so the stored prism is the
+    # convex pentagon that cuts the top-right corner off along the (0.1,0)-(0,0.1)
+    # diagonal -- the closest convex approximation of the missing quadrant.
+    L_FOOTPRINT = [[-0.1, -0.1], [0.1, -0.1], [0.1, 0.0], [0.0, 0.0], [0.0, 0.1], [-0.1, 0.1]]
+    RESULT = {
+        "container": {"id": "box", "dims": [0.4, 0.4, 0.2], "obstacles": []},
+        "placements": [
+            {"item_id": "lshape", "shape": "box", "position": [0.0, 0.0, 0.0], "dims": [0.2, 0.2, 0.1],
+             "center": [0.1, 0.1, 0.05], "orientation": "xyz", "axis": None, "mass": 0.4, "fragile": False},
+            # sits inside the L's missing corner (world X in [0.16, 0.20], Z in [-0.20, -0.16]):
+            # outside the pentagon's hull, but inside the L's full bounding box.
+            {"item_id": "pebble", "shape": "box", "position": [0.16, 0.16, 0.0], "dims": [0.04, 0.04, 0.05],
+             "center": [0.18, 0.18, 0.025], "orientation": "xyz", "axis": None, "mass": 0.05, "fragile": False},
+        ],
+        "unpacked": [],
+        "metrics": {},
+    }
+    ITEMS = {"items": [
+        {"id": "lshape", "footprint": L_FOOTPRINT, "keep_upright": False, "priority": 1.0},
+        {"id": "pebble", "keep_upright": False, "priority": 1.0},
+    ]}
+
+    def test_with_footprint_carried_no_collision(self):
+        result = validate_packer3d(self.RESULT, items=self.ITEMS)
+        types = {v["type"] for v in result["violations"]}
+        self.assertNotIn("OBJECT_COLLISION", types, result["violations"])
+
+    def test_without_footprint_it_collides(self):
+        items_no_footprint = {"items": [{"id": "lshape", "keep_upright": False, "priority": 1.0},
+                                         self.ITEMS["items"][1]]}
+        result = validate_packer3d(self.RESULT, items=items_no_footprint)
+        types = {v["type"] for v in result["violations"]}
+        self.assertIn("OBJECT_COLLISION", types)
+
+
 class MetadataGradingTests(unittest.TestCase):
     """`item_metadata` must describe the item the solver actually packed (grading bugs
     found 2026-09-12: a soft hoodie's cavity solids stood at twice the packed height,

@@ -30,6 +30,7 @@ def physics_object(doc: dict) -> Object:
     width, height, depth = (float(v) for v in doc["dimensions"])
     rigidity = doc.get("rigidity", "rigid")
     upright = bool(doc.get("keepUpright"))
+    footprint = doc.get("footprint")
     return Object(
         id=str(doc["id"]),
         dimensions=(width, height, depth),
@@ -43,6 +44,10 @@ def physics_object(doc: dict) -> Object:
         ),
         rigidity="soft" if rigidity == "soft" else "rigid",
         compressibility_k=float(doc.get("compressibility") or 1.0),
+        # LiDAR hull, straight from the scan doc -- same (x, z) convention as
+        # `physics.io.object_from_scanned_item`. Convexity/bounds are validated
+        # lazily wherever the geometry is actually built (`geometry.footprint_local`).
+        footprint=[(float(x), float(z)) for x, z in footprint] if footprint else None,
     )
 
 

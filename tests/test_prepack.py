@@ -36,6 +36,17 @@ class TestPrepack(unittest.TestCase):
         for key in ("heights", "cellSize", "suitcaseId", "dimensions", "rigidity"):
             self.assertEqual(out[key], d[key])
 
+    def test_footprint_reaches_the_object_and_the_solver_document_unchanged(self):
+        fp = [[-0.15, -0.1], [0.15, -0.1], [0.15, 0.0], [0.0, 0.0], [0.0, 0.1], [-0.15, 0.1]]
+        d = doc(footprint=fp)
+        obj = physics_object(d)
+        self.assertEqual(obj.footprint, [tuple(p) for p in fp])
+        self.assertEqual(packable(d)["footprint"], fp)
+
+    def test_missing_footprint_stays_none(self):
+        self.assertIsNone(physics_object(doc()).footprint)
+        self.assertNotIn("footprint", packable(doc()))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -215,6 +215,8 @@ def item_metadata(items) -> dict[str, dict]:
                 "keep_upright": bool(d["keep_upright"]) if "keep_upright" in d else bool(d.get("keepUpright", False)),
                 "priority": float(d.get("priority", 1.0)),
             }
+            if "footprint" in d:
+                entry["footprint"] = [(float(x), float(z)) for x, z in d["footprint"]]
             if "heights" in d:
                 width, depth, height, units = d.get("width"), d.get("depth"), d.get("height"), "cm"
                 if width is None and "dimensions" in d:
@@ -249,6 +251,30 @@ def _container(id: str, dims) -> Container:
     return Container(id=id, dimensions=(L, H, W), position=(L / 2.0, H / 2.0, -W / 2.0))
 
 
+# packer3d orientation -> physics-local (x, z) footprint point, for the two orientations
+# that keep the item's own z (height) axis mapped to world/physics up (see `_CAVITY_PERM`
+# just below: same "xyz"/"yxz" gate `_objects_from_placement` already uses for cavities).
+# Derived from `physics_point`/`swap_yz`: item-local (ix, iy) -> packer world (x, y) via the
+# orientation's permutation, then packer (x, y) -> physics local (x, z) = (x, -y).
+_FOOTPRINT_XZ = {
+    "xyz": lambda fx, fz: (fx, -fz),
+    "yxz": lambda fx, fz: (fz, -fx),
+}
+
+
+def _oriented_footprint(m: dict, orientation: str) -> Optional[list[tuple[float, float]]]:
+    """The item's scanned footprint, transformed into the placed Object's local (x, z) --
+    or None if there isn't one, or the orientation doesn't keep it meaningful."""
+    fp = m.get("footprint")
+    if not fp:
+        return None
+    xform = _FOOTPRINT_XZ.get(str(orientation))
+    if xform is None:
+        return None  # ponytail: other 4 orientations lay the item on its side (its scanned
+        # XZ hull no longer describes a horizontal cross-section); fall back to the box.
+    return [xform(float(x), float(z)) for x, z in fp]
+
+
 def _object_from_placement(p: dict, meta: dict[str, dict], oriented: bool = True) -> Object:
     m = meta.get(p["item_id"], {})
     o = str(p.get("orientation", "xyz"))
@@ -259,6 +285,7 @@ def _object_from_placement(p: dict, meta: dict[str, dict], oriented: bool = True
         rotation=IDENTITY_ROTATION if oriented else rotation_from_orientation(o),
         mass_kg=float(p.get("mass", 0.0)),
         constraints=_constraints(p.get("fragile", False), m.get("keep_upright", False)),
+        footprint=_oriented_footprint(m, o) if oriented else None,
     )
 
 

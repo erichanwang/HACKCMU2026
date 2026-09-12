@@ -1194,6 +1194,8 @@ class PlacementValidator:
     # ------------------------------------------------------------------
 
     def _commit(self, obj: Object) -> None:
+        """Back-compat shim for the old private name; `commit` is the entry
+        point (it took an already-built OBB, which is now derived internally)."""
         self.commit(obj)
 
     def _ensure_arrays(self) -> None:

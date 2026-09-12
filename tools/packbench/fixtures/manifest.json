@@ -61,5 +61,14 @@
       "pack_naive": "5/5, 97.7% volume",
       "pack_optimized": "5/5, 97.7% volume"
     }
+  },
+  "nested_foam_cutout.json": {
+    "name": "Camera case with a foam cut-out",
+    "notes": "WHAT IT IS FOR: the only fixture in the corpus whose CHOSEN plan nests one item inside another's scanned cavity, i.e. the only place --check's nested-count rule can bite. Cavity nesting landed 2026-09-12 (packer3d emits `nested_in`, verify() audits it, the plan carries `nestedIn`) and until this fixture the corpus could not see it break: no host here had a real cavity, so if a change stopped the solver nesting, the guest would simply go somewhere else or drop out and `items_packed` would not move. 26\" checked bag, interior 62x44x28 cm, 23 kg. The host is a hard camera case, 56x42x21 cm on 2 cm cells, packed and closed with ONE empty foam cut-out left in it (the lens that came out of it is being carried loose) - 14x10 cm of footprint, floor at 11 cm, so a 14x10x10 cm cavity. THE GEOMETRY IS FORCED, NOT TUNED, by two properties of the solver's own decomposition: (1) `Item.solid_boxes` max-pools `heights` to 4x4 blocks taking each block's TALLEST cell, so a cut-out has to be a whole pooled block or it pools away to the rim height and the case has no cavity at all. 28 rows split 7/7/7/7 (14 cm blocks) and 21 cols split 6/5/5/5 (12/10/10/10 cm), and the cut-out is exactly row block 1 x col block 1 - an interior block, so it keeps a rim on all four sides. (2) `from_scanned_heightmap` calls a shape `irregular` once true volume / bbox < 0.9; the cut-out is 6% of the footprint, so the ratio is 0.972 and the case stays a `box`. `fragile` is false and explicit: `rigidity: \"fragile\"` would make the decoder refuse to rest anything on ANY of the case's solids, the cut-out's own floor included, and no nest would be possible - correctly, which is why the host here is a case and not the gear inside it. THE LENS FITS NOWHERE ELSE: 12x9x8.5 cm against 6 cm of floor beside the case (62-56), 2 cm at the end (44-42) and 7 cm of headroom over the lid (28-21), all smaller than its smallest dimension, so the cut-out is the only place it goes in any orientation - the nest is forced by the container, not by tuning the objective. Everything else is ordinary packing: a laptop, a jacket, a sweater, two tees, jeans, two sock bundles and a charger pouch, soft items with compressibility 1.6-2.5. Bar: 11/11 items packed, physics valid, 0 violations, and nested >= 1 with lens_24_70_bagged inside camera_case_foam. Every candidate nests it (naive and optimised seeds 0, 1 and 2), so the count does not depend on which candidate wins.",
+    "baseline": {
+      "measured_at": "see the committed baseline.json's own `run` stamp, which is the machine-readable bar; these two lines are prose",
+      "pack_naive": "9/11, 75.4% volume, 1 nested; leaves out the sweater and the jeans",
+      "pack_optimized": "11/11, 83.5% volume, 1 nested"
+    }
   }
 }

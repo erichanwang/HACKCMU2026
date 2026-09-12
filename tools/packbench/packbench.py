@@ -42,9 +42,10 @@ from planner import rank  # noqa: E402  - the production ranking, not a copy
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 DEFAULT_ITERS = 40  # ~2.5 min for the 7-fixture corpus; the solver decodes at ~0.2-1 s per iteration
-# --quick: packing pressure + a heightmap cavity + fragility-as-binding-constraint, and
-# nothing over ~11 s. Why these three: see README.md.
-QUICK = ("adversarial_exact_fit.json", "camera_kit_fragile.json", "upright_bottles.json")
+# --quick: packing pressure + a heightmap cavity + fragility-as-binding-constraint + a real
+# nest, and nothing over ~11 s. Why these four: see README.md.
+QUICK = ("adversarial_exact_fit.json", "camera_kit_fragile.json", "nested_foam_cutout.json",
+         "upright_bottles.json")
 # A utilisation drop this large (fraction, not points) while packing the SAME items is
 # the one utilisation change the gate treats as a regression. See regressions().
 UTIL_DROP = 0.05
@@ -79,11 +80,16 @@ def run_scenario(scenario: dict, candidates, iters, time_budget):
 
 def row(candidate: dict, items_given: int) -> dict:
     m, v = candidate["solver"]["metrics"], candidate["validation"]
+    # `nested`: placements the DECODER recorded as sitting in another item's scanned cavity
+    # (`nested_in`, omitted entirely when there is none). Counted here rather than derived from
+    # overlapping boxes, for the same reason packer3d records it at the point of placement: a
+    # bounding-box overlap that nobody declared is a collision, not a nest.
     return {"strategy": candidate["strategy"], "seed": candidate["seed"],
             "items_given": items_given, "items_packed": int(m["items_packed"]),
             "volume_utilization": float(m["volume_utilization"]),
             "com_lateral_offset": float(m["com_lateral_offset"]),
             "physics_valid": bool(v["valid"]), "violations": len(v["violations"]),
+            "nested": sum(1 for p in candidate["solver"]["placements"] if p.get("nested_in")),
             "seconds": candidate["seconds"]}
 
 
@@ -126,6 +132,7 @@ def aggregate(results) -> dict:
             "mean_utilization": sum(r["best"]["volume_utilization"] for r in ok) / len(ok),
             "physics_valid": sum(1 for r in ok if r["best"]["physics_valid"]),
             "violations": sum(r["best"]["violations"] for r in ok),
+            "nested": sum(r["best"]["nested"] for r in ok),
             "mean_com_offset": sum(r["best"]["com_lateral_offset"] for r in ok) / len(ok),
             "seconds": sum(c["seconds"] for r in ok for c in r["candidates"])}
 
@@ -189,7 +196,8 @@ def print_header(run: dict) -> None:
     print()
 
 
-HDR = f"{'scenario':<26} {'packed':>9} {'util':>7} {'phys':>5} {'viol':>5} {'com(mm)':>8}  chosen"
+HDR = (f"{'scenario':<26} {'packed':>9} {'util':>7} {'phys':>5} {'viol':>5} {'nest':>5} "
+       f"{'com(mm)':>8}  chosen")
 
 
 def print_table(run: dict) -> None:
@@ -201,7 +209,7 @@ def print_table(run: dict) -> None:
             chosen = b["strategy"] if b["seed"] is None else f"{b['strategy']}:{b['seed']}"
             print(f"{r['name'][:26]:<26} {b['items_packed']:>4}/{b['items_given']:<4} "
                   f"{b['volume_utilization'] * 100:>6.1f}% {'yes' if b['physics_valid'] else 'NO':>5} "
-                  f"{b['violations']:>5} {b['com_lateral_offset'] * 1000:>8.1f}  {chosen}")
+                  f"{b['violations']:>5} {b['nested']:>5} {b['com_lateral_offset'] * 1000:>8.1f}  {chosen}")
         else:
             print(f"{r['name'][:26]:<26} {'ERROR':>9}  {r['error'][:60]}")
     a = run["aggregate"]
@@ -211,7 +219,7 @@ def print_table(run: dict) -> None:
         return
     print(f"{'AGGREGATE (' + str(a['scenarios']) + ' scenarios)':<26} {a['items_packed']:>4}/{a['items_given']:<4} "
           f"{a['mean_utilization'] * 100:>6.1f}% {str(a['physics_valid']) + '/' + str(a['scenarios']):>5} "
-          f"{a['violations']:>5} {a['mean_com_offset'] * 1000:>8.1f}")
+          f"{a['violations']:>5} {a['nested']:>5} {a['mean_com_offset'] * 1000:>8.1f}")
 
 
 def print_times(run: dict) -> None:
@@ -223,7 +231,8 @@ def print_times(run: dict) -> None:
     print(f"  {'TOTAL':<26} {'':<12} {run['aggregate'].get('seconds', 0.0):7.2f}")
 
 
-DHDR = f"{'scenario':<26} {'d packed':>9} {'d util':>8} {'d phys':>7} {'d viol':>7} {'d com(mm)':>10}"
+DHDR = (f"{'scenario':<26} {'d packed':>9} {'d util':>8} {'d phys':>7} {'d viol':>7} {'d nest':>7} "
+        f"{'d com(mm)':>10}")
 
 
 def print_delta(run: dict, base: dict) -> None:
@@ -240,9 +249,11 @@ def print_delta(run: dict, base: dict) -> None:
             continue
         n, b = r["best"], o["best"]
         phys = int(n["physics_valid"]) - int(b["physics_valid"])
+        # a baseline recorded before nesting was measured has no count: "?" beats a fake 0 delta
+        nest = f"{n['nested'] - b['nested']:>+7d}" if "nested" in b else f"{'?':>7}"
         print(f"{r['name'][:26]:<26} {n['items_packed'] - b['items_packed']:>+9d} "
               f"{(n['volume_utilization'] - b['volume_utilization']) * 100:>+7.1f}% {phys:>+7d} "
-              f"{n['violations'] - b['violations']:>+7d} "
+              f"{n['violations'] - b['violations']:>+7d} {nest} "
               f"{(n['com_lateral_offset'] - b['com_lateral_offset']) * 1000:>+10.1f}")
     subset = run.get("run", {}).get("flags", {}).get("quick")
     for f in sorted(set(old) - {r["file"] for r in run["scenarios"]}):
@@ -254,10 +265,11 @@ def print_delta(run: dict, base: dict) -> None:
         print(f"{'AGGREGATE':<26} {'n/a':>9}  ({a.get('scenarios')} scenarios vs "
               f"{ab.get('scenarios')} in the baseline)")
         return
+    nest = f"{a['nested'] - ab['nested']:>+7d}" if "nested" in ab else f"{'?':>7}"
     print(f"{'AGGREGATE':<26} {a['items_packed'] - ab['items_packed']:>+9d} "
           f"{(a['mean_utilization'] - ab['mean_utilization']) * 100:>+7.1f}% "
           f"{a['physics_valid'] - ab['physics_valid']:>+7d} {a['violations'] - ab['violations']:>+7d} "
-          f"{(a['mean_com_offset'] - ab['mean_com_offset']) * 1000:>+10.1f}")
+          f"{nest} {(a['mean_com_offset'] - ab['mean_com_offset']) * 1000:>+10.1f}")
 
 
 def regressions(run: dict, base: dict):
@@ -269,13 +281,20 @@ def regressions(run: dict, base: dict):
       * physics flipping valid -> invalid;
       * the fixture erroring out when the baseline solved it;
       * volume utilisation falling by more than UTIL_DROP while packing the SAME number
-        of items - the one utilisation change that is unambiguously worse.
+        of items - the one utilisation change that is unambiguously worse;
+      * FEWER NESTED PLACEMENTS than the baseline. Gated unconditionally, including when the
+        item count rose: `items_packed` cannot see a nesting regression at all (a guest that
+        stops nesting just goes somewhere else, or drops out and trades places with another
+        item), so this is the only rule that covers the cavity path. `nested` counts what the
+        decoder DECLARED, not overlapping boxes, so it moves only when the solver's own
+        nesting decision changes - which is exactly the event worth failing on.
     NOT a regression, deliberately, because a gate that fires on these gets switched off:
       * utilisation moving by less than UTIL_DROP, or moving at all when the item count
         changed (packing one more awkward item legitimately costs utilisation);
       * centre of mass moving in any direction by any amount - it is reported, never gated;
       * wall clock;
-      * a fixture the baseline does not have, or one this run did not measure (`--quick`);
+      * a fixture the baseline does not have, or one this run did not measure (`--quick`), and
+        a nested count the baseline does not carry at all (recorded before this rule existed);
       * anything in the aggregate row: over a `--quick` subset it compares different
         corpora, so the gate is per-fixture only.
     """
@@ -302,6 +321,12 @@ def regressions(run: dict, base: dict):
             regs.append(f"{f}: physics violations {b['violations']} -> {n['violations']}")
         if b["physics_valid"] and not n["physics_valid"]:
             regs.append(f"{f}: physics valid -> INVALID")
+        if "nested" not in b:
+            warns.append(f"{f}: baseline carries no nested count (recorded before nesting was "
+                         f"gated); this run nested {n['nested']} (not gated)")
+        elif n["nested"] < b["nested"]:
+            regs.append(f"{f}: nested placements {b['nested']} -> {n['nested']} "
+                        f"(a guest stopped going into a host's cavity)")
         if (n["items_packed"] == b["items_packed"]
                 and n["volume_utilization"] < b["volume_utilization"] - UTIL_DROP):
             regs.append(f"{f}: utilisation {b['volume_utilization'] * 100:.1f}% -> "
@@ -335,7 +360,7 @@ def selftest() -> int:
     """Assert the gate's rules on synthetic runs. No solver, no fixtures, milliseconds."""
     def mk(**best):
         b = {"items_given": 10, "items_packed": 8, "volume_utilization": 0.5,
-             "com_lateral_offset": 0.01, "physics_valid": True, "violations": 0,
+             "com_lateral_offset": 0.01, "physics_valid": True, "violations": 0, "nested": 1,
              "strategy": "optimized", "seed": 0, "seconds": 1.0} | best
         return {"config": {"c": 1}, "aggregate": {"scenarios": 1},
                 "run": {"commit": "abc", "dirty": False, "flags": {"quick": False}},
@@ -354,6 +379,15 @@ def selftest() -> int:
         "a utilisation collapse on the same items is a regression"
     assert regressions(mk(items_packed=9, volume_utilization=0.1), base)[0] == [], \
         "utilisation is not gated once the item count moved"
+    assert regressions(mk(nested=0), base)[0], "losing a nested placement is a regression"
+    assert regressions(mk(nested=2), base)[0] == [], "nesting more must pass"
+    assert regressions(mk(nested=0, items_packed=9), base)[0], \
+        "nesting is gated even when the item count rose - packing elsewhere is not a substitute"
+    # a baseline with no nested count at all warns; it must not fail and must not KeyError
+    old_base = mk()
+    del old_base["scenarios"][0]["best"]["nested"]
+    regs, warns = regressions(mk(nested=0), old_base)
+    assert regs == [] and any("no nested count" in w for w in warns), (regs, warns)
     # errored fixture vs a baseline that had a result
     err = mk()
     err["scenarios"] = [{"file": "f.json", "name": "f", "error": "boom"}]
@@ -391,7 +425,7 @@ def main(argv=None) -> int:
     ap.add_argument("--times", action="store_true", help="also print wall clock per candidate")
     ap.add_argument("--quick", action="store_true",
                     help=f"only the fast subset ({', '.join(f.split('.')[0] for f in QUICK)}); "
-                         "~15 s instead of ~2.5 min, for running before a commit")
+                         "~21 s instead of ~2.5 min, for running before a commit")
     ap.add_argument("--selftest", action="store_true",
                     help="assert the --check rules on synthetic runs and exit; no solver, no fixtures")
     ap.add_argument("--check", action="store_true",

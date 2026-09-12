@@ -117,10 +117,6 @@ class TestPlanMetadata(unittest.TestCase):
         self.assertNotIn("unpacked", plan)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestNesting(unittest.TestCase):
     """`nestedIn` is copied from the solver's `nested_in` (host + cavity), never inferred from boxes."""
 
@@ -146,3 +142,7 @@ class TestNesting(unittest.TestCase):
         ]}
         plan = to_app_plan(result, {"_id": "s", "dimensions": [1, 1, 1]}, {})
         self.assertTrue(all(q["nestedIn"] is None for q in plan["placements"]), "never inferred from overlap")
+
+
+if __name__ == "__main__":
+    unittest.main()

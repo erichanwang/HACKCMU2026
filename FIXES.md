@@ -51,14 +51,17 @@ against the code on `loop` today (grep or read), not carried over from the morni
 
 ## 4. Missing versus the spec
 
-- **Cavity nesting never reaches a real plan.** `packer3d/packer3d/models.py:573`'s `Placement`
-  dataclass has no `nested_in` field and `to_dict()` never emits one, so
-  `server/app_plan.py:57`'s `p.get("nested_in")` is always `None` for a real solver run — every
-  real plan's `nestedIn` is `null`. Today's chain (`packing-core`'s nestedIn-aware overlap check,
-  `ar_sim.py`'s nested decomposition) is real and correct, but only exercised by the hand-built
-  `packing-core/.../nested-plan.json` fixture. The geometry side is already there —
-  `from_scanned_heightmap` (models.py:258-303) carves a real cavity below 90% fill — the decoder
-  just needs to record which item it put in whose cavity.
+- **Cavity nesting does not fire in a real solve.** `tests/plan_contract/make_plan.py`'s forcing
+  scenario (a 0.24 x 0.10 x 0.24 bag, an open box 0.22 x 0.08 x 0.22 with a 3 cm rim, socks
+  0.1 x 0.04 x 0.1 that fit nowhere but the cavity) leaves the socks unpacked on `loop`, on
+  7358c16 and on 7358c16~1 alike, for both `pack_naive` and `pack_optimized`; so the decoder's
+  cavity search (875137d, `decoder.py:391-452`) never places into this cavity and no real plan has
+  carried `nestedIn` yet. The wire path is ready: `Placement.nested_in`
+  is set by the decoder from what it actually did and `to_dict()` emits `{item_id, position, dims}`,
+  which `server/app_plan.py::_nesting` copies into `nestedIn` + `cavity`; `packing-core`'s overlap
+  check and `ar_sim.py` honour it. What is left: see it once on a phone with a real open shoe or
+  dopp kit (the Linux proof is `tests/plan_contract/run.sh`'s bowl fixture and 8a's
+  `nested-plan.json`).
 - **Folding exists but isn't used.** `physics/prepack.py:71`'s `fold_options` (flat / half-fold /
   rolled candidate boxes, real logic, tested in `tests/test_folding.py`) is computed for every
   soft item and attached to its scenario dict via `prepare_items` → `packable` — but nothing in

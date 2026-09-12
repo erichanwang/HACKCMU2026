@@ -21,3 +21,8 @@ swiftc -Onone -I "$out/build/debug/Modules" -o "$out/check" \
     tests/plan_contract/main.swift "$out"/build/debug/PackingPlan.build/*.swift.o
 
 "$out/check" "$out/plan_doc.json" "$out/item_dims.json"
+# the forcing scenario: socks only fit inside the open box, so nestedIn must be present
+nest="$("$out/check" "$out/nest_doc.json" "$out/nest_dims.json")"; echo "$nest"
+# ponytail: WARN until the decoder actually nests here (today it leaves the socks unpacked, see FIXES.md
+# section 4); flip to `exit 1` once it does so the contract cannot regress.
+case "$nest" in *" 0 nested,"*) echo "plan contract WARN: the forcing scenario produced no nested placement (socks left unpacked)";; esac

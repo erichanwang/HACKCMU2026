@@ -45,7 +45,24 @@ for p in ordered {
     }
 }
 
+// Nesting: a solver claim that this item sits in another item's cavity. The host must be in the
+// plan and the cavity must lie inside the host's box (packing-core/CLAUDE.md, "Nested placements").
+let byID = Dictionary(uniqueKeysWithValues: ordered.map { ($0.itemID, $0) })
+var nestedCount = 0
+for p in ordered {
+    guard let n = p.nestedIn else { continue }
+    nestedCount += 1
+    guard let host = byID[n.itemID] else { fail("\(p.itemID) nestedIn unknown host '\(n.itemID)'") }
+    guard n.itemID != p.itemID else { fail("\(p.itemID) nested in itself") }
+    for a in Axis.allCases {
+        guard n.cavity.position[a] >= host.position[a] - 1e-6,
+              n.cavity.position[a] + n.cavity.size[a] <= host.position[a] + host.size[a] + 1e-6 else {
+            fail("\(p.itemID)'s cavity \(n.cavity.position)+\(n.cavity.size) is outside host \(host.itemID) \(host.position)+\(host.size)")
+        }
+    }
+}
+
 let rotations = Set(ordered.map(\.rotation.rawValue)).sorted().joined(separator: ",")
 print("plan contract ok: \(ordered.count) placements in \(plan.container.dimensions) m, "
     + "zones [\(zoneIDs.sorted().joined(separator: ","))], rotations [\(rotations)], "
-    + "steps 1...\(ordered.count), \(String(format: "%.0f%%", plan.packedVolumeFraction * 100)) of the interior")
+    + "steps 1...\(ordered.count), \(nestedCount) nested, \(String(format: "%.0f%%", plan.packedVolumeFraction * 100)) of the interior")

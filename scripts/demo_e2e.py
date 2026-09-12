@@ -32,21 +32,14 @@ SUITCASE = {"name": "Carry-on", "dimensions": [0.34, 0.20, 0.50]}  # [width, hei
 # ponytail: flat-top heightmaps (every cell == height, i.e. the full bounding box).
 # The solver packs the bbox + compressibility, so a real dip only changes the picture.
 FIXTURE_ITEMS = [
-    {"name": "book", "dimensions": [0.15, 0.04, 0.22], "label": "hardcover book", "rigidity": "rigid", "compressibility": 1.0},
-    {"name": "tshirts", "dimensions": [0.30, 0.10, 0.22], "label": "folded t-shirt stack", "rigidity": "soft", "compressibility": 2.0},
-    {"name": "camera", "dimensions": [0.13, 0.09, 0.10], "label": "mirrorless camera", "rigidity": "fragile", "compressibility": 1.0},
-    {"name": "bottle", "dimensions": [0.07, 0.18, 0.07], "label": "shampoo bottle (keep upright)", "rigidity": "rigid", "compressibility": 1.0},
-    {"name": "shoes", "dimensions": [0.28, 0.11, 0.11], "label": "running shoes", "rigidity": "soft", "compressibility": 1.3},
+    {"name": "book", "dimensions": [0.15, 0.04, 0.22], "label": "hardcover book", "rigidity": "rigid", "compressibility": 1.0, "mass": 0.6, "keepUpright": False},
+    {"name": "tshirts", "dimensions": [0.30, 0.10, 0.22], "label": "folded t-shirt stack", "rigidity": "soft", "compressibility": 2.0, "mass": 0.8, "keepUpright": False},
+    {"name": "camera", "dimensions": [0.13, 0.09, 0.10], "label": "mirrorless camera", "rigidity": "fragile", "compressibility": 1.0, "mass": 0.7, "keepUpright": False},
+    {"name": "bottle", "dimensions": [0.07, 0.18, 0.07], "label": "shampoo bottle (keep upright)", "rigidity": "rigid", "compressibility": 1.0, "mass": 0.4, "keepUpright": True},
+    {"name": "shoes", "dimensions": [0.28, 0.11, 0.11], "label": "running shoes", "rigidity": "soft", "compressibility": 1.3, "mass": 0.9, "keepUpright": False},
 ]
+PATCH_FIELDS = ("label", "rigidity", "compressibility", "mass", "keepUpright")  # what Grok would have guessed
 CELL = 0.02  # m; a coarse-but-honest scan grid, keeps the fixture payloads tiny
-
-# ponytail: the PAN rollup dicts (pan.types.CandidateReport) carry no backend name or
-# mock mode, so the honesty line is keyed off the backend name here. Delete this map if
-# `pan/demo.py` starts writing the note into candidates.json.
-BACKEND_NOTES = {
-    "mock": "synthetic frames (pan.world_model.MockPanBackend draws the placement; no physics, not a PAN rollout)",
-    "pan": "real PAN world model",
-}
 
 
 def die(message: str) -> None:
@@ -113,9 +106,12 @@ def scan(fixture: dict, suitcase_id: str) -> dict:
     }
 
 
-def jpeg() -> bytes:
-    """A 16x16 grey JPEG -- the server only forwards it to Grok, and the demo runs
-    without an `XAI_API_KEY` (the fixture's own label/rigidity is PATCHed in below)."""
+def jpeg(fixture: dict, photos: Path | None) -> bytes:
+    """`<photos>/<name>.jpg` when given (Grok labels the real object); otherwise a 16x16
+    grey JPEG -- the server only forwards it to Grok, and without `--photos` the fixture's
+    own label/rigidity/... is PATCHed in afterwards."""
+    if photos is not None:
+        return (photos / f"{fixture['name']}.jpg").read_bytes()
     from PIL import Image
 
     buf = io.BytesIO()
@@ -126,19 +122,23 @@ def jpeg() -> bytes:
 # --- steps -------------------------------------------------------------------
 
 
-def seed(server: str) -> tuple[dict, list[dict]]:
+def seed(server: str, photos: Path | None) -> tuple[dict, list[dict]]:
     suitcase = post_json(f"{server}/suitcases", SUITCASE)
-    print(f"[1/4] suitcase {suitcase['id']}  {SUITCASE['name']} {SUITCASE['dimensions']} m")
-    photo = jpeg()
+    print(f"[1/4] suitcase {suitcase['id']}  {SUITCASE['name']} {SUITCASE['dimensions']} m"
+          + ("  -- photos labelled by Grok on the server" if photos else "  -- fixture labels, no Grok"))
     items = []
     for fixture in FIXTURE_ITEMS:
-        doc = post_item(f"{server}/items", scan(fixture, suitcase["id"]), photo)
-        doc = patch_json(
-            f"{server}/items/{doc['id']}",
-            {k: fixture[k] for k in ("label", "rigidity", "compressibility")},
-        )
+        doc = post_item(f"{server}/items", scan(fixture, suitcase["id"]), jpeg(fixture, photos))
+        if photos is None:  # no photo worth labelling: restore what Grok would have guessed
+            doc = patch_json(f"{server}/items/{doc['id']}", {k: fixture[k] for k in PATCH_FIELDS})
+        elif doc["label"] == "unknown":
+            die("the server labelled the photo 'unknown': it is running without XAI_API_KEY "
+                "(start it with `uv run --env-file ../.env uvicorn main:app`)")
         items.append(doc)
-        print(f"      + {doc['label']:<30} {fixture['dimensions']} m  {doc['rigidity']}  k={doc['compressibility']}")
+        print(f"      + {doc['label']:<30} {fixture['dimensions']} m  {doc['rigidity']}  k={doc['compressibility']}"
+              f"  {doc['mass']} kg{'  keep upright' if doc['keepUpright'] else ''}  [{doc['labelSource']}]")
+        if photos is not None and doc.get("description"):
+            print(f"        {doc['description']}")
     return suitcase, items
 
 
@@ -173,14 +173,12 @@ def rollout_mock(out: Path) -> None:
         from_packer3d=out / "solver.json",
         scenario=out / "scenario.json",
     )
-    backend = payload["backend"]
-    note = BACKEND_NOTES.get(backend.removeprefix("cache(").removesuffix(")"), backend)  # run_demo wraps it in a cache
-    print(f"[3/4] PAN rollouts [{backend}] available={payload['pan_available']} -- {note}")
+    print(f"[3/4] PAN rollouts [{payload['backend']}] available={payload['pan_available']} -- {payload['backend_note']}")
     for c in payload["candidates"]:
         print(
             f"      candidate {c['candidate_id']} ({c['label']}): physics={c['physics_status']} "
             f"pan={c['simulation_status']} execution risk={c['execution_risk'] or 'n/a'} "
-            f"backend={backend} [{note}]"
+            f"backend={c['backend'] or 'none'} [{c['backend_note'] or 'no rollout ran'}]"
         )
         print(f"        action: {c['action_text']}")
 
@@ -217,8 +215,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--server", default="http://127.0.0.1:8000")
     p.add_argument("--out", default="out/e2e")
     p.add_argument("--backend", default="mock", choices=["mock", "real"])
+    p.add_argument("--photos", type=Path, default=None,
+                   help="directory with <book|tshirts|camera|bottle|shoes>.jpg: post real photos and keep "
+                        "Grok's label/rigidity/compressibility (server needs XAI_API_KEY)")
     p.add_argument("--keep", action="store_true", help="(no-op today: the server has no delete route, data always stays)")
     args = p.parse_args(argv)
+    if args.photos is not None:
+        missing = [f["name"] for f in FIXTURE_ITEMS if not (args.photos / f"{f['name']}.jpg").is_file()]
+        if missing:
+            die(f"--photos {args.photos}: missing {', '.join(n + '.jpg' for n in missing)}")
 
     if args.backend == "real":
         key = os.environ.get("IFM_API_KEY") or os.environ.get("PAN_API_KEY")  # Eric's .env names it PAN_API_KEY
@@ -230,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     server = args.server.rstrip("/")
 
-    suitcase, items = seed(server)
+    suitcase, items = seed(server, args.photos)
     doc = make_plan(server, suitcase, items, out)
     if args.backend == "mock":
         rollout_mock(out)

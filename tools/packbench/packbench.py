@@ -50,23 +50,42 @@ QUICK = ("adversarial_exact_fit.json", "camera_kit_fragile.json", "upright_bottl
 UTIL_DROP = 0.05
 
 
+def validator_items(scenario: dict) -> list:
+    """The scenario's items in the spelling `packer3d_adapter.item_metadata` actually reads.
+
+    `packer3d.scenario._item_from_dict` accepts `keep_upright` OR the server document's
+    `keepUpright`, but `item_metadata` reads only `keep_upright` - so a fixture that uses
+    the camelCase spelling is PACKED upright and then GRADED as if it had never asked to
+    be, and every upright violation is invisible. `server/planner.py` never hits this
+    because it validates against `physics.prepack.prepare_items` output, which emits
+    `keep_upright`; the harness has to do the same normalisation to match the server.
+    """
+    return [d | {"keep_upright": bool(d["keepUpright"])}
+            if "keepUpright" in d and "keep_upright" not in d else d
+            for d in scenario.get("items", [])]
+
+
 def run_scenario(scenario: dict, candidates, iters, time_budget):
     """`(candidates, items_given)`; one candidate per (strategy, seed). Shape matches planner.rank."""
-    container, items, _config, _weights = load_scenario(scenario)
+    container, items, _config, weights = load_scenario(scenario)
+    # `weights` is the objective the SCENARIO FILE declares (5 of the 7 fixtures set
+    # non-default `unpacked`/`com`); dropping it optimises a different problem than the
+    # fixture describes and flips which candidate wins - see README, "Why the weights".
+    vitems = validator_items(scenario)
     n_opt = sum(1 for s, _ in candidates if s == "optimized") or 1
     out = []
     for strategy, seed in candidates:
         t0 = time.perf_counter()
         if strategy == "naive":
-            result = pack_naive(container, items)
+            result = pack_naive(container, items)  # first-fit has no objective to weight
         else:
             cfg = (OptimizerConfig(time_budget_s=time_budget / n_opt, seed=seed) if time_budget
                    else OptimizerConfig(time_budget_s=0.0, max_iterations=iters, seed=seed))
-            result = pack_optimized(container, items, config=cfg)
+            result = pack_optimized(container, items, config=cfg, weights=weights)
         result_dict = json.loads(result.to_json())  # metrics carry numpy scalars
         out.append({"strategy": strategy, "seed": seed, "solver": result_dict,
                     "seconds": time.perf_counter() - t0,
-                    "validation": validate_packer3d(result_dict, items=scenario.get("items", []))})
+                    "validation": validate_packer3d(result_dict, items=vitems)})
     return out, len(items)
 
 
@@ -315,6 +334,55 @@ def print_check(regs, warns) -> None:
         print("PASS: no regressions against the baseline")
 
 
+def selftest() -> int:
+    """Assert the gate's rules on synthetic runs. No solver, no fixtures, milliseconds."""
+    def mk(**best):
+        b = {"items_given": 10, "items_packed": 8, "volume_utilization": 0.5,
+             "com_lateral_offset": 0.01, "physics_valid": True, "violations": 0,
+             "strategy": "optimized", "seed": 0, "seconds": 1.0} | best
+        return {"config": {"c": 1}, "aggregate": {"scenarios": 1},
+                "run": {"commit": "abc", "dirty": False, "flags": {"quick": False}},
+                "scenarios": [{"file": "f.json", "name": "f", "items_given": 10, "best": b}]}
+
+    base = mk()
+    assert regressions(mk(), base)[0] == [], "an identical run must pass"
+    assert regressions(mk(items_packed=9), base)[0] == [], "packing more must pass"
+    assert regressions(mk(items_packed=7), base)[0], "packing fewer is a regression"
+    assert regressions(mk(violations=1), base)[0], "a new violation is a regression"
+    assert regressions(mk(physics_valid=False), base)[0], "valid -> invalid is a regression"
+    assert regressions(mk(com_lateral_offset=9.9), base)[0] == [], "com is never gated"
+    assert regressions(mk(volume_utilization=0.5 - UTIL_DROP / 2), base)[0] == [], \
+        "a small utilisation drop is not gated"
+    assert regressions(mk(volume_utilization=0.5 - UTIL_DROP * 2), base)[0], \
+        "a utilisation collapse on the same items is a regression"
+    assert regressions(mk(items_packed=9, volume_utilization=0.1), base)[0] == [], \
+        "utilisation is not gated once the item count moved"
+    # errored fixture vs a baseline that had a result
+    err = mk()
+    err["scenarios"] = [{"file": "f.json", "name": "f", "error": "boom"}]
+    assert regressions(err, base)[0], "a fixture that stopped solving is a regression"
+    # a fixture only one side measured is a warning, never a failure
+    empty = mk()
+    empty["scenarios"] = []
+    regs, warns = regressions(empty, base)
+    assert regs == [] and any("not measured" in w for w in warns), (regs, warns)
+    regs, warns = regressions(mk(), {"config": {"c": 1}, "aggregate": {"scenarios": 0}, "scenarios": []})
+    assert regs == [] and any("not in the baseline" in w for w in warns), (regs, warns)
+    # config mismatch and dirty trees warn, never fail
+    regs, warns = regressions(mk(), dict(base, config={"c": 2}))
+    assert regs == [] and any("config differs" in w for w in warns), (regs, warns)
+    dirty = mk()
+    dirty["run"]["dirty"] = True
+    regs, warns = regressions(dirty, base)
+    assert regs == [] and any("DIRTY" in w for w in warns), (regs, warns)
+    # the keep_upright normalisation the validator needs
+    assert validator_items({"items": [{"id": "a", "keepUpright": True}]})[0]["keep_upright"] is True
+    assert validator_items({"items": [{"id": "a", "keep_upright": False, "keepUpright": True}]}) == \
+        [{"id": "a", "keep_upright": False, "keepUpright": True}], "an explicit spelling wins"
+    print("selftest: ok")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--fixtures", type=Path, default=FIXTURES)
@@ -330,11 +398,16 @@ def main(argv=None) -> int:
     ap.add_argument("--times", action="store_true", help="also print wall clock per candidate")
     ap.add_argument("--quick", action="store_true",
                     help=f"only the fast subset ({', '.join(f.split('.')[0] for f in QUICK)}); "
-                         "~35 s instead of ~7 min, for running before a commit")
+                         "~30 s instead of ~7 min, for running before a commit")
+    ap.add_argument("--selftest", action="store_true",
+                    help="assert the --check rules on synthetic runs and exit; no solver, no fixtures")
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if the run is WORSE than --baseline (see regressions() for "
                          "exactly what counts); requires --baseline")
     args = ap.parse_args(argv)
+
+    if args.selftest:
+        return selftest()
 
     seeds = [int(s) for s in args.seed.split(",") if s.strip() != ""]
     candidates = ([("naive", None)] if args.strategy in ("naive", "both") else []) + \

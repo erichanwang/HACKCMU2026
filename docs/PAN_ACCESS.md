@@ -114,3 +114,52 @@ expect to renegotiate all of it once real access exists.
   real-time numbers, and there is no endpoint to measure.
 - Practical consequence: treat PAN as unbounded-latency and strictly asynchronous. Keep the
   `pending / complete / failed / unavailable` status model and cache every completed rollout.
+
+## K2-Horizon / PAN_API_KEY investigation (2026-09-12, loop iteration 1)
+
+**Bottom line: no real PAN access. K2-Horizon is a plain LLM family, not a world model, and
+the PAN_API_KEY value only unlocks an LLM endpoint that has no PAN/world-model route on it.**
+
+### K2-Horizon on HuggingFace
+
+- `huggingface.co/IFM` lists 8 K2-Horizon checkpoints (375B-A23B, MoVA-36B-A4B, 32B, 7B,
+  3.7B, 0.9B, 7B-Uno, 0.9B-Uno) plus GGUF quantizations. **Every single one is tagged
+  Text Generation.** [VERIFIED: huggingface.co/IFM org page]
+- None are tagged image-to-video, video generation, or world-model/simulation. Nothing in
+  the visible model cards mentions images, video, or actions — this is "the fully
+  open-source fleet of LLMs," i.e. a chat/completion model family, unrelated in function to
+  PAN despite living in the same HF org. [VERIFIED: huggingface.co/IFM org page]
+- Conclusion: K2-Horizon's input/output shape (text in, text out) does **not** map onto
+  `pan/types.py`'s `Observation` (image) → `SimulationResult` (video frames) contract. There
+  is no plausible adapter here — it's not a world model at all, so nothing to wire in.
+
+### PAN_API_KEY / base URL
+
+- Tried a small set of documented-looking hosts: `api.ifm.ai`, `ifm.ai`, `api.panworld.ai`,
+  `panworld.ai`, `api.ifm.mbzuai.ac.ae`, `ifm.mbzuai.ac.ae`. [VERIFIED: curl, this session]
+- **`api.ifm.ai` is live** (`server: ifm-ai/0.1.0`, HTTP/2). `GET /v1/models` returns 200
+  with an OpenAI-style model list:
+  `{"object":"list","data":[{"id":"IFM/K2-Think-v2",...},{"id":"IFM/K2-Horizon-375B-A23B",...}]}`.
+  [VERIFIED: curl https://api.ifm.ai/v1/models, this session]
+- Sent the same request with `Authorization: Bearer <the PAN_API_KEY value>` — **byte-identical
+  response**, same as unauthenticated. This endpoint does not appear to gate on auth at all,
+  so this call neither confirms nor denies the key is valid; it only proves the host is real
+  and serves an OpenAI-compatible `/v1/models` listing. [VERIFIED: curl, this session]
+- Only two models are exposed: `IFM/K2-Think-v2` and `IFM/K2-Horizon-375B-A23B` — both LLMs.
+  **No PAN model, no world-model/video-generation route, nothing resembling the
+  observation+action→frames contract exists on this host's `/v1/models` list.**
+  [VERIFIED: curl, this session]
+- Did not attempt an authenticated POST (chat/completions or otherwise) — out of scope for
+  this read-only recon and unnecessary once `/v1/models` showed no PAN-shaped endpoint.
+- `api.panworld.ai` and `api.ifm.mbzuai.ac.ae` did not resolve/respond (curl exit, no TCP
+  connection). `ifm.ai` (403) and `panworld.ai` (200, static site) behave as already
+  documented in (b) above — no change. [VERIFIED: curl, this session]
+
+### Answer to "is there a real integration opportunity"
+
+**No.** The PAN_API_KEY value is real in the sense that it points at a genuinely live IFM
+API host (`api.ifm.ai`), but that host only serves K2 text-generation models, which is a
+different product from PAN (world-model video simulation) despite the shared "IFM" branding
+and the superficially PAN-adjacent "Horizon" name. There is no PAN endpoint to call, and
+K2-Horizon's I/O shape cannot stand in for PAN's image+action→video contract. Do not wire
+this key into `pan/world_model.py`; the mock backend remains the only working path.

@@ -9,14 +9,26 @@ import simd
 /// callers are unaffected; pass them separately once a real bag is measured (see
 /// tests/swift/bag/main.swift) — the floor needs extra clearance for the wheel well, and the back
 /// (and, symmetrically, front) wall needs extra clearance for the telescoping handle's spine.
-// ponytail: BoxFit is symmetric, so wallDepth also shrinks the front (no spine there) — safe but
-// gives up real volume there too. Asymmetric front/back walls or forbidden regions if that margin
-// turns out too aggressive for the demo bag.
+// The handle spine only intrudes from the back (bag-frame z = +depth/2 — the end PlanAnchor's
+// `origin`/`perp` already treat as the far side from bag-frame z = 0, see PlanAnchor.init below
+// and tests/swift/bag/main.swift's frame comment), so `wallDepth` is paid once, from that side,
+// mirroring how `wallHeight` already pays once from the floor and shifts `center.y` to match.
 func interiorBox(_ outer: BoxFit, wall: Float, wallHeight: Float? = nil, wallDepth: Float? = nil) -> BoxFit {
     let wallHeight = wallHeight ?? wall
     let wallDepth = wallDepth ?? wall
-    return BoxFit(width: outer.width - 2 * wall, depth: outer.depth - 2 * wallDepth, height: outer.height - wallHeight,
-           center: outer.center + SIMD3<Float>(0, wallHeight / 2, 0), axis: outer.axis)
+    let depthIntrusion = wallDepth - wall
+    let depth = outer.depth - wall - wallDepth
+    let perp = SIMD3<Float>(-outer.axis.z, 0, outer.axis.x)
+    let center = outer.center + SIMD3<Float>(0, wallHeight / 2, 0) - perp * (depthIntrusion / 2)
+    // Pin the direction: the modeled back face (+perp) must be inset from the outer shell by
+    // exactly `wallDepth`, and the front face (-perp) by exactly `wall` — never swapped. Flipping
+    // `perp`'s sign here would pull volume toward the spine instead of away from it.
+    assert(abs((depth / 2 - depthIntrusion / 2) - (outer.depth / 2 - wallDepth)) < 1e-4,
+           "interiorBox: back face isn't inset by wallDepth — depth shift points the wrong way")
+    assert(abs((-depth / 2 - depthIntrusion / 2) - (-outer.depth / 2 + wall)) < 1e-4,
+           "interiorBox: front face isn't inset by wall — depth shift points the wrong way")
+    return BoxFit(width: outer.width - 2 * wall, depth: depth, height: outer.height - wallHeight,
+           center: center, axis: outer.axis)
 }
 
 /// Average several single-tap axis fits into one steadier direction. Each tap's `minAreaRect`

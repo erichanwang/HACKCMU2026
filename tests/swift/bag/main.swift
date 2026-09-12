@@ -76,23 +76,25 @@ for bag in bags {
     assert(flatMaxZ > spineNearZ, "\(bag.name): flat model's back face should reach the spine")
 }
 
-// --- 2. The fix: per-axis wall, calibrated to clear the well and the spine -----------------------
-// interiorBox grows two optional per-axis walls (default = the flat `wall`, so every existing
-// caller and the plan-anchor test keep compiling and behaving unchanged). Setting them to
-// shell + intrusion depth raises the modeled floor above the wells and pulls the modeled back
-// (and, symmetrically, front) wall clear of the handle spine, for any width/x-position those
-// features actually have.
-print("\n=== calibrated per-axis model vs true interior ===")
+// --- 2. Symmetric baseline: same wallDepth off both faces, hand-rolled -----------------------
+// This is what `interiorBox` did before the asymmetric fix below (and what section 4's single
+// flat knob still does): both the front (opening, no intrusion) and back (spine) faces lose
+// `wallDepth`, because nothing shifts the box's center in z. Hand-rolled here (not calling
+// `interiorBox`, which now does the cheaper thing) purely as the "before" baseline section 3
+// measures its improvement against.
+print("\n=== symmetric baseline (old interiorBox behavior, hand-rolled) vs true interior ===")
 for bag in bags {
     let wallHeight = bag.shell + bag.wellHeight
     let wallDepth = bag.shell + bag.spineDepth
-    let modeled = interiorBox(bag.outerBox, wall: bag.shell, wallHeight: wallHeight, wallDepth: wallDepth)
+    let modeled = BoxFit(width: bag.outerW - 2 * bag.shell, depth: bag.outerD - 2 * wallDepth,
+                          height: bag.outerH - wallHeight,
+                          center: SIMD3<Float>(0, bag.outerH / 2 + wallHeight / 2, 0), axis: SIMD3(1, 0, 0))
     let modeledVol = modeled.width * modeled.depth * modeled.height
     let trueVol = bag.trueVolume
     let margin = (trueVol - modeledVol) / trueVol * 100
     print("\(pad(bag.name, 16)) modeled=\(r2(modeledVol * 1000))L true=\(r2(trueVol * 1000))L " +
           "margin=-\(r1(margin))% (safe volume given up)")
-    assert(modeledVol < trueVol, "\(bag.name): calibrated model must stay inside the true interior")
+    assert(modeledVol < trueVol, "\(bag.name): symmetric baseline must stay inside the true interior")
 
     // Containment proof: every corner of the modeled interior box must clear the well (in y) and
     // the spine (in z), regardless of the wells'/spine's actual x-position or width.
@@ -105,48 +107,53 @@ for bag in bags {
     assert(halfD <= spineNearZ + eps, "\(bag.name): modeled back wall \(halfD) crosses into the spine (starts at \(spineNearZ))")
     assert(maxY <= bag.outerH + eps, "\(bag.name): modeled interior taller than the outer shell")
     assert(halfW <= bag.outerW / 2 - bag.shell + eps, "\(bag.name): modeled interior wider than the shell-only interior")
-    // Section 2's calibration is safe, but it must not become so conservative it demos as a bag
+    // The symmetric baseline is safe, but it must not become so conservative it demos as a bag
     // that "holds nothing" — cap how much volume it's allowed to give up.
-    assert(margin < 45, "\(bag.name): symmetric calibration should give up well under half the bag, got \(margin)%")
+    assert(margin < 45, "\(bag.name): symmetric baseline should give up well under half the bag, got \(margin)%")
 }
 
-// --- 3. The cheaper fix: pay the spine once, not twice (needs a PlanAnchor.swift change) --------
-// Section 2's wallDepth is subtracted from BOTH the front (opening, no intrusion) and back
-// (spine) faces, because interiorBox never shifts the box's center in z. The spine only exists
-// at the back, so half of that cut is pure waste. Height doesn't have this problem: interiorBox
+// --- 3. The real fix, now implemented: interiorBox pays the spine once -------------------------
+// Section 2's wallDepth was subtracted from BOTH the front (opening, no intrusion) and back
+// (spine) faces, because interiorBox never shifted the box's center in z. The spine only exists
+// at the back, so half of that cut was pure waste. Height doesn't have this problem: interiorBox
 // already raises the floor by wallHeight AND shifts center.y up by wallHeight/2, so the modeled
-// top still touches the outer shell exactly (zero waste there). Depth needs the same treatment —
-// pay spineDepth once, shift center.z toward the opening by spineDepth/2 — which is a few lines
-// in PlanAnchor.swift (out of scope here), so it's modelled by hand to quantify what it buys.
-print("\n=== cheapest real fix: asymmetric depth (pay the spine once) vs true interior ===")
+// top still touches the outer shell exactly (zero waste there). `Spike/PlanAnchor.swift` now
+// gives depth the same treatment — pays wallDepth once from the back (+perp, see PlanAnchor's
+// frame comment) and shifts center.z toward the opening by half the extra intrusion — so this
+// calls the real function, not a hand-rolled model.
+print("\n=== asymmetric depth (interiorBox, pays the spine once) vs true interior ===")
 for bag in bags {
     let wallHeight = bag.shell + bag.wellHeight
-    let width = bag.outerW - 2 * bag.shell
-    let height = bag.outerH - wallHeight
-    let depth = bag.outerD - 2 * bag.shell - bag.spineDepth
-    let center = SIMD3<Float>(0, bag.outerH / 2 + wallHeight / 2, -bag.spineDepth / 2)
-    let modeled = BoxFit(width: width, depth: depth, height: height, center: center, axis: SIMD3(1, 0, 0))
+    let wallDepth = bag.shell + bag.spineDepth
+    let modeled = interiorBox(bag.outerBox, wall: bag.shell, wallHeight: wallHeight, wallDepth: wallDepth)
     let modeledVol = modeled.width * modeled.depth * modeled.height
     let trueVol = bag.trueVolume
     let margin = (trueVol - modeledVol) / trueVol * 100
     print("\(pad(bag.name, 16)) modeled=\(r2(modeledVol * 1000))L true=\(r2(trueVol * 1000))L " +
           "margin=-\(r1(margin))% (safe volume given up)")
+    // Both directions: never overestimate (the failure mode that doesn't fit the real bag), and
+    // never give up more than the measured margin (an over-conservative model is a worse demo).
     assert(modeledVol < trueVol, "\(bag.name): asymmetric model must stay inside the true interior")
-    assert(margin < 30, "\(bag.name): asymmetric fix should give up well under a third of the bag, got \(margin)%")
+    assert(margin < 26, "\(bag.name): asymmetric fix should give up well under a quarter of the bag, got \(margin)%")
 
-    // Same containment proof as section 2, plus: the back face should touch the spine boundary
-    // exactly (a tight fit, not just another conservative pad).
-    let minY = modeled.center.y - modeled.height / 2
+    // Same containment proof as section 2, in world space (center.z is no longer 0), plus: the
+    // back face should touch the spine boundary exactly (a tight fit, not just another pad).
+    let minY = modeled.center.y - modeled.height / 2, maxY = modeled.center.y + modeled.height / 2
     let wellTopY = bag.shell + bag.wellHeight
     let spineNearZ = bag.outerD / 2 - bag.shell - bag.spineDepth
     let backZ = modeled.center.z + modeled.depth / 2
+    let frontZ = modeled.center.z - modeled.depth / 2
     let eps: Float = 1e-4
     assert(minY >= wellTopY - eps, "\(bag.name): asymmetric floor dips into the well")
+    assert(maxY <= bag.outerH + eps, "\(bag.name): asymmetric interior taller than the outer shell")
     assert(backZ <= spineNearZ + eps, "\(bag.name): asymmetric back wall crosses into the spine")
     assert(abs(backZ - spineNearZ) < eps, "\(bag.name): asymmetric back wall should touch the spine boundary, not pad past it")
+    assert(abs(frontZ - (-bag.outerD / 2 + bag.shell)) < eps, "\(bag.name): asymmetric front wall should touch the shell-only interior, not pad past it")
 
-    // It should also recover more usable volume than section 2's symmetric calibration.
-    let symModeled = interiorBox(bag.outerBox, wall: bag.shell, wallHeight: wallHeight, wallDepth: bag.shell + bag.spineDepth)
+    // It should also recover more usable volume than section 2's symmetric baseline.
+    let symModeled = BoxFit(width: bag.outerW - 2 * bag.shell, depth: bag.outerD - 2 * wallDepth,
+                             height: bag.outerH - wallHeight,
+                             center: SIMD3<Float>(0, bag.outerH / 2 + wallHeight / 2, 0), axis: SIMD3(1, 0, 0))
     let symVol = symModeled.width * symModeled.depth * symModeled.height
     assert(modeledVol > symVol, "\(bag.name): asymmetric fix should recover more volume than the symmetric one")
 }

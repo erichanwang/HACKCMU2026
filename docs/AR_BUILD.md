@@ -164,60 +164,58 @@ run) — the calibration below only needs how far each bulge intrudes, not its f
 
 ### Where the numbers go
 
-`Spike/ScanView.swift:123` currently calls `interiorBox(box, wall: suitcaseWallMeters)` with one
-constant (`suitcaseWallMeters`, `Spike/ScanView.swift:24`, currently `0.01`). `interiorBox`
-(`Spike/PlanAnchor.swift:15`) already accepts two more, `wallHeight`/`wallDepth`, that default to
-`wall` when omitted — they just aren't wired up yet. To calibrate:
+`Spike/ScanView.swift` calls `interiorBox(steadied, wall: suitcaseWallMeters, wallHeight:
+suitcaseFloorWallMeters, wallDepth: suitcaseHandleWallMeters)`. All three constants live at the
+top of `Spike/ScanView.swift` and default to `suitcaseWallMeters` (`0.01`), so nothing needs
+wiring — just replace the values:
 
 ```
-let suitcaseWallMeters: Float = shell            // width: no protrusion on either side wall
-let suitcaseWallHeightMeters: Float = shell + wellHeight   // floor: raised to clear the wells
-let suitcaseWallDepthMeters: Float = shell + spineDepth    // back wall: pulled clear of the spine
+let suitcaseWallMeters: Float = shell                        // width: no protrusion on either side wall
+let suitcaseFloorWallMeters: Float = shell + wellHeight       // floor: raised to clear the wells
+let suitcaseHandleWallMeters: Float = shell + spineDepth      // back wall: pulled clear of the spine
 ```
 
-and change the call to
-`interiorBox(box, wall: suitcaseWallMeters, wallHeight: suitcaseWallHeightMeters, wallDepth: suitcaseWallDepthMeters)`.
+`interiorBox` (`Spike/PlanAnchor.swift`) pays `wallHeight` once from the floor and `wallDepth`
+once from the back (the handle side — see the frame note below); the front/opening face only
+ever pays the plain `wall`, so there's no separate front-wall constant to set.
 
 **Do not try to force one constant to cover all three axes.** `tests/swift/bag/main.swift`
 section 4 measured what that costs: making a single flat wall big enough to be safe on height
 *and* depth needlessly shrinks the width too (which has no wheel well or handle spine at all),
 and gives up **61–66%** of the bag's volume across the three simulated bags — worse than doing
-nothing. Three separate constants is a ~3-line change, not a redesign; do that instead.
+nothing. Three separate constants is what's already wired up; use them.
+
+**Which physical wall is "back"?** `interiorBox`'s depth cut comes off the `+perp` face, where
+`perp = (-axis.z, 0, axis.x)` and bag-frame z runs from 0 (the corner `PlanAnchor.origin` anchors
+placements to) to `+depth` at that face — the same convention `tests/swift/bag/main.swift`
+documents. That's an internal convention every reader (`PlanAnchor`, `ScanView`, `Geometry`'s
+`heightMap`) already agrees on; a single tap scan has no signal for which real side of your bag
+that lands on, so before trusting `suitcaseHandleWallMeters`, check the AR overlay: its back face
+is the one only pulled in by `wall` on the opening side and by the larger `wallDepth` on the
+other — confirm that thicker cut visually lines up with your bag's handle side. If it's on the
+wrong wall, the fix is a `perp` sign flip, not a recalibration — flag it rather than guessing.
 
 ### How to check you got it right
 
 Run `bash tests/swift/bag/run.sh` — it doesn't know your bag's numbers, but it proves the
-*shape* of the calibration (three separate constants, not one) stays inside the true interior
-across a range of bag sizes without giving away more than a stated fraction. To check your own
-bag once the app is calibrated: scan the empty, closed suitcase, then physically set one real
-item that just barely fits (by hand) into the back corner near the wheel well and against the
-back wall. If the app's AR overlay would place an item there but it doesn't actually fit, your
-`wellHeight`/`spineDepth` measurements were too small — remeasure. If the overlay leaves a
-suspiciously large empty-looking gap along the back wall or floor everywhere, not just near the
-wheel/handle, you're over-conservative — see the margin discussion below.
+*shape* of the calibration (three separate constants feeding the asymmetric depth cut) stays
+inside the true interior across a range of bag sizes without giving away more than a stated
+fraction. To check your own bag once the app is calibrated: scan the empty, closed suitcase, then
+physically set one real item that just barely fits (by hand) into the back corner near the wheel
+well and against the back wall. If the app's AR overlay would place an item there but it doesn't
+actually fit, your `wellHeight`/`spineDepth` measurements were too small — remeasure. If the
+overlay leaves a suspiciously large empty-looking gap along the back wall or floor everywhere,
+not just near the wheel/handle, you're over-conservative — see the margin discussion below.
 
-### The 40% problem, and what to do about it tonight
+### The 24% margin (asymmetric depth is implemented)
 
-Calibrating three separate constants as above (measured in `tests/swift/bag/main.swift` section
-2) is **safe** — it never reaches into the well or spine — but it costs real capacity:
-
-```
-small carry-on   modeled=16.99L true=28.11L margin=-39.6%
-medium carry-on  modeled=25.23L true=41.42L margin=-39.1%
-large carry-on   modeled=33.06L true=55.7L  margin=-40.7%
-```
-
-That ~40% comes from a specific bug in the symmetry, not from the wells/spine themselves: `wall`
-and `wallDepth` in `interiorBox` shrink the box by the *same* amount on both the back face (where
-the spine actually is) and the front/opening face (where nothing intrudes), because the box's
-z-center never moves. Height doesn't have this problem — `interiorBox` already raises the floor
-by `wallHeight` *and* shifts the box's center up by `wallHeight/2`, so the modeled ceiling still
-touches the real ceiling exactly, zero waste. Depth needs the same treatment and doesn't get it.
-
-`tests/swift/bag/main.swift` section 3 models the fix by hand — pay `spineDepth` once, shift the
-box's center back by `spineDepth/2` toward the opening — since it needs a code change to
-`interiorBox`/`PlanAnchor.swift` (out of scope for this doc; the recipe below is for whoever picks
-it up). That drops the margin to:
+Calibrating the three constants above is **safe** — it never reaches into the well or spine —
+and it now pays the spine only once. `Spike/PlanAnchor.swift`'s `interiorBox` raises the floor by
+`wallHeight` *and* shifts the box's center up by `wallHeight/2` (so the modeled ceiling still
+touches the real ceiling exactly, zero waste there), and gives depth the matching treatment: pay
+`wallDepth` once, from the back face, and shift `center` toward the opening by half the extra
+intrusion (`wallDepth - wall`), so the modeled front face still touches the shell-only interior
+exactly. `tests/swift/bag/run.sh` measures the result against the true interior:
 
 ```
 small carry-on   modeled=21.24L true=28.11L margin=-24.4%
@@ -225,19 +223,18 @@ medium carry-on  modeled=31.54L true=41.42L margin=-23.9%
 large carry-on   modeled=41.88L true=55.7L  margin=-24.8%
 ```
 
-roughly **halving** the wasted volume (+4.25L / +6.3L / +8.8L recovered) for a few lines of code.
-It is still not a perfect fit — BoxFit is a single axis-aligned box, and the wheel wells only eat
-into the back *corners* (not the full width/depth), so even a "tight" per-axis box gives up space
-that's actually free elsewhere. Carving that out exactly would need a compound (L-shaped) shape,
-which is a modelling project, not a calibration — not worth it for a demo.
+versus the old symmetric behavior (same wallDepth off both faces, `tests/swift/bag/main.swift`
+section 2's hand-rolled baseline) at -39.6% / -39.1% / -40.7% — roughly **halving** the wasted
+volume (+4.25L / +6.3L / +8.8L recovered) on the three simulated bags. It is still not a perfect
+fit — BoxFit is a single axis-aligned box, and the wheel wells only eat into the back *corners*
+(not the full width/depth), so even a "tight" per-axis box gives up space that's actually free
+elsewhere. Carving that out exactly would need a compound (L-shaped) shape, which is a modelling
+project, not a calibration — not worth it for a demo.
 
-**Recommendation for tonight:** use the three-constant symmetric calibration above (the ~40%
-number) — it needs zero new logic, only two new constants and the already-tested formula from
-`suitcaseWallMeters + wellHeight`/`spineDepth`. If someone has ~15 spare minutes and is
-comfortable touching `Spike/PlanAnchor.swift`, implement the asymmetric depth fix from section 3
-(pay `spineDepth` once, shift center.z by `-spineDepth/2`) — it's a real, measured 15-point
-improvement for a small, well-understood change. Don't attempt anything fancier than that
-tonight.
+**Recommendation:** set the three constants above (`suitcaseWallMeters`, `suitcaseFloorWallMeters`,
+`suitcaseHandleWallMeters`) from your real bag's measurements — the asymmetric depth cut is
+already in place, so there's no follow-up code change to schedule. Don't attempt anything
+fancier than that tonight.
 
 ### Is 1 cm the right default?
 

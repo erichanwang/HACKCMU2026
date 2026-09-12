@@ -41,7 +41,7 @@ from physics.packer3d_adapter import validate_packer3d  # noqa: E402
 from planner import rank  # noqa: E402  - the production ranking, not a copy
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
-DEFAULT_ITERS = 40  # ~2.5 min for the 7-fixture corpus; the solver decodes at ~0.2-1 s per iteration
+DEFAULT_ITERS = 40  # ~3 min for the corpus (194.8 s at 9 fixtures); the solver decodes at ~0.2-1 s per iteration
 # --quick: packing pressure + a heightmap cavity + fragility-as-binding-constraint + a real
 # nest, and nothing over ~11 s. Why these four: see README.md.
 QUICK = ("adversarial_exact_fit.json", "camera_kit_fragile.json", "nested_foam_cutout.json",
@@ -425,7 +425,7 @@ def main(argv=None) -> int:
     ap.add_argument("--times", action="store_true", help="also print wall clock per candidate")
     ap.add_argument("--quick", action="store_true",
                     help=f"only the fast subset ({', '.join(f.split('.')[0] for f in QUICK)}); "
-                         "~21 s instead of ~2.5 min, for running before a commit")
+                         "~20 s instead of ~3 min, for running before a commit")
     ap.add_argument("--selftest", action="store_true",
                     help="assert the --check rules on synthetic runs and exit; no solver, no fixtures")
     ap.add_argument("--check", action="store_true",

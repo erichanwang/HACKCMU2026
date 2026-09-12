@@ -1,8 +1,9 @@
 """Object-in-container containment checks.
 
 Assumptions:
-- Both container and object are convex OBBs (oriented bounding boxes) built
-  via `physics.geometry.obb_from` / `OBB`. Non-box geometry is not modeled.
+- The container is a convex OBB (oriented bounding box) built via
+  `physics.geometry.obb_from` / `OBB`. An object is either the same (a box) or
+  a convex PRISM extruded from its scanned `footprint`; see below.
 - Coordinate system matches physics.schema: X=right, Y=up, Z=forward, meters,
   quaternion (x, y, z, w).
 - The container may itself be rotated/positioned arbitrarily in world space
@@ -16,6 +17,15 @@ Assumptions:
 - epsilon is a tolerance in meters: a vertex within `epsilon` of a container
   wall counts as inside/touching, not penetrating. This absorbs floating
   point noise and lets "flush against the wall" packing count as valid.
+- SCANNED PRISMS: for an object with a `footprint`
+  (`SceneGeometry.is_prism[i]`) the tested points are its 2m prism vertices
+  (bottom ring then top ring) rather than the 8 corners of its box envelope,
+  so `penetrating_vertices` are real hull vertices and `per_wall_depth_m` is
+  the real overshoot. Because a prism is always inside its envelope, only the
+  rows the cheap vectorized envelope pass already flagged are recomputed --
+  a prism can only be more contained than its box, never less. The
+  single-object `check_containment(container_obb, object_obb)` entry point
+  takes OBBs, which carry no footprint, so it stays box-only.
 
 Complexity: one batched op. `_containment_arrays` does a single einsum
 projecting every vertex of every object into the container's local frame
@@ -33,7 +43,8 @@ two fields keep working unchanged.
 Known failure modes / out of scope:
 - Only object-vs-container is checked here; object-vs-object collisions are
   a separate module's job.
-- Assumes convex box geometry — does not model non-box/irregular shapes.
+- Convex geometry only (box or scanned convex prism) — a concave item is
+  approximated by its hull, which can report a false violation.
 - Does not account for soft/compressible items (e.g. squishable bags).
 """
 from __future__ import annotations
@@ -68,7 +79,7 @@ class ContainmentResult:
 
 
 def _containment_arrays(
-    vertices: np.ndarray,  # (n, 8, 3) world-space object corners
+    vertices: np.ndarray,  # (n, v, 3) world-space object vertices (v=8 corners, or 2m prism ring)
     container_center: np.ndarray,  # (3,)
     container_axes: np.ndarray,  # (3, 3), columns = container's world axes
     container_half_extents: np.ndarray,  # (3,)
@@ -77,14 +88,14 @@ def _containment_arrays(
     """Batched containment core shared by every caller.
 
     One einsum projects every vertex of every object into the container's
-    local frame; a fixed-size (3-axis) loop of masked reductions over the 8
+    local frame; a fixed-size (3-axis) loop of masked reductions over the
     vertices then pulls out, per object, the max overshoot on each of the 6
     walls. The loop is over container axes (always 3), never over n.
 
     Returns:
       wall_depth: (n, 6) float, columns in `_WALL_ORDER` order, `-inf` where
         that wall isn't violated (beyond `epsilon`) for that object.
-      vertex_penetrating: (n, 8) bool, True where that vertex is outside any
+      vertex_penetrating: (n, v) bool, True where that vertex is outside any
         wall by more than `epsilon`.
     """
     local = np.einsum("nvj,jk->nvk", vertices - container_center, container_axes)  # (n,8,3)
@@ -109,8 +120,8 @@ def _build_result(
     object_id: str, verts: np.ndarray, wall_depth: np.ndarray, vertex_penetrating: np.ndarray
 ) -> ContainmentResult:
     """Assemble one ContainmentResult from one row of `_containment_arrays`'s
-    output. `verts` is (8, 3), `wall_depth` is (6,), `vertex_penetrating` is
-    (8,) bool."""
+    output. `verts` is (v, 3), `wall_depth` is (6,), `vertex_penetrating` is
+    (v,) bool."""
     per_wall = {
         _WALL_ORDER[w]: float(wall_depth[w]) for w in range(6) if np.isfinite(wall_depth[w])
     }
@@ -167,7 +178,23 @@ def check_scene_containment(
         geom.vertices, container.center, container.axes, container.half_extents, epsilon
     )
     violator_rows = np.nonzero(vertex_penetrating.any(axis=1))[0]
-    return [
-        _build_result(geom.ids[i], geom.vertices[i], wall_depth[i], vertex_penetrating[i])
-        for i in violator_rows
-    ]
+
+    # A scanned prism lies inside its box envelope, so it can only be MORE
+    # contained: only the rows the envelope flagged need the exact test, redone
+    # on that prism's own 2m ring vertices. Box rows keep the arrays above.
+    prisms: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+    for row in violator_rows[geom.is_prism[violator_rows]]:
+        ring = geom.prism_vertices[int(row)]
+        ring_depth, ring_penetrating = _containment_arrays(
+            ring[None], container.center, container.axes, container.half_extents, epsilon
+        )
+        prisms[int(row)] = (ring, ring_depth[0], ring_penetrating[0])
+
+    results: list[ContainmentResult] = []
+    for i in violator_rows:
+        verts, depth, penetrating = prisms.get(
+            int(i), (geom.vertices[i], wall_depth[i], vertex_penetrating[i])
+        )
+        if penetrating.any():  # False only for a prism saved by its real hull
+            results.append(_build_result(geom.ids[i], verts, depth, penetrating))
+    return results

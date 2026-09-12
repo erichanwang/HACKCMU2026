@@ -7,9 +7,24 @@ scalars, so it's directly `json.dumps`-able): overall mass balance
 is (`fill_ratio`), and per-object spatial stats (`per_object`): how much room
 is left before each wall (`wall_clearance_m`), how close the nearest other
 object is (`nearest_neighbor_gap_m` / `nearest_neighbor_id`), height off the
-floor, footprint, and volume.
+floor, footprint, volume, and -- for a scanned object only -- which geometry
+the numbers came from (`geometry`: always `"prism"` here, `footprint_vertices`:
+the footprint polygon's vertex count). `scene_metrics`'s key shape for a BOX is
+a locked contract (`tests/test_stability_metrics.py`'s
+`test_scene_metrics_keys_are_unchanged`) -- byte-identical to the pre-prism
+output, so those two extra keys are only ever added for `is_prism` objects.
 
 Units: meters and kilograms everywhere, matching physics.schema.
+
+Boxes vs scanned prisms (`SceneGeometry.is_prism`): a box's
+`footprint_area_m2` is its world XZ-AABB area and its `volume_m3` the product
+of its dimensions; a prism's are the exact XZ hull area of its ring vertices
+and its (local) footprint area x height -- so `fill_ratio` counts the real
+scanned volume, not the box envelope's. `wall_clearance_m` likewise projects a
+prism's ring vertices rather than its 8 envelope corners. `center_of_mass` /
+`com_offset_m` use `SceneGeometry.com` (the OBB centre for boxes, the footprint
+area centroid for prisms). `nearest_neighbor_gap_m` stays AABB-based for both,
+which is simply tighter now that a prism's AABB comes from its ring.
 
 `com_offset_m` is expressed in the CONTAINER's local axes (not world), so a
 solver can push mass toward a fixed side of the container (e.g. the wheel
@@ -75,6 +90,7 @@ import math
 
 import numpy as np
 
+from physics.geometry import convex_hull_2d, polygon_area_2d
 from physics.scene_geometry import (
     SceneGeometry,
     container_local_vertices,
@@ -89,14 +105,15 @@ ABOVE_EPS_M = 1e-3
 
 
 def _center_of_mass(geom: SceneGeometry) -> np.ndarray:
-    """Mass-weighted centroid of the object OBB centres (uniform density, same
-    assumption as support.py). Falls back to the container centre for an empty
-    or all-massless scene (e.g. solver obstacles, mass_kg=0), where a
+    """Mass-weighted centroid of `SceneGeometry.com` (the OBB centre for a box,
+    the footprint centroid for a scanned prism -- identical arrays when every
+    object is a box). Falls back to the container centre for an empty or
+    all-massless scene (e.g. solver obstacles, mass_kg=0), where a
     mass-weighted centroid is undefined, instead of dividing by zero."""
     total = float(geom.masses.sum()) if geom.n else 0.0
     if total <= 0.0:
         return geom.container_obb.center
-    return (geom.masses[:, None] * geom.centers).sum(axis=0) / total
+    return (geom.masses[:, None] * geom.com).sum(axis=0) / total
 
 
 def scene_metrics(geom: SceneGeometry) -> dict:
@@ -118,7 +135,6 @@ def scene_metrics(geom: SceneGeometry) -> dict:
     com_offset_m = (center_of_mass - container.center) @ container.axes  # world -> container-local
 
     object_volumes_m3 = 8.0 * np.prod(geom.half_extents, axis=1)  # (n,)
-    fill_ratio = float(object_volumes_m3.sum() / container_volume_m3)
 
     # Wall clearance: same vertex-into-container-frame projection as
     # physics.containment, but reported as remaining room (can go negative)
@@ -138,6 +154,19 @@ def scene_metrics(geom: SceneGeometry) -> dict:
     )
     height_above_floor_m = geom.aabb_min[:, 1] - geom.container_floor_y
 
+    # Scanned prisms: exact hull area / prism volume / ring-vertex clearance
+    # instead of the box-envelope values. Boxes never enter this loop.
+    for row in np.nonzero(geom.is_prism)[0]:
+        i = int(row)
+        ring = geom.prism_vertices[i]
+        footprint_area_m2[i] = polygon_area_2d(convex_hull_2d(ring[:, ::2]))
+        # Exact prism volume at any orientation: LOCAL footprint area x height.
+        object_volumes_m3[i] = polygon_area_2d(geom.footprints[i]) * 2.0 * geom.half_extents[i, 1]
+        ring_local = (ring - container.center) @ container.axes
+        wall_clearance_m[i] = (container.half_extents - np.abs(ring_local)).min()
+
+    fill_ratio = float(object_volumes_m3.sum() / container_volume_m3)
+
     has_neighbour = n > 1
     per_object = {}
     for i, oid in enumerate(geom.ids):
@@ -150,6 +179,12 @@ def scene_metrics(geom: SceneGeometry) -> dict:
             "footprint_area_m2": float(footprint_area_m2[i]),
             "volume_m3": float(object_volumes_m3[i]),
         }
+        if geom.is_prism[i]:
+            # Only a scanned object carries these -- a box-only scene's
+            # per_object shape must stay byte-identical to the pre-prism
+            # contract (tests/test_stability_metrics.py's key-shape guard).
+            per_object[oid]["geometry"] = "prism"
+            per_object[oid]["footprint_vertices"] = len(geom.footprints[i])
 
     return {
         "total_mass_kg": total_mass_kg,

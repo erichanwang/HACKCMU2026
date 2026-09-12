@@ -167,6 +167,90 @@ class TestFillRatio(unittest.TestCase):
         self.assertAlmostEqual(m["fill_ratio"], 0.001, places=9)
 
 
+class TestScannedPrisms(unittest.TestCase):
+    """Footprint objects report hull area / prism volume / centroid COM; boxes
+    keep their AABB-area and dimension-product values."""
+
+    TRIANGLE = [(-0.1, -0.1), (0.1, -0.1), (-0.1, 0.1)]  # area 0.02, centroid (-1/30, -1/30)
+    OCTAGON = [
+        (0.1, 0.05), (0.05, 0.1), (-0.05, 0.1), (-0.1, 0.05),
+        (-0.1, -0.05), (-0.05, -0.1), (0.05, -0.1), (0.1, -0.05),
+    ]
+
+    def _prism_metrics(self, **kwargs):
+        opts = dict(id="t", dimensions=(0.2, 0.1, 0.2), position=(0.0, 0.0, 0.0))
+        opts.update(kwargs)
+        scene = Scene(container=make_container(dims=(1.0, 1.0, 1.0)), objects=[Object(**opts)])
+        return scene_metrics(precompute(scene))
+
+    def test_triangular_prism_area_volume_and_labels(self):
+        m = self._prism_metrics(footprint=self.TRIANGLE)
+        po = m["per_object"]["t"]
+        self.assertAlmostEqual(po["footprint_area_m2"], 0.02, places=12)  # half of 0.2 x 0.2
+        self.assertAlmostEqual(po["volume_m3"], 0.002, places=12)  # 0.02 x 0.1 height
+        # Container volume is 1 m^3, so fill_ratio IS the prism volume.
+        self.assertAlmostEqual(m["fill_ratio"], 0.002, places=12)
+
+    def test_same_object_as_box_keeps_envelope_values(self):
+        m = self._prism_metrics()
+        po = m["per_object"]["t"]
+        self.assertAlmostEqual(po["footprint_area_m2"], 0.04, places=12)
+        self.assertAlmostEqual(po["volume_m3"], 0.004, places=12)
+        self.assertAlmostEqual(m["fill_ratio"], 0.004, places=12)
+
+    def test_geometry_and_footprint_vertices_only_on_prism_objects(self):
+        # A box-only scene's per_object shape must stay byte-identical to the
+        # pre-prism contract, so these two keys only ever appear for is_prism.
+        prism_po = self._prism_metrics(footprint=self.TRIANGLE)["per_object"]["t"]
+        self.assertEqual(prism_po["geometry"], "prism")
+        self.assertEqual(prism_po["footprint_vertices"], 3)
+        box_po = self._prism_metrics()["per_object"]["t"]
+        self.assertNotIn("geometry", box_po)
+        self.assertNotIn("footprint_vertices", box_po)
+
+    def test_scene_com_is_the_footprint_centroid_not_the_box_centre(self):
+        m = self._prism_metrics(position=(0.2, 0.1, -0.3), footprint=self.TRIANGLE)
+        self.assertAlmostEqual(m["center_of_mass"][0], 0.2 - 0.1 / 3.0, places=12)
+        self.assertAlmostEqual(m["center_of_mass"][1], 0.1, places=12)
+        self.assertAlmostEqual(m["center_of_mass"][2], -0.3 - 0.1 / 3.0, places=12)
+        self.assertAlmostEqual(m["com_offset_m"][0], 0.2 - 0.1 / 3.0, places=12)
+        # The box at the same pose reports its centre, unchanged.
+        box = self._prism_metrics(position=(0.2, 0.1, -0.3))
+        self.assertAlmostEqual(box["center_of_mass"][0], 0.2, places=12)
+        self.assertAlmostEqual(box["center_of_mass"][2], -0.3, places=12)
+
+    def test_yawed_prism_wall_clearance_from_ring_vertices(self):
+        # Octagon yawed 45 deg near the +x wall (at x = 1.0): the hull reaches
+        # 0.15/sqrt(2) = 0.106066 in X, its box envelope 0.1*sqrt(2) = 0.141421.
+        kwargs = dict(
+            id="bag", dimensions=(0.2, 0.1, 0.2), position=(0.8, 0.0, 0.0),
+            rotation=quat((0, 1, 0), 45),
+        )
+        container = make_container()  # half-extents (1, 1, 1)
+        prism = Scene(container=container, objects=[Object(footprint=self.OCTAGON, **kwargs)])
+        box = Scene(container=container, objects=[Object(**kwargs)])
+        self.assertAlmostEqual(
+            scene_metrics(precompute(prism))["per_object"]["bag"]["wall_clearance_m"],
+            1.0 - 0.8 - 0.15 / math.sqrt(2.0),
+            places=12,
+        )
+        self.assertAlmostEqual(
+            scene_metrics(precompute(box))["per_object"]["bag"]["wall_clearance_m"],
+            1.0 - 0.8 - 0.1 * math.sqrt(2.0),
+            places=12,
+        )
+
+    def test_yawed_prism_footprint_area_is_rotation_invariant(self):
+        for degrees in (0.0, 17.0, 45.0, 180.0):
+            m = self._prism_metrics(footprint=self.OCTAGON, rotation=quat((0, 1, 0), degrees))
+            po = m["per_object"]["t"]
+            self.assertAlmostEqual(po["footprint_area_m2"], 0.035, places=12)
+            self.assertAlmostEqual(po["volume_m3"], 0.0035, places=12)
+
+    def test_prism_metrics_json_dumpsable(self):
+        json.dumps(self._prism_metrics(footprint=self.TRIANGLE))
+
+
 class TestJsonSerializable(unittest.TestCase):
     def test_all_values_json_dumpsable(self):
         for scene_fn in (

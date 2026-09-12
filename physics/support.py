@@ -9,8 +9,10 @@ object look adequately supported and balanced under gravity alone?"
 Model (geometrically exact for boxes, unlike the bounding-rectangle
 approximation this replaced):
 - Rigid bodies, uniform density per object, so an object's center of mass is
-  its OBB center (`SceneGeometry.centers[i]`); its COM projection is that
-  center's (X, Z).
+  `SceneGeometry.com[i]` -- the OBB center for a box, the footprint's area
+  centroid at mid-height for a scanned prism; its COM projection is that
+  point's (X, Z). The distinction matters: a triangular prism's box center can
+  sit outside the triangle while the true centroid is always inside it.
 - Gravity acts along -Y (Y is up, per physics.schema).
 - Contact footprints are exact convex polygons in the XZ plane. An object's
   bottom contact set is the subset of its 8 world-space corners with
@@ -23,6 +25,18 @@ approximation this replaced):
   lowest corners (so a yaw-rotated or mildly tilted container still works; a
   heavily tilted container, where "the floor" is no longer one horizontal
   plane, is out of scope).
+- SCANNED PRISMS (`SceneGeometry.is_prism[i]`, i.e. the object supplied a
+  LiDAR-hull `footprint`) use their own 2m prism vertices instead of the 8 box
+  corners: the bottom contact set is the ring vertices with
+  `y <= aabb_min.y + epsilon`, the top set those with
+  `y >= aabb_max.y - epsilon`, and the footprint is the XZ hull of that set --
+  exactly the same rule as for a box, just over the real vertices. For a
+  yaw-only prism the low set is its whole bottom ring, so the contact polygon
+  IS the scanned hull and the result is exact. For a tilted prism the lowest
+  ring vertices are an approximation of the real (edge or vertex) contact in
+  precisely the way the lowest box corners already were -- no better, no worse.
+  Everything downstream (clipping, ratios, margins, chains) is polygon math and
+  needs no change.
 - A support patch is the convex polygon intersection (Sutherland-Hodgman) of
   the object's bottom footprint with each supporter's top footprint, for every
   supporter reported by `scene_geometry.resting_pairs` plus the container floor
@@ -419,8 +433,20 @@ def check_support(
                 _hull([xz[k] for k in _BIT_INDICES[hi_bits]]) if top is None else top
             )
 
+    # Scanned prisms: redo those rows off their own ring vertices. Boxes never
+    # enter this loop, so their code path above is untouched.
+    for row in np.nonzero(geom.is_prism)[0]:
+        i = int(row)
+        ring = geom.prism_vertices[i]
+        bottom_pts[i] = [
+            (float(p[0]), float(p[2])) for p in ring[ring[:, 1] <= geom.aabb_min[i, 1] + epsilon]
+        ]
+        bottom_hulls[i] = _hull(bottom_pts[i])
+        if i in supporting:
+            top_hulls[i] = _xz_hull(ring[ring[:, 1] >= geom.aabb_max[i, 1] - epsilon])
+
     floored = on_floor(geom, epsilon).tolist()
-    centers_xz = [tuple(c) for c in geom.centers[:, ::2].tolist()]
+    com_xz = [tuple(c) for c in geom.com[:, ::2].tolist()]
     # Objects whose whole XZ footprint is inside a rectangular floor: their
     # bottom footprint survives the floor clip untouched (see `_axis_rect`).
     floor_rect = _axis_rect(floor_hull)
@@ -445,7 +471,7 @@ def check_support(
         )
         candidates += [(geom.ids[j], top_hulls[j], False) for j in sorted(supporters[i])]
 
-        com = centers_xz[i]
+        com = com_xz[i]
         names: list[str] = []
         patch_areas: dict[str, float] = {}
         patch_vertices: list[Pt] = []

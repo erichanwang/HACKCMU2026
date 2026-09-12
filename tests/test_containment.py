@@ -203,6 +203,94 @@ class TestCheckSceneContainment(unittest.TestCase):
             )
 
 
+class TestScannedPrisms(unittest.TestCase):
+    """A scanned footprint is tested on its own prism vertices, so a prism whose
+    box envelope pokes through a wall can still be contained."""
+
+    # Axis-aligned octagon inscribed in the 0.2 square (corners cut 0.05 back).
+    OCTAGON = [
+        (0.1, 0.05), (0.05, 0.1), (-0.05, 0.1), (-0.1, 0.05),
+        (-0.1, -0.05), (-0.05, -0.1), (0.05, -0.1), (0.1, -0.05),
+    ]
+    TRIANGLE = [(-0.1, -0.1), (0.1, -0.1), (-0.1, 0.1)]
+    # Regular hexagon, circumradius 0.1, a vertex on +x.
+    HEX_H = 0.1 * math.sqrt(3.0) / 2.0
+    HEXAGON = [
+        (0.1, 0.0), (0.05, HEX_H), (-0.05, HEX_H),
+        (-0.1, 0.0), (-0.05, -HEX_H), (0.05, -HEX_H),
+    ]
+
+    def _scene(self, obj):
+        return Scene(container=make_container(), objects=[obj])  # walls at +-1
+
+    def test_envelope_pokes_through_wall_but_hull_does_not(self):
+        # Yawed 45 deg: the 0.2 box envelope reaches 0.1*sqrt(2) = 0.141421 in
+        # world X, the octagon only 0.15/sqrt(2) = 0.106066. Placed so the
+        # envelope's corner is 0.01 past the +x wall.
+        center_x = 1.01 - 0.1 * math.sqrt(2.0)
+        kwargs = dict(
+            id="bag", dimensions=(0.2, 0.1, 0.2), position=(center_x, 0.0, 0.0),
+            rotation=quat((0, 1, 0), 45),
+        )
+        self.assertEqual(check_scene_containment(self._scene(Object(footprint=self.OCTAGON, **kwargs))), [])
+        # Same object as a plain box: a real 0.01 m violation of +x.
+        (bad,) = check_scene_containment(self._scene(Object(**kwargs)))
+        self.assertEqual(bad.violated_walls, ["+x"])
+        self.assertAlmostEqual(bad.per_wall_depth_m["+x"], 0.01, places=9)
+
+    def test_hull_vertex_poking_out_reports_ring_vertices(self):
+        # Triangle footprint, no rotation: only ONE footprint vertex (0.1, -0.1)
+        # is at max local x, so exactly 2 ring vertices (bottom + top) poke out
+        # -- the box envelope would have reported 4 corners, two of them at
+        # z = +0.1 where the prism has no material at all.
+        tri = Object(
+            id="t", dimensions=(0.2, 0.1, 0.2), position=(0.92, 0.0, 0.0),
+            footprint=self.TRIANGLE,
+        )
+        (r,) = check_scene_containment(self._scene(tri))
+        self.assertFalse(r.contained)
+        self.assertEqual(r.violated_walls, ["+x"])
+        self.assertAlmostEqual(r.per_wall_depth_m["+x"], 0.02, places=9)
+        self.assertEqual(len(r.penetrating_vertices), 2)
+        for v in r.penetrating_vertices:
+            self.assertAlmostEqual(float(v[0]), 1.02, places=9)
+            self.assertAlmostEqual(float(v[2]), -0.1, places=9)  # the triangle's vertex
+        self.assertEqual({round(float(v[1]), 9) for v in r.penetrating_vertices}, {-0.05, 0.05})
+
+    def test_yawed_hexagonal_prism_in_a_corner(self):
+        # Yawed 30 deg the hexagon spans +-0.0866025 in X and +-0.1 in Z; its
+        # box envelope spans +-0.1299038 and +-0.125. Placed 1 mm clear of both
+        # corner walls: the prism fits, the envelope breaks through both.
+        kwargs = dict(
+            id="hex", dimensions=(0.2, 0.1, 2.0 * self.HEX_H),
+            position=(-1.0 + self.HEX_H + 0.001, 0.0, -0.899),
+            rotation=quat((0, 1, 0), 30),
+        )
+        self.assertEqual(check_scene_containment(self._scene(Object(footprint=self.HEXAGON, **kwargs))), [])
+        (bad,) = check_scene_containment(self._scene(Object(**kwargs)))
+        self.assertEqual(bad.violated_walls, ["-x", "-z"])
+        # -x: envelope 0.1299038 - hull 0.0866025 - the 1 mm clearance.
+        self.assertAlmostEqual(bad.per_wall_depth_m["-x"], 0.0423013, places=6)
+        self.assertAlmostEqual(bad.per_wall_depth_m["-z"], 0.024, places=9)
+
+    def test_box_rows_are_untouched_by_a_prism_neighbour(self):
+        # A prism violator and a box violator in one scene: both reported, in
+        # scene order, each from its own vertex set.
+        scene = Scene(
+            container=make_container(),
+            objects=[
+                Object(id="t", dimensions=(0.2, 0.1, 0.2), position=(0.92, 0.0, 0.0),
+                       footprint=self.TRIANGLE),
+                make_object("box", (0.2, 0.2, 0.2), (0.0, 0.0, 0.95)),
+            ],
+        )
+        results = check_scene_containment(scene)
+        self.assertEqual([r.object_id for r in results], ["t", "box"])
+        self.assertEqual(len(results[0].penetrating_vertices), 2)
+        self.assertEqual(len(results[1].penetrating_vertices), 4)
+        self.assertAlmostEqual(results[1].per_wall_depth_m["+z"], 0.05, places=9)
+
+
 class TestPerWallDepth(unittest.TestCase):
     def test_two_walls_violated_by_different_known_amounts(self):
         # Container half-extents (1,1,1). Object half-extents (0.5,0.5,0.5)

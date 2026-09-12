@@ -9,7 +9,7 @@ On the Mac:
 
 ```sh
 docker run --rm -d --name suitcase-mongo -p 27017:27017 mongo:7
-cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0
+cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0 --workers 2
 ```
 
 (`make mongo` / `make server` do the same two steps if `.env` is at the repo root.)
@@ -83,7 +83,7 @@ fallback below if it doesn't render.)
   Point at the line and say the solver reports failures instead of silently dropping items.
 - **Server crashes.** Restart with the same two commands from Setup:
   `docker start suitcase-mongo` (if the container stopped) then
-  `cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0`. Re-point the app at
+  `cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0 --workers 2`. Re-point the app at
   the URL only if the IP changed — it didn't need re-typing otherwise.
 
 ## 4. Judge questions — honest answers

@@ -79,6 +79,7 @@ from physics.packer3d_adapter import (  # noqa: E402
     swap_yz,
     validate_packer3d,
 )
+from physics.prepack import prepare_items  # noqa: E402
 
 RNG_SEED = 20260912
 TABLE_Y = 0.80          # world height of the table plane, metres
@@ -770,6 +771,23 @@ def footprint_gate_flip_check(driver: Path, base: str) -> None:
                                     {"id": "pebble", "keep_upright": False, "priority": 1.0}]}
         with_fp = validate_packer3d(synthetic_result, items=items_with)
         without_fp = validate_packer3d(synthetic_result, items=items_without)
+
+        # The two dicts above omit `heights`, and that is the key that decides everything:
+        # `_objects_from_placement` takes its cavity branch whenever an item has a height grid,
+        # and that branch builds its Objects with no footprint at all. `POST /items` REQUIRES
+        # heights and `server/planner.py` passes `prepare_items(docs)` straight through, so on
+        # the real path the footprint is never the thing being graded. Grade the production
+        # shape too and say so, rather than let the flip above imply otherwise.
+        prod_items = prepare_items([doc]) + [{"id": "pebble", "keep_upright": False, "priority": 1.0}]
+        prod_stripped = [{k: v for k, v in it.items() if k != "footprint"} for it in prod_items]
+        prod_with = validate_packer3d(synthetic_result, items={"items": prod_items})
+        prod_without = validate_packer3d(synthetic_result, items={"items": prod_stripped})
+        if ({v["type"] for v in prod_with["violations"]}
+                == {v["type"] for v in prod_without["violations"]}):
+            warn("footprint inert", "the flip above uses metadata without `heights`; with the "
+                                     "height grid the server really sends, deleting the footprint "
+                                     "changes no verdict -- the cavity branch grades the grid, "
+                                     "not the hull")
         with_types = {v["type"] for v in with_fp["violations"]}
         without_types = {v["type"] for v in without_fp["violations"]}
         if "OBJECT_COLLISION" not in without_types:
@@ -781,13 +799,15 @@ def footprint_gate_flip_check(driver: Path, base: str) -> None:
                  f"footprint should clear the pebble (it's in the cut-away notch), got "
                  f"violations={with_fp['violations']}")
         print(f"[footprint-gate] orientation {orientation!r} (suitcase forced for {wanted!r}): "
-              f"collides without footprint, clean with it -- verdict flips through the real /plan path")
+              f"collides without footprint, clean with it -- "
+              f"the mapping is right; see the footprint inert WARN for what production grades")
 
     if set(exercised) != {"xyz", "yxz"}:
         warn("footprint gate orientations", f"could only exercise {sorted(set(exercised))}, not "
              f"both xyz and yxz -- asserted the flip for whichever orientation(s) were obtained")
     else:
-        print("[footprint-gate] both xyz and yxz exercised end-to-end through the real /plan path")
+        print("[footprint-gate] both xyz and yxz exercised on real /plan placements; the "
+              "footprint itself is graded only when an item has no height grid")
 
 
 def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item_fits: list[dict],

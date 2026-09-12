@@ -8,7 +8,7 @@ names=() results=() seconds=() details=()
 # Checks print "AR-WARN: <name> | <detail>" for a characterised limitation that is real but not
 # a failure. They are collected here and shown as WARN rows, so a GREEN gate never implies
 # there is nothing to know -- see ar_sim.py's warn().
-warn_names=() warn_details=()
+warn_names=() warn_details=() warn_seen=()
 
 run_check() {
   local name="$1" cmd="$2" start end out line
@@ -19,6 +19,9 @@ run_check() {
   printf '%s\n' "$out" | tail -25
   while IFS= read -r line; do
     [ -n "$line" ] || continue
+    # A check may emit the same warning once per variant it exercises; report it once.
+    case " ${warn_seen[*]-} " in *" $line "*) continue ;; esac
+    warn_seen+=("$line")
     warn_names+=("${line%% | *}")
     warn_details+=("${line#* | }")
   done < <(printf '%s\n' "$out" | sed -n 's/^AR-WARN: //p')

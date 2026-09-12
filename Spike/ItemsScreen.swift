@@ -39,6 +39,8 @@ struct ItemsScreen: View {
                                            description: Text("Scan something on the Scan tab and it lands here."))
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Sheet.paper)
             .navigationTitle("Items")
             .refreshable { await load() }
             .toolbar {
@@ -169,14 +171,19 @@ struct StampIcon: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: 14, weight: .regular))
-            .foregroundStyle(Sheet.ink.opacity(0.75))
+            .foregroundStyle(Sheet.ink.opacity(0.6))
             .frame(width: 30, height: 30)
-            .overlay(Rectangle().stroke(Sheet.ink.opacity(0.25), lineWidth: 0.75))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Sheet.hairline, lineWidth: 0.75))
             .accessibilityHidden(true)
     }
 }
 
 extension ScannedItem {
+    /// Centimetres, no decimals — a measurement column, not a sentence.
+    var manifestSize: String {
+        String(format: "%.0f×%.0f×%.0f", width * 100, depth * 100, height * 100)
+    }
+
     /// A glyph for whatever the server called this. Keyword match, first hit wins; an
     /// item nobody has labelled yet gets the generic box rather than a wrong picture.
     var symbol: String {

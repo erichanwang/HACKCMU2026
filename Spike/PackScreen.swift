@@ -31,6 +31,7 @@ struct PackScreen: View {
                     empty
                 }
             }
+            .background(Sheet.paper)
             .navigationTitle("Packing plan")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

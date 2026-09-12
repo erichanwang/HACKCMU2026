@@ -55,11 +55,11 @@ struct InventoryRings<MenuContent: View>: View {
             let step = rings > 0 ? min(reach / CGFloat(rings), 96) : 0
             let diameter = max(44, min(72, step - 8))  // 44pt: the smallest usable tap target
             ZStack {
-                Color.black.opacity(0.45).ignoresSafeArea().onTapGesture(perform: dismiss)
+                Color.white.opacity(0.72).ignoresSafeArea().onTapGesture(perform: dismiss)
                 if items.isEmpty {
                     Text("Nothing scanned yet")
                         .font(.body)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Sheet.ink)
                         .position(center)
                 }
                 TimelineView(.animation(paused: reduceMotion)) { context in
@@ -85,9 +85,9 @@ struct InventoryRings<MenuContent: View>: View {
                 .minimumScaleFactor(0.7)
                 .padding(6)
                 .frame(width: diameter, height: diameter)
-                .background(.black.opacity(0.6), in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.3), lineWidth: 1))
-                .foregroundStyle(.white)
+                .background(.white.opacity(0.95), in: Circle())
+                .overlay(Circle().stroke(Sheet.ink.opacity(0.15), lineWidth: 1))
+                .foregroundStyle(Sheet.ink)
         }
         .buttonStyle(.plain)
         .contextMenu { menu(item) }

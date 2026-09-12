@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// The landing page, as the load sheet for your bags.
+/// The landing page: your bags, what is in them, and a swipe to start scanning.
 ///
-/// Aircraft have solved this exact problem with paperwork for seventy years: what is
-/// aboard, where, how heavy, how close to the limit. The direction contract lives in
-/// `.impeccable/surfaces/spike-homescreen-swift.md`; the short version is that rules and
-/// tabular figures do the work cards and progress bars were doing, because `PRODUCT.md`
+/// Keeps the load sheet's substance — a bag states its size, its load against the
+/// limit, and every item aboard by name and measurement — and drops its hard edges.
+/// White ground, soft cards, sentence case, figures still tabular because `PRODUCT.md`
 /// asks this product to read like a good tape measure.
+/// Direction contract: `.impeccable/surfaces/spike-homescreen-swift.md`.
 struct HomeScreen: View {
     /// Switches tabs — these are shortcuts to the tabs, not separate screens.
     var go: (AppTab) -> Void
@@ -16,239 +16,197 @@ struct HomeScreen: View {
     /// nil while the first check is still in flight.
     @State private var reachable: Bool?
     @State private var showSettings = false
-    @State private var revision = Date()
     @AppStorage("serverURL") private var serverURL = API.defaultBase
     @AppStorage("authToken") private var authToken = ""
 
     var body: some View {
-        ZStack {
-            Sheet.paper.ignoresSafeArea()
+        NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    masthead
+                VStack(alignment: .leading, spacing: 14) {
+                    summaryLine
                     if suitcases.isEmpty {
-                        noSheet
+                        emptyCard
                     } else {
-                        ForEach(Array(suitcases.enumerated()), id: \.element.id) { index, bag in
-                            sheet(bag, number: index + 1)
-                        }
+                        ForEach(suitcases) { bag in bagCard(bag) }
                     }
                     unmanifested
-                    linkField
+                    linkRow
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 28)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 22)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) { scanAction }
+            .background(Sheet.paper)
+            .navigationTitle("PackAR")
+            .refreshable { await load() }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                SwipeToScan(label: suitcases.isEmpty ? "Swipe to scan your suitcase" : "Swipe to scan an item") {
+                    go(.scan)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+                .background(Sheet.paper)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                        .accessibilityLabel("Server settings")
+                }
+            }
         }
         .sheet(isPresented: $showSettings) { SettingsSheet(serverURL: $serverURL, authToken: $authToken) }
         .task { await load() }
     }
 
-    // MARK: - Masthead
+    // MARK: - Pieces
 
-    private var masthead: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("LOAD SHEET")
-                    .font(.caption.weight(.semibold))
-                    .tracking(1.6)
-                Spacer()
-                Text("REV \(revision, format: .dateTime.hour().minute())")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(Sheet.ink.opacity(0.55))
-                Button { showSettings = true } label: {
-                    Image(systemName: "gearshape")
-                        .font(.footnote.weight(.semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("Server settings")
-                .padding(.trailing, -12)
+    private var summaryLine: some View {
+        HStack(spacing: 6) {
+            Text("\(suitcases.count) \(suitcases.count == 1 ? "bag" : "bags")")
+            Text("·")
+            Text("\(items.count) \(items.count == 1 ? "item" : "items")")
+            if pendingCount > 0 {
+                Text("·")
+                Text("\(pendingCount) identifying").foregroundStyle(Sheet.accent)
             }
-            .foregroundStyle(Sheet.ink)
-            Rule(weight: 1.5)
-            HStack(spacing: 14) {
-                Text("\(suitcases.count) \(suitcases.count == 1 ? "BAG" : "BAGS")")
-                Text("\(items.count) \(items.count == 1 ? "ITEM" : "ITEMS")")
-                if pendingCount > 0 { Text("\(pendingCount) IDENTIFYING") }
-                Spacer()
-            }
-            .font(.caption2.monospaced())
-            .foregroundStyle(Sheet.ink.opacity(0.55))
-            .padding(.top, 7)
+            Spacer()
         }
-        .padding(.top, 8)
+        .font(.subheadline.monospacedDigit())
+        .foregroundStyle(Sheet.ink.opacity(0.55))
+        .padding(.top, 2)
     }
 
     private var pendingCount: Int { items.filter { $0.labelStatus == "pending" }.count }
 
-    // MARK: - One bag, one sheet
-
-    private func sheet(_ bag: API.Suitcase, number: Int) -> some View {
+    private func bagCard(_ bag: API.Suitcase) -> some View {
         let aboard = contents(of: bag)
         let value = fraction(for: bag)
+        let over = value > 1
+        let shown = aboard.prefix(5)
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .lastTextBaseline) {
-                Text(bag.name.uppercased())
-                    .font(.system(.title, design: .default).weight(.heavy))
-                    .tracking(-0.4)
+            HStack(alignment: .firstTextBaseline) {
+                Text(bag.name)
+                    .font(.title3.weight(.semibold))
                 Spacer(minLength: 10)
-                Text("SHEET \(number) OF \(suitcases.count)")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(Sheet.ink.opacity(0.5))
+                Text("\(percent(value))%")
+                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(over ? Sheet.warn : Sheet.accent)
             }
-            .padding(.top, 26)
-
-            Text("\(bag.sizeText ?? "SIZE UNKNOWN") · \(volumeText(bag))")
-                .font(.footnote.monospaced())
-                .foregroundStyle(Sheet.ink.opacity(0.6))
-                .padding(.top, 3)
+            Text("\(bag.sizeText ?? "size unknown") · \(volumeText(bag))")
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(Sheet.ink.opacity(0.5))
+                .padding(.top, 2)
 
             LoadBar(value: value)
-                .padding(.top, 20)
+                .padding(.top, 14)
 
-            manifest(aboard)
-        }
-        .foregroundStyle(Sheet.ink)
-    }
-
-    private func manifest(_ aboard: [ScannedItem]) -> some View {
-        let shown = aboard.prefix(6)
-        return VStack(alignment: .leading, spacing: 0) {
-            FieldLabel("MANIFEST", trailing: "\(aboard.count) \(aboard.count == 1 ? "ITEM" : "ITEMS")")
-                .padding(.top, 24)
-            Rule()
             if aboard.isEmpty {
-                Text("Nothing aboard yet.")
+                Text("Nothing in this bag yet.")
                     .font(.footnote)
-                    .foregroundStyle(Sheet.ink.opacity(0.6))
-                    .padding(.vertical, 12)
-                Rule()
+                    .foregroundStyle(Sheet.ink.opacity(0.5))
+                    .padding(.top, 16)
             } else {
-                ForEach(Array(shown.enumerated()), id: \.element.id) { index, scanned in
-                    ManifestRow(position: index + 1, item: scanned)
-                    Rule()
+                VStack(spacing: 0) {
+                    ForEach(Array(shown), id: \.id) { scanned in
+                        ContentsRow(item: scanned)
+                    }
                 }
+                .padding(.top, 10)
                 if aboard.count > shown.count {
                     Button { go(.items) } label: {
-                        HStack {
-                            Text("+ \(aboard.count - shown.count) MORE")
-                                .font(.caption.monospaced().weight(.semibold))
+                        HStack(spacing: 4) {
+                            Text("\(aboard.count - shown.count) more")
+                            Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
                             Spacer()
-                            Image(systemName: "arrow.right").font(.caption.weight(.semibold))
                         }
+                        .font(.footnote.weight(.medium))
                         .foregroundStyle(Sheet.accent)
-                        .frame(minHeight: 44)
+                        .frame(minHeight: 40)
                         .contentShape(Rectangle())
                     }
-                    Rule()
+                    .buttonStyle(.plain)
                 }
             }
         }
+        .foregroundStyle(Sheet.ink)
+        .padding(18)
+        .background(Sheet.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Sheet.hairline, lineWidth: 0.5))
     }
-
-    // MARK: - Loose items and empty state
 
     @ViewBuilder private var unmanifested: some View {
         let loose = items.filter { $0.suitcaseId == nil }
         if !loose.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                FieldLabel("UNMANIFESTED", trailing: "\(loose.count)")
-                    .padding(.top, 30)
-                Rule()
-                ForEach(Array(loose.prefix(4).enumerated()), id: \.element.id) { index, scanned in
-                    ManifestRow(position: index + 1, item: scanned)
-                    Rule()
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Not in a bag").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(loose.count)").font(.footnote.monospacedDigit()).foregroundStyle(Sheet.ink.opacity(0.5))
                 }
-                Text("Not assigned to a bag. Move them from the Items tab.")
+                VStack(spacing: 0) {
+                    ForEach(Array(loose.prefix(4)), id: \.id) { ContentsRow(item: $0) }
+                }
+                .padding(.top, 8)
+                Text("Move them into a bag from the Items tab.")
                     .font(.caption)
-                    .foregroundStyle(Sheet.ink.opacity(0.55))
-                    .padding(.top, 8)
+                    .foregroundStyle(Sheet.ink.opacity(0.5))
+                    .padding(.top, 6)
             }
             .foregroundStyle(Sheet.ink)
+            .padding(18)
+            .background(Sheet.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Sheet.hairline, lineWidth: 0.5))
         }
     }
 
-    private var noSheet: some View {
+    private var emptyCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(reachable == false ? "NO LINK" : "NO BAG ON FILE")
-                .font(.system(.title2, design: .default).weight(.heavy))
-                .tracking(-0.3)
+            Text(reachable == false ? "No connection" : "No bag yet")
+                .font(.title3.weight(.semibold))
             Text(reachable == false
                  ? "Tried \(host). The Mac running the server has to be on this Wi-Fi, and the address has to match."
-                 : "Scan your suitcase and it opens a sheet here. Everything you scan after that is manifested against it.")
+                 : "Swipe below to scan your suitcase. Everything you scan after that is listed against it.")
                 .font(.footnote)
-                .foregroundStyle(Sheet.ink.opacity(0.65))
+                .foregroundStyle(Sheet.ink.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
             if reachable == false {
-                Button("SET SERVER ADDRESS") { showSettings = true }
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.8)
+                Button("Set the server address") { showSettings = true }
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(Sheet.accent)
                     .frame(minHeight: 44)
             }
         }
         .foregroundStyle(Sheet.ink)
-        .padding(.top, 30)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(Sheet.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Sheet.hairline, lineWidth: 0.5))
     }
 
-    // MARK: - Action and link
-
-    private var scanAction: some View {
-        Button { go(.scan) } label: {
-            Text(suitcases.isEmpty ? "SCAN SUITCASE" : "SCAN ITEM")
-                .font(.subheadline.weight(.bold))
-                .tracking(1.4)
-                .foregroundStyle(Sheet.paper)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(Sheet.accent)
-        }
-        // Plain: the system's own button chrome composites over the fill otherwise and
-        // washes the bar out to a pale tint with unreadable text.
-        .buttonStyle(.plain)
-        .padding(.horizontal, 20)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
-        .background(alignment: .top) {
-            ZStack(alignment: .top) {
-                Sheet.paper
-                Rule()
-            }
-        }
-    }
-
-    private var linkField: some View {
+    private var linkRow: some View {
         Button { showSettings = true } label: {
-            VStack(spacing: 0) {
-                Rule().padding(.bottom, 8)
-                HStack(spacing: 8) {
-                    Text("LINK")
-                        .font(.caption2.weight(.semibold))
-                        .tracking(1.2)
-                    Text(linkState)
-                        .font(.caption2.monospaced().weight(.semibold))
-                        .foregroundStyle(reachable == false ? Sheet.warn : Sheet.ink)
-                    Text(host)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(Sheet.ink.opacity(0.5))
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                    Spacer(minLength: 4)
-                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
-                }
-                .foregroundStyle(Sheet.ink.opacity(0.75))
-                .frame(minHeight: 44)
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(reachable == nil ? Sheet.ink.opacity(0.3) : (reachable! ? .green : Sheet.warn))
+                    .frame(width: 7, height: 7)
+                Text(linkState).font(.footnote)
+                Text(host).font(.footnote.monospaced()).foregroundStyle(Sheet.ink.opacity(0.4)).lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
             }
+            .foregroundStyle(Sheet.ink.opacity(0.6))
+            .frame(minHeight: 44)
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
         }
-        .padding(.top, 22)
+        .buttonStyle(.plain)
     }
 
     private var linkState: String {
         switch reachable {
-        case nil: return "···"
-        case true?: return "OK"
-        default: return "DOWN"
+        case nil: return "Checking"
+        case true?: return "Connected"
+        default: return "Not connected"
         }
     }
 
@@ -257,6 +215,8 @@ struct HomeScreen: View {
     private func contents(of bag: API.Suitcase) -> [ScannedItem] {
         items.filter { $0.suitcaseId == bag.id }
     }
+
+    private func percent(_ value: Double) -> Int { Int((value * 100).rounded()) }
 
     /// Scanned bounding-box volume against the bag's own; 0 when either is unknown.
     private func fraction(for bag: API.Suitcase) -> Double {
@@ -268,8 +228,7 @@ struct HomeScreen: View {
 
     private func volumeText(_ bag: API.Suitcase) -> String {
         guard bag.dimensions.count == 3 else { return "—" }
-        let litres = Double(bag.dimensions[0] * bag.dimensions[1] * bag.dimensions[2]) * 1000
-        return String(format: "%.0f L", litres)
+        return String(format: "%.0f L", Double(bag.dimensions[0] * bag.dimensions[1] * bag.dimensions[2]) * 1000)
     }
 
     private var host: String {
@@ -284,85 +243,52 @@ struct HomeScreen: View {
             items = try await API.inventory()
             suitcases = (try? await API.suitcases()) ?? []
             reachable = true
-            revision = Date()
         } catch {
             reachable = false
         }
     }
 }
 
-// MARK: - The sheet's vocabulary
+// MARK: - Vocabulary
 
-/// The one place the sheet's ink, paper and signal are named.
+/// The one place the app's ink, paper and signal are named.
 enum Sheet {
-    static let paper = Color(red: 0.957, green: 0.949, blue: 0.925)
+    static let paper = Color.white
+    static let card = Color(red: 0.976, green: 0.976, blue: 0.980)
+    static let hairline = Color(red: 0.102, green: 0.122, blue: 0.169).opacity(0.10)
     static let ink = Color(red: 0.102, green: 0.122, blue: 0.169)
     static let accent = Color(red: 0.839, green: 0.329, blue: 0.122)
     static let warn = Color(red: 0.702, green: 0.443, blue: 0.031)
 }
 
-/// A ruled line. The sheet separates with rules, never with cards.
-struct Rule: View {
-    var weight: CGFloat = 0.75
-
-    var body: some View {
-        Rectangle()
-            .fill(Sheet.ink.opacity(weight > 1 ? 0.85 : 0.22))
-            .frame(height: weight)
-    }
-}
-
-/// A form field's name, with its count on the right where a form puts it.
-struct FieldLabel: View {
-    let title: String
-    var trailing: String?
-
-    init(_ title: String, trailing: String? = nil) {
-        self.title = title
-        self.trailing = trailing
-    }
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.caption2.weight(.semibold)).tracking(1.4)
-            Spacer()
-            if let trailing {
-                Text(trailing).font(.caption2.monospaced()).foregroundStyle(Sheet.ink.opacity(0.55))
-            }
-        }
-        .padding(.bottom, 7)
-    }
-}
-
-/// Position number, what it is, what it measures — the three columns a manifest has.
-struct ManifestRow: View {
-    let position: Int
+/// One thing in a bag: what it is, and what it measures.
+struct ContentsRow: View {
     let item: ScannedItem
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(String(format: "%02d", position))
-                .font(.caption.monospaced())
+        HStack(spacing: 10) {
+            Image(systemName: item.symbol)
+                .font(.system(size: 13))
                 .foregroundStyle(Sheet.ink.opacity(0.45))
-            Text(item.labelStatus == "pending" ? "IDENTIFYING…" : (item.label ?? "UNLABELLED").uppercased())
-                .font(.footnote.weight(.medium))
+                .frame(width: 20)
+            Text(item.labelStatus == "pending" ? "Identifying…" : (item.label ?? "Unlabelled"))
+                .font(.subheadline)
                 .lineLimit(1)
             Spacer(minLength: 8)
             Text(item.manifestSize)
                 .font(.caption.monospaced())
-                .foregroundStyle(Sheet.ink.opacity(0.6))
+                .foregroundStyle(Sheet.ink.opacity(0.45))
         }
-        .foregroundStyle(Sheet.ink)
-        .frame(minHeight: 38)
+        .foregroundStyle(Sheet.ink.opacity(0.9))
+        .frame(minHeight: 32)
     }
 }
 
-/// The load against the limit: ticks at 0/50/100, a limit rule, and the reading in
-/// figures. Past the limit the bar runs into the amber overrun past the rule rather
-/// than stopping at it, because a bag that will not close should look like one.
+/// The load against the limit. The 100 mark sits inboard of the end, so a bag holding
+/// more than it can close on runs into the overrun strip rather than stopping at full
+/// and looking fine.
 struct LoadBar: View {
-    /// Where the 100% rule sits across the bar's width; the rest is the overrun strip.
-    static let limitShare: CGFloat = 0.82
+    static let limitShare: CGFloat = 0.84
 
     let value: Double
 
@@ -370,44 +296,82 @@ struct LoadBar: View {
     private var over: Bool { value > 1 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            FieldLabel("LOAD", trailing: over ? "OVER LIMIT" : nil)
-            GeometryReader { geo in
-                // The limit rule sits at LoadBar.limitShare of the width; the strip past it
-                // is overrun, so a bag that will not close runs into it instead of stopping.
-                let limit = geo.size.width * LoadBar.limitShare
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(Sheet.ink.opacity(0.08)).frame(height: 14)
-                    Rectangle()
-                        .fill(over ? Sheet.warn : Sheet.accent)
-                        .frame(width: max(2, limit * min(value, 1.2)), height: 14)
-                    Rectangle().fill(Sheet.ink).frame(width: 1.5, height: 22).offset(x: limit - 0.75)
-                }
-                .frame(height: 22, alignment: .center)
-                .overlay(alignment: .topLeading) {
-                    // Ticks under the marks they name: 0 at the origin, 100 under the rule.
-                    ZStack(alignment: .topLeading) {
-                        Text("0").offset(x: 0, y: 24)
-                        Text("100").offset(x: limit - 14, y: 24)
-                    }
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(Sheet.ink.opacity(0.5))
-                }
+        GeometryReader { geo in
+            let limit = geo.size.width * LoadBar.limitShare
+            ZStack(alignment: .leading) {
+                Capsule().fill(Sheet.ink.opacity(0.07)).frame(height: 8)
+                Capsule()
+                    .fill(over ? Sheet.warn : Sheet.accent)
+                    .frame(width: max(6, limit * min(value, 1.18)), height: 8)
+                Rectangle().fill(Sheet.ink.opacity(0.35)).frame(width: 1, height: 14).offset(x: limit)
             }
-            .frame(height: 40)
-            Text("\(percent)% BY VOLUME")
-                .font(.caption2.monospaced().weight(.semibold))
-                .foregroundStyle(over ? Sheet.warn : Sheet.ink)
-                .padding(.top, 2)
+            .frame(height: 14, alignment: .center)
         }
+        .frame(height: 14)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Load \(percent) percent by volume\(over ? ", over the limit" : "")")
+        .accessibilityLabel("\(percent) percent by volume\(over ? ", over what the bag holds" : "")")
     }
 }
 
-extension ScannedItem {
-    /// Centimetres, no decimals, fixed width — a manifest column, not a sentence.
-    var manifestSize: String {
-        String(format: "%.0f×%.0f×%.0f", width * 100, depth * 100, height * 100)
+/// Swipe the knob across to open the scanner. A tap anywhere on the track does the same
+/// thing, and VoiceOver gets it as a plain button: a swipe must never be the only way.
+struct SwipeToScan: View {
+    let label: String
+    let action: () -> Void
+
+    @State private var offset: CGFloat = 0
+    @State private var armed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let knob: CGFloat = 52
+    private let height: CGFloat = 60
+
+    var body: some View {
+        GeometryReader { geo in
+            let travel = max(1, geo.size.width - knob - 8)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Sheet.ink.opacity(0.05))
+                Capsule().stroke(Sheet.hairline, lineWidth: 0.5)
+
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Sheet.ink.opacity(0.45 * (1 - offset / travel)))
+                    .frame(maxWidth: .infinity)
+                    .padding(.leading, knob * 0.5)
+
+                Circle()
+                    .fill(Sheet.accent)
+                    .overlay(
+                        Image(systemName: "viewfinder")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.white)
+                    )
+                    .frame(width: knob, height: knob)
+                    .offset(x: 4 + offset)
+                    .gesture(
+                        DragGesture(minimumDistance: 1)
+                            .onChanged { drag in
+                                offset = min(max(0, drag.translation.width), travel)
+                                armed = offset > travel * 0.6
+                            }
+                            .onEnded { _ in
+                                if armed {
+                                    action()
+                                }
+                                withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8)) {
+                                    offset = 0
+                                }
+                                armed = false
+                            }
+                    )
+            }
+            .contentShape(Capsule())
+            .onTapGesture { action() }
+        }
+        .frame(height: height)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { action() }
     }
 }

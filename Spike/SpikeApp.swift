@@ -90,18 +90,20 @@ struct ScanScreen: View {
                 // A simulator, or a device with no LiDAR. Saying so beats a black screen
                 // that reads as a crash.
                 ZStack {
-                    Color.black.ignoresSafeArea()
+                    Sheet.paper.ignoresSafeArea()
                     VStack(spacing: 10) {
-                        Image(systemName: "camera.metering.unknown").font(.largeTitle)
-                        Text("NO AR CAMERA")
-                            .font(.subheadline.weight(.bold)).tracking(1.4)
-                        Text("This device has no ARKit world tracking, so scanning is unavailable. Everything else works.")
+                        Image(systemName: "camera.metering.unknown")
+                            .font(.largeTitle)
+                            .foregroundStyle(Sheet.accent)
+                        Text("No AR camera")
+                            .font(.title3.weight(.semibold))
+                        Text("This device has no ARKit world tracking, so scanning is unavailable here. Everything else works.")
                             .font(.footnote)
                             .multilineTextAlignment(.center)
-                            .foregroundStyle(Sheet.paper.opacity(0.6))
+                            .foregroundStyle(Sheet.ink.opacity(0.55))
                             .padding(.horizontal, 44)
                     }
-                    .foregroundStyle(Sheet.paper)
+                    .foregroundStyle(Sheet.ink)
                 }
             } else {
                 ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
@@ -120,8 +122,8 @@ struct ScanScreen: View {
                     .padding(.bottom, 10)
                 panel
             }
-            // Camera-app chrome: dark over the live feed whatever the system theme. Sheets follow the system.
-            .environment(\.colorScheme, .dark)
+            // Light chrome over the live feed, matching every other screen.
+            .environment(\.colorScheme, .light)
         }
         .tint(Sheet.accent)
         .animation(.easeOut(duration: 0.2), value: showingInventory)
@@ -170,14 +172,14 @@ struct ScanScreen: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 240)
             .padding(6)
-            .background(Sheet.ink.opacity(0.82))
+            .background(Sheet.paper.opacity(0.92), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             Spacer()
             Button { showSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(Sheet.paper)
+                    .foregroundStyle(Sheet.ink)
                     .frame(width: 44, height: 44)
-                    .background(Sheet.ink.opacity(0.82))
+                    .background(Sheet.paper.opacity(0.92), in: Circle())
             }
             .accessibilityLabel("Server settings")
         }
@@ -199,8 +201,8 @@ struct ScanScreen: View {
                         Text("\(inventory.count)")
                             .font(.caption2.bold().monospacedDigit())
                             .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Sheet.accent)
-                            .foregroundStyle(Sheet.paper)
+                            .background(Sheet.accent, in: Capsule())
+                            .foregroundStyle(.white)
                     }
                 }
         }
@@ -238,7 +240,7 @@ struct ScanScreen: View {
             actions
         }
         .padding(16)
-        .background(Sheet.ink.opacity(0.9))
+        .background(Sheet.paper.opacity(0.94), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
     }

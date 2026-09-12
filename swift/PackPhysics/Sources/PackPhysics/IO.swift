@@ -243,6 +243,11 @@ public struct PANCandidateReport: Codable, Equatable {
     public var actionText: String
     public var panPreviewVideo: String?
     public var panFinalFrame: String?
+    /// Which world model produced the rollout, and what that rollout actually
+    /// is. Both nil when no rollout ran. Never show the assets above without
+    /// them -- a mock rollout must not read as a PAN prediction.
+    public var backend: String?
+    public var backendNote: String?
     public var riskMetadata: JSONValue?
     public var scoreComponents: [String: JSONValue]
 
@@ -255,6 +260,8 @@ public struct PANCandidateReport: Codable, Equatable {
         case actionText = "action_text"
         case panPreviewVideo = "pan_preview_video"
         case panFinalFrame = "pan_final_frame"
+        case backend
+        case backendNote = "backend_note"
         case riskMetadata = "risk_metadata"
         case scoreComponents = "score_components"
     }
@@ -262,7 +269,8 @@ public struct PANCandidateReport: Codable, Equatable {
     public init(
         candidateId: String, label: String, physicsStatus: String, simulationStatus: String,
         executionRisk: String?, actionText: String, panPreviewVideo: String?, panFinalFrame: String?,
-        riskMetadata: JSONValue?, scoreComponents: [String: JSONValue]
+        riskMetadata: JSONValue?, scoreComponents: [String: JSONValue],
+        backend: String? = nil, backendNote: String? = nil
     ) {
         self.candidateId = candidateId
         self.label = label
@@ -274,6 +282,8 @@ public struct PANCandidateReport: Codable, Equatable {
         self.panFinalFrame = panFinalFrame
         self.riskMetadata = riskMetadata
         self.scoreComponents = scoreComponents
+        self.backend = backend
+        self.backendNote = backendNote
     }
 }
 
@@ -285,6 +295,9 @@ public typealias PANStepReport = PANCandidateReport
 /// `out_dir/candidates.json` as written by `pan/demo.py`'s `run_demo`.
 public struct PANCandidatesFile: Codable, Equatable {
     public var backend: String
+    /// What this run's world model actually is -- show it wherever the rollouts
+    /// below are shown.
+    public var backendNote: String?
     public var panAvailable: Bool
     public var returnedAfterMs: Double
     public var candidates: [PANCandidateReport]
@@ -292,6 +305,7 @@ public struct PANCandidatesFile: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case backend
+        case backendNote = "backend_note"
         case panAvailable = "pan_available"
         case returnedAfterMs = "returned_after_ms"
         case candidates, steps
@@ -299,9 +313,11 @@ public struct PANCandidatesFile: Codable, Equatable {
 
     public init(
         backend: String, panAvailable: Bool, returnedAfterMs: Double,
-        candidates: [PANCandidateReport], steps: [PANStepReport]
+        candidates: [PANCandidateReport], steps: [PANStepReport],
+        backendNote: String? = nil
     ) {
         self.backend = backend
+        self.backendNote = backendNote
         self.panAvailable = panAvailable
         self.returnedAfterMs = returnedAfterMs
         self.candidates = candidates

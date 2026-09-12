@@ -9,14 +9,14 @@ PackAR scans items with an iPhone's LiDAR, figures out the optimal way to pack t
 Needs Docker and [uv](https://docs.astral.sh/uv/). Two terminals from the repo root:
 
 ```bash
-docker compose --env-file /dev/null up -d          # Mongo 7 on localhost:27017
+docker compose up -d                               # Mongo 7 on localhost:27017
 cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0
 ```
 
-`docker compose --env-file /dev/null down` stops Mongo again; the named volume keeps the data.
-The `--env-file /dev/null` is only there because compose parses the repo's `.env` for variable
-interpolation even though `docker-compose.yml` uses none, and one stray line in `.env` is then
-enough to make `docker compose` refuse to run.
+`docker compose down` stops Mongo again; the named volume keeps the data.
+Compose parses the repo's `.env` for variable interpolation even though `docker-compose.yml` uses
+none, so one stray non-`KEY=value` line in `.env` is enough to make it refuse to run. If that
+happens, `docker compose --env-file /dev/null up -d` ignores the file entirely.
 
 Both flags on the second command are load-bearing:
 
@@ -68,8 +68,8 @@ Packing a suitcase well is a 3D bin-packing problem most people solve badly by e
 - iOS LiDAR scanning → structured item data → server (`Spike/`, `server/`)
 - 3D packing solver with center-of-mass optimization (`packer3d/`)
 - Physics validation of any proposed layout — collision, containment, support, fragility (`physics/`, Swift port in `swift/PackPhysics`)
-- Counterfactual "what if I packed it differently" rollouts via the PAN world-model layer (`pan/`)
-- Packing plan viewer — 2D layered diagram UI, Swift package (`packing-core/`)
+- Counterfactual "what if I packed it differently" rollouts via the PAN world-model layer (`pan/`) — mock world-model only; the real PAN backend is pending API access (`docs/PAN_ACCESS.md`)
+- Packing plan viewer — 2D layered diagram + 3D orbit viewer under one picker, Swift package (`packing-core/`)
 
 ## Why this is a hard problem, not a toy one
 
@@ -86,8 +86,13 @@ Spike/          iOS app — LiDAR scan → ScannedItem → POST to server
 server/         FastAPI + MongoDB — stores items, labels them with Grok
 packer3d/       3D packing solver with centre-of-mass optimisation
 physics/        deterministic physics validation (Python; Swift port in swift/PackPhysics)
-pan/            IFM PAN world-model layer (counterfactual packing rollouts)
-packing-core/   Swift package — packing plan model + 2D layer diagram UI
+pan/            IFM PAN world-model layer (counterfactual packing rollouts, mock backend)
+packing-core/   Swift package — packing plan model, 2D layer diagram, 3D orbit viewer
+swift/          PackPhysics — the physics layer ported to Swift, runs on Linux
+tools/          plan3d (renders a plan to SVG without a Mac), packbench (solver benchmark)
+scripts/        end-to-end demo and pipeline checks
+examples/       sample scans, scenes and placements
+docs/           technical references (table below)
 tests/          physics self-checks, property tests, synthetic fixtures
 ```
 
@@ -98,5 +103,11 @@ tests/          physics self-checks, property tests, synthetic fixtures
 | [`OVERVIEW.md`](OVERVIEW.md) | Full product/technical writeup: the hard-problem breakdown above in depth, the pipeline, the stack, and where this could go beyond travel (foam case layout, fulfillment cartons, field kits). |
 | [`PRD.md`](PRD.md) | Product requirements: goals, non-goals, target users, hackathon scope vs. roadmap. |
 | [`MVP.md`](MVP.md) | The hackathon demo spec: one container, 4-6 rigid items, exact data shapes between scan and solver. |
+| [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) | The three-minute demo, step by step, written from the code as it stands. |
+| [`docs/AR_BUILD.md`](docs/AR_BUILD.md) | Building and running the iOS app on a Mac, and what Linux can and cannot prove first. |
 | [`docs/PHYSICS.md`](docs/PHYSICS.md) | Technical reference for the physics validation layer. |
+| [`docs/PLAN_3D.md`](docs/PLAN_3D.md) | The 3D plan viewer, and `tools/plan3d` for checking its geometry without a Mac. |
+| [`docs/INTEGRATION.md`](docs/INTEGRATION.md) | Wiring the physics layer into the scan → solver → renderer loop. |
+| [`docs/SOLVER_INTEGRATION.md`](docs/SOLVER_INTEGRATION.md) | How `physics/packer3d_adapter.py` maps solver JSON into scenes and back. |
+| [`docs/PAN_ACCESS.md`](docs/PAN_ACCESS.md) | What PAN access we actually have: mock backend now, no public API as of 12 Sep. |
 | [`SCAN_OUTPUT.md`](SCAN_OUTPUT.md) | The scanned-item JSON format. |

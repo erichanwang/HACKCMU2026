@@ -64,6 +64,7 @@ def balance_masses(container: Container, placements, max_rounds: int = 10_000) -
         pi, pj = placements[i], placements[j]
         pi.position, pj.position = pj.position, pi.position
         pi.center, pj.center = pj.center, pi.center
+        pi.nested_in, pj.nested_in = pj.nested_in, pi.nested_in   # describes the slot, not the item
         cur = float(dev_of(moment))
         swaps += 1
     return swaps

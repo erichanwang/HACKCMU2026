@@ -12,6 +12,10 @@ and are a collision otherwise.  That symmetry with the decoder is load-bearing -
 re-derives every collision independently, but from the *same* notion of where an item is
 solid, or every correct nested placement would be reported as an overlap.  An item with no
 height grid decomposes to its plain bounding box: no scan, no cavity, no excuse.
+
+Support, by contrast, is a whole-body question and is judged once per placement over its whole
+bounding-box footprint -- again exactly as the decoder judges it -- because an item is a rigid
+body: one overhanging sub-box of a scanned footprint does not tip a toiletry bag over.
 """
 from __future__ import annotations
 
@@ -62,6 +66,7 @@ def verify(result: PackResult, items) -> list:
             errors.append(f"item {iid!r} is neither placed nor reported unpacked")
 
     solids = []  # (lo, hi, fragile, label, owner) for placement sub-boxes + obstacles
+    bboxes = []  # (lo, hi, label, owner) for whole placements -- the body support is judged on
     for owner, p in enumerate(result.placements):
         it = items_by_id.get(p.item_id)
         if not _all_finite(p.position, p.dims, p.center) or not is_finite_number(p.mass):
@@ -95,7 +100,16 @@ def verify(result: PackResult, items) -> list:
             if lo[k] < -EPS or hi[k] > c.dims[k] + EPS:
                 errors.append(f"{p.item_id}: outside the container {c.id!r} along axis {k} "
                               f"-- spans {lo[k]:.4g}..{hi[k]:.4g}, container is 0..{c.dims[k]:.4g}")
-        if c.shape == "cylinder":
+        if c.shape == "cylinder" and p.shape == "cylinder" and p.axis == "z":
+            # An upright cylinder's footprint is a circle, so only its axis offset matters --
+            # the bbox-corner test below would reject a r=0.4 can from a R=0.5 bore.  A cylinder
+            # laid on its side really does sweep an h x 2r rectangle and keeps that test.
+            r = d[0] / 2.0
+            off = math.hypot(lo[0] + r - R, lo[1] + r - R)
+            if off > R - r + EPS:
+                errors.append(f"{p.item_id}: upright cylinder r={r:.4g} centred {off:.4g} m off the "
+                              f"container axis reaches past the wall at R={R:.4g}")
+        elif c.shape == "cylinder":
             for cx in (lo[0], hi[0]):
                 for cy in (lo[1], hi[1]):
                     if (cx - R) ** 2 + (cy - R) ** 2 > (R + EPS) ** 2:
@@ -110,7 +124,7 @@ def verify(result: PackResult, items) -> list:
         sub_boxes = oriented_solid_boxes(it, lo, d, p.orientation) if it is not None else [(lo, hi)]
         for wlo, whi in sub_boxes:
             solids.append((wlo, whi, bool(p.fragile), p.item_id, owner))
-    n_item_solids = len(solids)   # placements skipped above (non-finite/negative dims) never reach here
+        bboxes.append((lo, hi, p.item_id, owner))
     for ob in c.obstacles:
         lo = tuple(float(v) for v in ob.position)
         hi = tuple(lo[k] + ob.dims[k] for k in range(3))
@@ -135,6 +149,35 @@ def verify(result: PackResult, items) -> list:
         errors.append(f"{la} overlaps {lb} by {depth:.4g} m along {axis} -- their solid parts "
                       f"intersect, so this is a collision and not a nest")
 
+    # ---- nested_in, as declared by the decoder.  Downstream consumers suppress a bounding-box
+    # overlap on the strength of this field, so it is audited here rather than trusted: the host
+    # must exist, the item must really be inside the host's bounding box, and the cavity must be
+    # a region of the host that none of the host's own solids occupy.
+    bbox_of = {label: (lo, hi) for lo, hi, label, _owner in bboxes}
+    for p in result.placements:
+        nest = p.nested_in
+        if nest is None:
+            continue
+        cav = list(nest.get("cavity") or ())
+        host = bbox_of.get(nest.get("item_id"))
+        if host is None or len(cav) != 6 or p.item_id not in bbox_of:
+            errors.append(f"{p.item_id}: nested_in is malformed or names an unplaced host: {nest!r}")
+            continue
+        clo, chi = tuple(cav[:3]), tuple(cav[k] + cav[3 + k] for k in range(3))
+        lo, hi = bbox_of[p.item_id]
+        hlo, hhi = host
+        if any(_overlap_len(lo[k], hi[k], hlo[k], hhi[k]) <= EPS for k in range(3)):
+            errors.append(f"{p.item_id}: nested_in claims a nest in {nest['item_id']} but their "
+                          f"bounding boxes do not overlap -- stale or invented nesting")
+        if any(clo[k] < hlo[k] - EPS or chi[k] > hhi[k] + EPS for k in range(3)):
+            errors.append(f"{p.item_id}: nested_in cavity {cav} is not inside {nest['item_id']}")
+        for blo, bhi, _bfrag, blabel, _bowner in solids:
+            if blabel == nest["item_id"] and all(
+                    _overlap_len(clo[k], chi[k], blo[k], bhi[k]) > EPS for k in range(3)):
+                errors.append(f"{p.item_id}: nested_in cavity {cav} is solid part of "
+                              f"{nest['item_id']}, not a cavity")
+                break
+
     # ---- mass
     total = sum(p.mass for p in result.placements)
     if total > c.max_mass + EPS:
@@ -144,15 +187,18 @@ def verify(result: PackResult, items) -> list:
                       f"{c.id!r} by {total - c.max_mass:.6g} (heaviest placed: {heavy})")
 
     # ---- fragile: nothing rests on a fragile top face; gravity: base supported
+    # Support is judged ONCE per placement, over its whole bounding-box footprint, exactly as
+    # the decoder judges it before committing: an item is a rigid body, so a single overhanging
+    # patch of a scanned footprint does not tip it over -- what matters is the fraction of the
+    # whole base that is carried. Judging each heightmap sub-box separately (a stricter rule the
+    # decoder never applied) made verify reject placements the decoder had accepted.
     on_fragile = {}   # (item, fragile item) -> [contact area, contact z]
-    unsupported = {}  # item -> (support ratio, message), worst sub-box wins
-    for i in range(n_item_solids):
-        lo, hi, _frag, label, owner = solids[i]
+    unsupported = []
+    for lo, hi, label, owner in bboxes:
         base = (hi[0] - lo[0]) * (hi[1] - lo[1])
         support = 0.0
         below = None   # (top z, label) of the nearest solid anywhere under this one
-        for j in range(len(solids)):
-            blo, bhi, bfrag, blabel, bowner = solids[j]
+        for blo, bhi, bfrag, blabel, bowner in solids:
             if bowner == owner:
                 continue
             area = _overlap_len(lo[0], hi[0], blo[0], bhi[0]) * _overlap_len(lo[1], hi[1], blo[1], bhi[1])
@@ -172,11 +218,9 @@ def verify(result: PackResult, items) -> list:
             under = ("nothing is under it" if below is None else
                      f"nearest solid below is {below[1]}, top at z={below[0]:.4g} "
                      f"({lo[2] - below[0]:.4g} m gap)")
-            if label not in unsupported or ratio < unsupported[label][0]:
-                unsupported[label] = (ratio, f"{label} is not supported: base at z={lo[2]:.4g} has "
-                                             f"support ratio {ratio:.3f} < {c.min_support} -- {under}")
+            unsupported.append(f"{label} is not supported: base at z={lo[2]:.4g} has "
+                               f"support ratio {ratio:.3f} < {c.min_support} -- {under}")
     for (la, lb), (area, z) in on_fragile.items():
         errors.append(f"{la} rests on fragile {lb} (contact area {area:.4g} m^2 at z={z:.4g})")
-    for _label, (_ratio, msg) in unsupported.items():
-        errors.append(msg)
+    errors.extend(unsupported)
     return errors

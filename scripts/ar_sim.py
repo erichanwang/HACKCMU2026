@@ -772,6 +772,20 @@ def footprint_gate_flip_check(driver: Path, base: str) -> None:
         with_fp = validate_packer3d(synthetic_result, items=items_with)
         without_fp = validate_packer3d(synthetic_result, items=items_without)
 
+        # If anyone wires the hull through the cavity branch, DILATE IT FIRST. Measured on a
+        # 40x40 cm grid: for a 45-degree convex wedge the 4x4 block decomposition covers 1.93x
+        # the true area while the 16-vertex hull covers 0.94x -- and below 1.0 is the unsafe
+        # direction. An over-approximating footprint only wastes space; an under-approximating
+        # one lets the solver put a neighbour where the real object already is, and the gate
+        # blesses it. The cause is structural: `decimateHull` (Spike/Geometry.swift:152) scales
+        # outward to contain every point the SAMPLED hull had, but a hull of samples sits inside
+        # the true outline by about the sample spacing, and `ScannedItem.footprint(from:)`
+        # deliberately applies no padding (Geometry.swift:308-314 -- jitter tolerance lives in
+        # the box's `padding`/`trimmedRange`). Harmless while nothing grades against it. A
+        # consumer would need the polygon dilated by `paddingMeters` plus a sample-spacing term,
+        # then re-clamped to the box. For a concave shape the hull is not an option at all: it
+        # fills the notch by definition, which is the space nesting exists to use.
+        #
         # The two dicts above omit `heights`, and that is the key that decides everything:
         # `_objects_from_placement` takes its cavity branch whenever an item has a height grid,
         # and that branch builds its Objects with no footprint at all. `POST /items` REQUIRES

@@ -42,18 +42,22 @@ final class PlanLayerTests: XCTestCase {
 
     // MARK: - Grouping
 
-    func testMockPlanGroupsIntoTwoLayers() throws {
+    /// Three tiers, because each item rests on whatever is actually under it: the
+    /// floor, the top of the jeans (0.035), and the top of the shirts (0.08).
+    func testMockPlanGroupsIntoThreeLayers() throws {
         let layers = try mockPlan().layers()
 
-        XCTAssertEqual(layers.count, 2, "The demo bag is two layers, not three")
-        XCTAssertEqual(layers.map(\.index), [0, 1])
+        XCTAssertEqual(layers.count, 3)
+        XCTAssertEqual(layers.map(\.index), [0, 1, 2])
         XCTAssertEqual(layers[0].floorY, 0.0, accuracy: 1e-6)
-        XCTAssertEqual(layers[1].floorY, 0.075, accuracy: 1e-6)
+        XCTAssertEqual(layers[1].floorY, 0.035, accuracy: 1e-6)
+        XCTAssertEqual(layers[2].floorY, 0.08, accuracy: 1e-6)
         XCTAssertEqual(
             layers[0].placements.map(\.itemID),
             ["shoes-pair", "toiletry-kit", "jeans-folded", "sweater-roll"]
         )
-        XCTAssertEqual(layers[1].placements.map(\.itemID), ["shirt-stack", "laptop-sleeve"])
+        XCTAssertEqual(layers[1].placements.map(\.itemID), ["shirt-stack"])
+        XCTAssertEqual(layers[2].placements.map(\.itemID), ["laptop-sleeve"])
     }
 
     func testLayersPartitionEveryPlacementExactlyOnce() throws {
@@ -79,8 +83,8 @@ final class PlanLayerTests: XCTestCase {
         // The dopp kit is the tallest thing on the floor: 0.14 m.
         XCTAssertEqual(layers[0].ceilingY, 0.14, accuracy: 1e-6)
         XCTAssertEqual(layers[0].thickness, 0.14, accuracy: 1e-6)
-        // Shirts top out at 0.075 + 0.045.
-        XCTAssertEqual(layers[1].ceilingY, 0.12, accuracy: 1e-6)
+        // Shirts rest on the jeans and top out at 0.035 + 0.045.
+        XCTAssertEqual(layers[1].ceilingY, 0.08, accuracy: 1e-6)
         XCTAssertEqual(layers[1].thickness, 0.045, accuracy: 1e-6)
     }
 
@@ -126,11 +130,12 @@ final class PlanLayerTests: XCTestCase {
         // Nothing is below the floor layer.
         XCTAssertTrue(plan.protrusions(into: layers[0]).isEmpty)
 
-        // Shoes (0.115) and dopp kit (0.14) cross the 0.075 floor; the jeans
-        // (0.035) and sweater (0.07) do not.
+        // Shoes (0.115), dopp kit (0.14) and sweater roll (0.07) all cross the
+        // 0.035 floor the shirts rest on; the jeans stop exactly at it, which is
+        // contact, not protrusion.
         XCTAssertEqual(
             plan.protrusions(into: layers[1]).map(\.itemID),
-            ["shoes-pair", "toiletry-kit"]
+            ["shoes-pair", "toiletry-kit", "sweater-roll"]
         )
     }
 

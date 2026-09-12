@@ -207,18 +207,18 @@ final class PlanGeometryStabilityTests: XCTestCase {
 
     // MARK: - Real plans
 
-    /// The bundled mock plan is geometrically clean but its two "upper layer"
-    /// items sit at the zone floor rather than on the goods below them. The
-    /// stability pass is what makes that visible; keeping it out of
-    /// `geometryIssues()` is what keeps the plan loadable.
-    func testMockPlanIsCleanButFloats() throws {
+    /// The bundled mock plan is what every `#Preview`, `PlanLoader.mockPlan()`
+    /// caller and both diagram views render, so it has to be a picture of the
+    /// product working: geometrically clean *and* physically possible. Every item
+    /// rests on the bag floor or on the item beneath it — nothing floats, nothing
+    /// tips, nothing is buried under a mountain, and the lid closes.
+    func testMockPlanIsCleanAndStable() throws {
         let plan = try PlanLoader.mockPlan()
-        XCTAssertTrue(plan.geometryIssues(tolerance: tolerance).isEmpty)
 
-        let floating = plan.stabilityIssues(tolerance: tolerance).compactMap { issue -> String? in
-            guard case let .floating(id, _) = issue else { return nil }
-            return id
-        }
-        XCTAssertEqual(Set(floating), ["shirt-stack", "laptop-sleeve"])
+        let geometry = plan.geometryIssues(tolerance: tolerance)
+        XCTAssertTrue(geometry.isEmpty, "\(geometry)")
+
+        let stability = plan.stabilityIssues(tolerance: tolerance)
+        XCTAssertTrue(stability.isEmpty, "\(stability)")
     }
 }

@@ -133,7 +133,7 @@ final class PackingPlanGeometryTests: XCTestCase {
     func testValidatorCatchesAnInjectedOverlap() throws {
         let plan = try loadMockPlan()
 
-        // Drop the laptop sleeve straight through the sweater below it.
+        // Drop the laptop sleeve straight through the shirt stack below it.
         var placements = plan.orderedPlacements
         let laptop = placements[5]
         placements[5] = Placement(
@@ -157,11 +157,11 @@ final class PackingPlanGeometryTests: XCTestCase {
         XCTAssertTrue(
             issues.contains { issue in
                 if case let .intersection(a, b, _) = issue {
-                    return [a, b].contains("laptop-sleeve") && [a, b].contains("sweater-roll")
+                    return [a, b].contains("laptop-sleeve") && [a, b].contains("shirt-stack")
                 }
                 return false
             },
-            "Expected a laptop/sweater intersection, found: \(issues)"
+            "Expected a laptop/shirt intersection, found: \(issues)"
         )
         XCTAssertThrowsError(try broken.validateGeometry(tolerance: tolerance))
     }

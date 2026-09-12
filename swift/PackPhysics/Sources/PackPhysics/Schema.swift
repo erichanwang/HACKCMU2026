@@ -101,10 +101,16 @@ public struct SceneObject: Codable, Equatable, Hashable, Sendable {
     /// >= 1.0. A soft/semi item's loose volume V can occupy a void as small as V/k.
     /// Ignored when `rigidity == .rigid`.
     public var compressibilityK: Double = 1.0
+    /// Convex footprint polygon in LOCAL (x, z), meters, any vertex order (hulled
+    /// on precompute), every point within +-dimensions.x/2 x +-dimensions.z/2.
+    /// nil = rectangular footprint (plain box). See physics/schema.py's module
+    /// docstring for the model this mirrors.
+    public var footprint: [FootprintPoint]? = nil
 
     public init(id: String, dimensions: Vec3, position: Vec3, rotation: Quat = .identity,
                 massKg: Double = 1.0, constraints: Constraints = Constraints(),
-                rigidity: Rigidity = .rigid, compressibilityK: Double = 1.0) {
+                rigidity: Rigidity = .rigid, compressibilityK: Double = 1.0,
+                footprint: [FootprintPoint]? = nil) {
         self.id = id
         self.dimensions = dimensions
         self.position = position
@@ -113,10 +119,11 @@ public struct SceneObject: Codable, Equatable, Hashable, Sendable {
         self.constraints = constraints
         self.rigidity = rigidity
         self.compressibilityK = compressibilityK
+        self.footprint = footprint
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, dimensions, position, rotation, constraints, rigidity
+        case id, dimensions, position, rotation, constraints, rigidity, footprint
         case massKg = "mass_kg"
         case compressibilityK = "compressibility_k"
     }
@@ -131,6 +138,7 @@ public struct SceneObject: Codable, Equatable, Hashable, Sendable {
         constraints = try c.decodeIfPresent(Constraints.self, forKey: .constraints) ?? Constraints()
         rigidity = try c.decodeIfPresent(Rigidity.self, forKey: .rigidity) ?? .rigid
         compressibilityK = try c.decodeIfPresent(Double.self, forKey: .compressibilityK) ?? 1.0
+        footprint = try c.decodeIfPresent([FootprintPoint].self, forKey: .footprint)
     }
 }
 

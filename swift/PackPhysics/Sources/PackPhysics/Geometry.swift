@@ -139,3 +139,156 @@ public func obbFrom(_ c: Container) throws -> OBB {
 public func obbVertices(_ obb: OBB) -> [Vec3] {
     SIGNS.map { s in obb.center + obb.axes * (s * obb.halfExtents) }
 }
+
+// ---------------------------------------------------------------------------
+// Footprints / convex prisms (LiDAR hull support). Mirrors the "Footprints /
+// convex prisms" section of physics/geometry.py.
+// ---------------------------------------------------------------------------
+
+/// A point in an object's local (x, z) plane. `SIMD2<Double>` already conforms
+/// to `Codable` as a 2-element JSON array (`[x, z]`), matching the Python wire
+/// format exactly, so it doubles as `SceneObject.footprint`'s element type.
+public typealias FootprintPoint = SIMD2<Double>
+
+extension SIMD2 where Scalar == Double {
+    @inlinable public var z: Double { y }
+    @inlinable public init(x: Double, z: Double) { self.init(x, z) }
+}
+
+/// Convex hull of 2D points (Andrew's monotone chain), CCW, no duplicates, no
+/// collinear intermediate vertices. `points` need not be sorted or deduped.
+public func convexHull2D(_ points: [FootprintPoint]) -> [FootprintPoint] {
+    var pts = points.sorted { $0.x != $1.x ? $0.x < $1.x : $0.z < $1.z }
+    var uniq: [FootprintPoint] = []
+    uniq.reserveCapacity(pts.count)
+    for p in pts where uniq.last != p { uniq.append(p) }
+    pts = uniq
+    if pts.count <= 2 { return pts }
+
+    func cross(_ o: FootprintPoint, _ a: FootprintPoint, _ b: FootprintPoint) -> Double {
+        (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x)
+    }
+    var lower: [FootprintPoint] = []
+    for p in pts {
+        while lower.count >= 2 && cross(lower[lower.count - 2], lower[lower.count - 1], p) <= 0 {
+            lower.removeLast()
+        }
+        lower.append(p)
+    }
+    var upper: [FootprintPoint] = []
+    for p in pts.reversed() {
+        while upper.count >= 2 && cross(upper[upper.count - 2], upper[upper.count - 1], p) <= 0 {
+            upper.removeLast()
+        }
+        upper.append(p)
+    }
+    return Array(lower.dropLast()) + Array(upper.dropLast())
+}
+
+/// Shoelace area of a CCW polygon (positive; 0 for a segment or point).
+public func polygonArea2D(_ poly: [FootprintPoint]) -> Double {
+    let k = poly.count
+    if k < 3 { return 0.0 }
+    var s = 0.0
+    for i in 0..<k {
+        let a = poly[i], b = poly[(i + 1) % k]
+        s += a.x * b.z - b.x * a.z
+    }
+    return abs(s) / 2.0
+}
+
+/// Area centroid of a CCW convex polygon. Falls back to the vertex mean for
+/// degenerate (zero-area, or < 3 vertex) input.
+public func polygonCentroid2D(_ poly: [FootprintPoint]) -> FootprintPoint {
+    func mean(_ pts: [FootprintPoint]) -> FootprintPoint {
+        var sx = 0.0, sz = 0.0
+        for p in pts { sx += p.x; sz += p.z }
+        let n = Double(max(pts.count, 1))
+        return FootprintPoint(x: sx / n, z: sz / n)
+    }
+    if poly.count < 3 { return mean(poly) }
+    let n = poly.count
+    var aSum = 0.0, sxSum = 0.0, szSum = 0.0
+    for i in 0..<n {
+        let j = (i + 1) % n
+        let cr = poly[i].x * poly[j].z - poly[j].x * poly[i].z
+        aSum += cr
+        sxSum += (poly[i].x + poly[j].x) * cr
+        szSum += (poly[i].z + poly[j].z) * cr
+    }
+    let a = aSum / 2.0
+    if abs(a) <= 1e-18 { return mean(poly) }
+    return FootprintPoint(x: sxSum / (6.0 * a), z: szSum / (6.0 * a))
+}
+
+/// Sutherland-Hodgman intersection of two CCW convex polygons -> CCW polygon,
+/// possibly empty. Mirrors `physics.geometry.convex_clip_2d` (the general
+/// hull-vs-hull clip used for `xzOverlapArea`; distinct from the plainer
+/// `_clip_convex_2d` in Collision.swift used only for the yaw-only prism
+/// narrow phase's contact patch).
+public func convexClip2D(_ subject: [FootprintPoint], _ clipper: [FootprintPoint]) -> [FootprintPoint] {
+    var out = subject
+    let m = clipper.count
+    for i in 0..<m {
+        if out.isEmpty { break }
+        let a = clipper[i], b = clipper[(i + 1) % m]
+        let ex = b.x - a.x, ez = b.z - a.z
+        func inside(_ p: FootprintPoint) -> Bool { ex * (p.z - a.z) - ez * (p.x - a.x) >= -1e-15 }
+        func isect(_ p: FootprintPoint, _ q: FootprintPoint) -> FootprintPoint {
+            let dx = q.x - p.x, dz = q.z - p.z
+            let den = ex * dz - ez * dx
+            if abs(den) < 1e-18 { return q }
+            let t = (ex * (a.z - p.z) - ez * (a.x - p.x)) / den
+            return FootprintPoint(x: p.x + t * dx, z: p.z + t * dz)
+        }
+        var nxt: [FootprintPoint] = []
+        var prev = out[out.count - 1]
+        for cur in out {
+            if inside(cur) {
+                if !inside(prev) { nxt.append(isect(prev, cur)) }
+                nxt.append(cur)
+            } else if inside(prev) {
+                nxt.append(isect(prev, cur))
+            }
+            prev = cur
+        }
+        out = nxt
+    }
+    return out
+}
+
+/// The entity's footprint in its LOCAL (x, z) plane as a CCW convex polygon.
+/// No supplied footprint (`nil`) returns the 4 rectangle corners CCW:
+/// (-hx,-hz), (hx,-hz), (hx,hz), (-hx,hz). A supplied footprint is hulled and
+/// validated: >= 3 points with positive area, finite, and inside the
+/// dimensions' bounding rectangle (1e-6 slack) -- the box must remain a
+/// conservative envelope of the prism.
+public func footprintLocal(id: String, dimensions: Vec3, footprint: [FootprintPoint]?) throws -> [FootprintPoint] {
+    let hx = dimensions.x / 2.0, hz = dimensions.z / 2.0
+    guard let fp = footprint else {
+        return [FootprintPoint(x: -hx, z: -hz), FootprintPoint(x: hx, z: -hz),
+                FootprintPoint(x: hx, z: hz), FootprintPoint(x: -hx, z: hz)]
+    }
+    guard fp.allSatisfy({ $0.x.isFinite && $0.z.isFinite }) else {
+        throw MalformedSceneError(objectId: id, message: "\(id): invalid footprint \(fp)")
+    }
+    let hull = convexHull2D(fp)
+    guard hull.count >= 3, polygonArea2D(hull) > 1e-12 else {
+        throw MalformedSceneError(objectId: id, message: "\(id): footprint is degenerate (needs >= 3 non-collinear points)")
+    }
+    guard !hull.contains(where: { abs($0.x) > hx + 1e-6 || abs($0.z) > hz + 1e-6 }) else {
+        throw MalformedSceneError(objectId: id, message: "\(id): footprint exceeds dimensions \(dimensions) in local x/z")
+    }
+    return hull
+}
+
+/// World-space vertices of the convex prism: bottom ring (local y = -hy) in
+/// footprint order, then the top ring (+hy) in the same order.
+public func prismVertices(_ obb: OBB, _ footprint: [FootprintPoint]) -> [Vec3] {
+    let hy = obb.halfExtents.y
+    var out: [Vec3] = []
+    out.reserveCapacity(2 * footprint.count)
+    for p in footprint { out.append(obb.center + obb.axes * Vec3(p.x, -hy, p.z)) }
+    for p in footprint { out.append(obb.center + obb.axes * Vec3(p.x, hy, p.z)) }
+    return out
+}

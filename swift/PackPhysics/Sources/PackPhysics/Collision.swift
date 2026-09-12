@@ -107,15 +107,27 @@ public struct CollisionResult: Equatable {
     public var contactPoint: Vec3?
     public var aId: String
     public var bId: String
+    /// The true XZ contact patch as [[x, z], ...] -- only the prism narrow phase
+    /// fills it (the OBB path has no polygon to report).
+    public var contactPolygon: [[Double]]?
+    /// Which narrow phase produced this: "sat_obb" | "sat_prism" | "sat_obb_envelope".
+    public var narrowPhase: String
+    /// True when the shapes were approximated (box envelopes for a tilted prism).
+    public var approximate: Bool
 
     public init(colliding: Bool, penetrationDepthM: Double = 0.0, axis: Vec3? = nil,
-                contactPoint: Vec3? = nil, aId: String, bId: String) {
+                contactPoint: Vec3? = nil, aId: String, bId: String,
+                contactPolygon: [[Double]]? = nil, narrowPhase: String = "sat_obb",
+                approximate: Bool = false) {
         self.colliding = colliding
         self.penetrationDepthM = penetrationDepthM
         self.axis = axis
         self.contactPoint = contactPoint
         self.aId = aId
         self.bId = bId
+        self.contactPolygon = contactPolygon
+        self.narrowPhase = narrowPhase
+        self.approximate = approximate
     }
 }
 
@@ -230,14 +242,157 @@ public func checkPairs(_ g: SceneGeometry, _ pairs: [(Int, Int)],
     pairs.map { checkCollision(g.obbs[$0.0], g.obbs[$0.1], epsilon: epsilon) }
 }
 
+/// Unit outward edge normals of a CCW convex polygon (p -> q, d = q - p gives
+/// outward normal (d.z, -d.x)). Mirrors `physics.collision._outward_normals_2d`.
+private func outwardNormals2D(_ poly: [FootprintPoint]) -> [FootprintPoint] {
+    let n = poly.count
+    var out: [FootprintPoint] = []
+    out.reserveCapacity(n)
+    for i in 0..<n {
+        let p = poly[i], q = poly[(i + 1) % n]
+        let dx = q.x - p.x, dz = q.z - p.z
+        var nx = dz, nz = -dx
+        let len = (nx * nx + nz * nz).squareRoot()
+        if len > 0.0 { nx /= len; nz /= len }
+        out.append(FootprintPoint(x: nx, z: nz))
+    }
+    return out
+}
+
+/// Object i's bottom prism ring in world XZ (CCW) plus its unit outward edge
+/// normals. Only valid for a `yawOnly` object. Mirrors `physics.collision._prism_xz`;
+/// `cache` (per object index) is worth passing whenever one object is tested
+/// against several others (`collideScene`'s prism sweep does).
+private func prismXZ(_ g: SceneGeometry, _ i: Int,
+                     _ cache: inout [Int: ([FootprintPoint], [FootprintPoint])]) -> ([FootprintPoint], [FootprintPoint]) {
+    if let cached = cache[i] { return cached }
+    let m = g.footprints[i].count
+    var ring = (0..<m).map { FootprintPoint(x: g.prismVerts[i][$0].x, z: g.prismVerts[i][$0].z) }
+    if g.obbs[i].axes.c1.y < 0.0 { ring.reverse() }
+    let result = (ring, outwardNormals2D(ring))
+    cache[i] = result
+    return result
+}
+
+/// Sutherland-Hodgman: `poly` clipped by every half-plane of the CCW convex
+/// polygon `clip`. Used only for the yaw-only prism narrow phase's contact
+/// patch -- mirrors `physics.collision._clip_convex_2d` (plainer / stricter
+/// than `Geometry.swift`'s `convexClip2D`: `>= 0.0`, no epsilon slack).
+private func clipConvex2D(_ poly: [FootprintPoint], _ clip: [FootprintPoint]) -> [FootprintPoint] {
+    var out = poly
+    let m = clip.count
+    for k in 0..<m {
+        if out.count < 3 { return [] }
+        let a = clip[k], b = clip[(k + 1) % m]
+        let ex = b.x - a.x, ez = b.z - a.z
+        let s = out.map { ex * ($0.z - a.z) - ez * ($0.x - a.x) }
+        if s.min()! >= 0.0 { continue }
+        var kept: [FootprintPoint] = []
+        let n = out.count
+        for t in 0..<n {
+            let u = (t + 1) % n
+            if s[t] >= 0.0 { kept.append(out[t]) }
+            if (s[t] >= 0.0) != (s[u] >= 0.0) {
+                let f = s[t] / (s[t] - s[u])
+                kept.append(FootprintPoint(x: out[t].x + (out[u].x - out[t].x) * f,
+                                           z: out[t].z + (out[u].z - out[t].z) * f))
+            }
+        }
+        out = kept
+    }
+    return out
+}
+
+/// Footprint-aware narrow phase for objects i and j of `g`. Mirrors
+/// `physics.collision.check_prism_pair`.
+///
+/// Both `yawOnly` (the LiDAR case): exact, treating the prism as the Cartesian
+/// product of its XZ footprint and its Y interval -- candidate axes are the
+/// outward edge normals of both world-XZ footprints plus world Y, checked in
+/// that order (ties keep whichever axis was checked first, as in the OBB
+/// path). Either object tilted: falls back to the OBB-envelope SAT on the two
+/// box envelopes (`approximate = true`) -- by the box-envelope invariant this
+/// can only over-report, never miss a real collision.
+private func checkPrismPair(_ g: SceneGeometry, _ i: Int, _ j: Int, _ epsilon: Double,
+                            _ cache: inout [Int: ([FootprintPoint], [FootprintPoint])]) -> CollisionResult {
+    guard g.yawOnly[i] && g.yawOnly[j] else {
+        var res = checkCollision(g.obbs[i], g.obbs[j], epsilon: epsilon)
+        res.narrowPhase = "sat_obb_envelope"
+        res.approximate = true
+        return res
+    }
+    let ids = g.ids
+    let clear = CollisionResult(colliding: false, aId: ids[i], bId: ids[j], narrowPhase: "sat_prism")
+    let yLo = max(g.aabbMin[i].y, g.aabbMin[j].y)
+    let yHi = min(g.aabbMax[i].y, g.aabbMax[j].y)
+    let yOvl = yHi - yLo
+    if yOvl <= epsilon { return clear }  // two scalars decide it; skip the XZ polygons entirely
+
+    let (pa, na) = prismXZ(g, i, &cache)
+    let (pb, nb) = prismXZ(g, j, &cache)
+    let axes2 = na + nb
+    var ovlXZ = [Double](repeating: 0, count: axes2.count)
+    for k in 0..<axes2.count {
+        let ax = axes2[k]
+        var minA = Double.infinity, maxA = -Double.infinity
+        for p in pa { let v = p.x * ax.x + p.z * ax.z; minA = min(minA, v); maxA = max(maxA, v) }
+        var minB = Double.infinity, maxB = -Double.infinity
+        for p in pb { let v = p.x * ax.x + p.z * ax.z; minB = min(minB, v); maxB = max(maxB, v) }
+        ovlXZ[k] = min(maxA, maxB) - max(minA, minB)
+    }
+    var k = 0
+    for idx in 1..<ovlXZ.count where ovlXZ[idx] < ovlXZ[k] { k = idx }
+    let depth = min(ovlXZ[k], yOvl)
+    if depth <= epsilon { return clear }
+
+    var axis = ovlXZ[k] <= yOvl ? Vec3(axes2[k].x, 0.0, axes2[k].z) : Vec3(0.0, 1.0, 0.0)
+    let d = g.obbs[j].center - g.obbs[i].center
+    if dot(axis, d) < 0.0 { axis = axis * -1.0 }  // orient A -> B, same rule as the OBB path
+
+    let polygon = clipConvex2D(pa, pb)
+    let cx: Double, cz: Double
+    var contactPolygon: [[Double]]
+    if polygon.count >= 3 && polygonArea2D(polygon) > 0.0 {
+        let c = polygonCentroid2D(polygon)
+        cx = c.x; cz = c.z
+        contactPolygon = polygon.map { [$0.x, $0.z] }
+    } else {  // knife-edge touch: no patch to report, keep a point between the two
+        let ca = polygonCentroid2D(pa), cb = polygonCentroid2D(pb)
+        cx = (ca.x + cb.x) / 2.0; cz = (ca.z + cb.z) / 2.0
+        contactPolygon = []
+    }
+    let contact = Vec3(cx, (yLo + yHi) / 2.0, cz)
+    return CollisionResult(colliding: true, penetrationDepthM: depth, axis: axis, contactPoint: contact,
+                           aId: ids[i], bId: ids[j], contactPolygon: contactPolygon, narrowPhase: "sat_prism")
+}
+
 /// Every colliding object pair in a scene: AABB broad phase + SAT narrow phase.
 ///
 /// `broadPhaseEpsilon` (default: `epsilon`) pads the broad-phase AABBs, so a pair can only
 /// be pruned when it is further apart than the narrow phase's own slack -- no pair SAT would
-/// call colliding is lost. Only colliding results are returned, in `aabbCandidatePairs`
+/// call colliding is lost (for a prism the AABB is its own, tighter than its box envelope's,
+/// which only prunes harder). Only colliding results are returned, in `aabbCandidatePairs`
 /// order (ascending (i, j)).
+///
+/// Pairs where neither object is a prism go through `checkCollision` exactly as before
+/// (byte-identical to the pre-footprint behaviour); pairs involving a prism go through
+/// `checkPrismPair`.
 public func collideScene(_ g: SceneGeometry, epsilon: Double = 1e-6,
                          broadPhaseEpsilon: Double? = nil) -> [CollisionResult] {
     let eps = broadPhaseEpsilon ?? epsilon
-    return checkPairs(g, aabbCandidatePairs(g, epsilon: eps), epsilon: epsilon).filter(\.colliding)
+    let pairs = aabbCandidatePairs(g, epsilon: eps)
+    guard g.isPrism.contains(true) else {
+        return checkPairs(g, pairs, epsilon: epsilon).filter(\.colliding)
+    }
+    var cache: [Int: ([FootprintPoint], [FootprintPoint])] = [:]
+    var out: [CollisionResult] = []
+    out.reserveCapacity(pairs.count)
+    for (i, j) in pairs {
+        if g.isPrism[i] || g.isPrism[j] {
+            out.append(checkPrismPair(g, i, j, epsilon, &cache))
+        } else {
+            out.append(checkCollision(g.obbs[i], g.obbs[j], epsilon: epsilon))
+        }
+    }
+    return out.filter(\.colliding)
 }

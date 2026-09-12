@@ -33,7 +33,7 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 | Field | Meaning |
 |---|---|
 | `id` | UUID string, unique per scan; also the Mongo `_id`. |
-| `suitcaseId` | Id of the suitcase this item was scanned into. Required by `POST /items` (the server rejects an item with none); the suitcase must already exist and belong to the requesting user. |
+| `suitcaseId` | Id of the suitcase this item was scanned into. Required by `POST /items` (the server rejects an item with none); the suitcase must already exist and belong to the requesting user. `null` afterwards means the item is in the inventory but in no bag (its suitcase was deleted, or it was taken out); `PATCH /items/{id}` with `suitcaseId` moves it. |
 | `dimensions` | `[width, height, depth]` of the minimum-area bounding box. Width and depth are the footprint on the table; height is its surface above the table (a 98th-percentile extent on every axis, so LiDAR jitter and stray mesh spikes do not inflate it). Includes a small padding (default 0.5 cm) because LiDAR reads slightly inside true edges. |
 | `cellSize` | Side length of one heightmap cell (default 0.01 m). |
 | `footprint` | Optional: up to 16 `[x, z]` vertices in metres of the object's convex footprint outline, in the box's local frame relative to its centre (X along `width`, Z along `depth`). Lets the physics gate use a prism instead of the full box for L-shapes and ovals; absent means the footprint is the whole box. |

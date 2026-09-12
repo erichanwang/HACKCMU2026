@@ -87,6 +87,7 @@ import planner  # noqa: E402  server/planner.py -- the real entry point the POST
 from packer3d.models import oriented_solid_boxes  # noqa: E402
 from packer3d.scenario import load_scenario  # noqa: E402
 from physics.compressibility import compression_allowance_m  # noqa: E402
+from physics.constraints import RESTING_CONTACT_EPS_M  # noqa: E402
 from physics.packer3d_adapter import scene_from_packer3d, swap_yz  # noqa: E402
 from physics.prepack import physics_object, prepare_items  # noqa: E402
 from physics.schema import Constraints, Container, Object, Scene  # noqa: E402
@@ -94,6 +95,11 @@ from physics.validator import validate_layout  # noqa: E402
 
 OPTIMIZER_ITERATIONS = 40   # SA iterations per optimised candidate, in place of a wall-clock budget
 EPS = 1e-6          # geometry slack: the solver works in metres, plans are printed as floats
+# 1e-3 m, the physics layer's OWN resting-contact tolerance ("is this object resting on that one",
+# physics/support.py). Deliberately coarser than EPS: it absorbs reconstruction noise between two
+# independently placed faces, not just float64 rounding. Support is asked with this one so this
+# file and the grader read the same resting graph.
+CONTACT = RESTING_CONTACT_EPS_M
 AXIS = ("x", "y", "z")
 LETTER = {"X": 0, "Y": 1, "Z": 2}
 
@@ -497,8 +503,44 @@ def check_decomposition(rep: Report, doc: dict, plan: dict, items: list = None) 
                      + ("\n        " + "\n        ".join(escapes[:6]) if escapes else ""))
 
 
-def check_physics_agrees(rep: Report, doc: dict, plan: dict,
-                         suitcase: dict = None, items: list = None) -> None:
+def nested_support(doc: dict, ref: dict) -> dict:
+    """The three z values that must coincide under a nested guest, in the packer frame.
+
+    Keyed by guest id, for every placement the SOLVER recorded as nested:
+
+      base    the guest's own min z -- where it actually sits
+      floor   the floor of the cavity its `nested_in` DECLARES
+      plinth  the top of the tallest host SOLID under the guest's footprint, read out of
+              `oriented_solid_boxes(host_item, ...)` -- the same max-pooled decomposition the
+              solver placed against, which knows nothing about `nested_in`
+
+    `plinth` is the independent one: it comes from the host item's geometry, not from the
+    declaration, so it is the only one of the three that can disagree with the other two.
+    Empty when the solver nested nothing, so a plan with no nesting excuses nothing.
+    """
+    nested = [p for p in doc["solver"]["placements"] if p.get("nested_in")]
+    solver = {p["item_id"]: p for p in doc["solver"]["placements"]}
+    out = {}
+    for p in nested:
+        host = solver.get(p["nested_in"]["item_id"])
+        if host is None or host["item_id"] not in ref:
+            continue    # a dangling host is check_nested_chain's failure to report, not this one
+        lo = tuple(p["position"])
+        hi = tuple(lo[k] + p["dims"][k] for k in range(3))
+        solids = oriented_solid_boxes(ref[host["item_id"]], tuple(host["position"]),
+                                      host["dims"], host["orientation"])
+        under = [bhi[2] for blo, bhi in solids
+                 if min(hi[0], bhi[0]) - max(lo[0], blo[0]) > EPS
+                 and min(hi[1], bhi[1]) - max(lo[1], blo[1]) > EPS]
+        out[p["item_id"]] = {"host": host["item_id"], "base": lo[2],
+                             "floor": float(p["nested_in"]["position"][2]),
+                             "plinth": max(under) if under else None,
+                             "under": len(under), "solids": len(solids)}
+    return out
+
+
+def check_physics_agrees(rep: Report, doc: dict, plan: dict, suitcase: dict = None,
+                         items: list = None, support: dict = None) -> None:
     """The verdict stored in the server document is about the packer-frame layout. Rebuild
     the SAME layout out of the app-frame plan JSON (physics_point on the app frame: app
     (x, y, z) -> physics (x, y, -z)) and re-run physics.validator on it. A frame or
@@ -530,6 +572,13 @@ def check_physics_agrees(rep: Report, doc: dict, plan: dict,
     # contains the shared volume ("the host's cavity counts as support for the nested item, so it
     # does not read as floating"). The cavity itself is asserted by check_nested_chain, so nothing
     # is waved through on the field's word alone; every other violation must still match.
+    #
+    # The float half is excused on the GEOMETRY, never on the declaration: `support` (nested_support)
+    # says whether the guest's base is in resting contact with the tallest host solid under its
+    # footprint, out of the host's own decomposition. This used to be `|guest.y - cavity.y| <= EPS`,
+    # which cannot fail -- the producer sets the cavity floor to the guest's base by construction --
+    # so it excused every nested float, including one hanging in mid-air. See check_nested_support.
+    # No `support` passed means no excuse: strict, which is what a plan with no real nest wants.
     by_id = {p["itemId"]: p for p in plan["placements"]}
     excused_pairs, excused_float = set(), set()
     for a in plan["placements"]:
@@ -537,8 +586,9 @@ def check_physics_agrees(rep: Report, doc: dict, plan: dict,
         if b is None or not permitted(a, b):
             continue
         excused_pairs.add(tuple(sorted((a["itemId"], b["itemId"]))))
-        if abs(vec(a["position"])[1] - vec(a["nestedIn"]["cavity"]["position"])[1]) <= EPS:
-            excused_float.add((a["itemId"],))   # sitting on the cavity floor, not floating in it
+        s = (support or {}).get(a["itemId"])
+        if s and s["plinth"] is not None and abs(s["base"] - s["plinth"]) <= CONTACT:
+            excused_float.add((a["itemId"],))   # really resting on a host solid, not floating in it
 
     def kinds(v: dict) -> set:
         # the stored verdict decomposes a scanned item into cavity cells (`id#k`); compare
@@ -562,8 +612,9 @@ def check_physics_agrees(rep: Report, doc: dict, plan: dict,
         f"stored valid={stored['valid']} score={stored['score']:.3f} violations={sorted(kinds(stored))} "
         f"| re-run valid={rerun['valid']} score={rerun['score']:.3f} violations={sorted(kinds(rerun))} "
         f"over {len(objects)} placements"
-        + (f"; excused by a declared cavity (collision with the host, support from its floor): "
-           f"{excused}, leaving {sorted(kinds(rerun))} to match" if excused else ""))
+        + (f"; excused by a declared cavity (collision with the host) and by resting contact with "
+           f"the host solid under it (the float): {excused}, leaving {sorted(kinds(rerun))} to match"
+           if excused else ""))
 
 
 def plan3d_binary() -> str | None:
@@ -758,6 +809,95 @@ def check_nested_chain(rep: Report, doc: dict, plan: dict, ref: dict, label: str
             f"{next((l for l in c_out.splitlines() if 'geometry issue' in l), c_said) or '(no output)'}")
 
 
+def check_nested_support(rep: Report, doc: dict, plan: dict, ref: dict, label: str) -> None:
+    """A nested guest's SUPPORT, asserted as support rather than as geometry.
+
+    `packer3d/decoder._nested_in` builds the cavity's floor by raising `c0[2]` to the top of the
+    tallest host solid under the guest's footprint, and the Swift side turns that floor into a
+    plinth which suppresses `.floating` for the guest. Every other assertion in this file is
+    satisfied by the DECLARATION alone: the cavity is inside the host, clear of its solids, and
+    contains the whole shared volume -- all still true of a guest hanging in mid-air inside a
+    correctly-shaped cavity. And `|guest.y - cavity.y| <= EPS`, which check_physics_agrees used to
+    excuse the guest's float with, cannot fail: the producer sets `c0 = max(guest.lo, host.lo)` and
+    only ever raises z to a solid the candidate was already proved clear of, so the declared floor
+    IS the guest's base by construction. It restated the declaration; it tested nothing.
+
+    So the plinth is checked here against the host's own max-pooled decomposition
+    (`oriented_solid_boxes` -- the very boxes the solver placed against, which know nothing about
+    `nested_in`): the guest's base must be in resting contact with the tallest host solid under its
+    footprint AND with the declared floor. A plinth one pooled block too low, or a cavity declaring
+    a floor the host's solids do not reach, separates the two -- and the negative control below is
+    exactly that plan, hand-edited the way `--perturb` does, because the real solver cannot produce
+    it: the guest that floats inside a correctly-declared cavity.
+    """
+    sup = nested_support(doc, ref)
+    if not sup:
+        rep.note(f"a nested guest rests on the host solid under it ({label})",
+                 "the solver recorded no nested placement here, so this assertion had nothing to "
+                 "run against (check_nested_chain reports why)")
+        return
+    bad, lines = [], []
+    for gid, s in sorted(sup.items()):
+        if s["plinth"] is None:
+            bad.append(f"{gid}: no host solid under its footprint at all -- {s['host']} cannot be "
+                       f"holding it up, whatever the cavity declares")
+            continue
+        air, sunk = s["base"] - s["plinth"], s["floor"] - s["base"]
+        if abs(air) > CONTACT:
+            bad.append(f"{gid}: base z={s['base']:.4f} is {air:+.4f} m off the tallest of "
+                       f"{s['host']}'s {s['under']} solids under its footprint (top "
+                       f"z={s['plinth']:.4f}) -- {'air beneath it' if air > 0 else 'sunk into it'}")
+        if abs(sunk) > CONTACT:
+            bad.append(f"{gid}: declared cavity floor z={s['floor']:.4f} is {sunk:+.4f} m off the "
+                       f"guest's base z={s['base']:.4f}")
+        lines.append(f"{gid} on {s['host']}: base z={s['base']:.4f}, declared floor "
+                     f"z={s['floor']:.4f}, tallest of {s['under']} host solids under its footprint "
+                     f"(of {s['solids']}) tops at z={s['plinth']:.4f}")
+    rep(f"a nested guest's base is in resting contact with the host solid under it AND with the "
+        f"declared cavity floor, within {CONTACT * 1000:.0f} mm ({label})",
+        not bad, "; ".join(lines) + ("\n        UNSUPPORTED: " + "; ".join(bad) if bad else ""))
+
+    # ---- the negative control, the plan that separates support from geometry: lift one guest 8 mm
+    # inside its own cavity and lift the declared floor with it, so the DECLARATION stays perfectly
+    # self-consistent -- the guest still sits exactly on the floor it claims, the cavity is still
+    # inside the host, still clear of its solids, still contains the whole shared volume -- and only
+    # the host's real solids say the guest is in the air. Nothing else in the pipeline sees it.
+    lift = 0.008
+    gid = sorted(sup)[0]
+    broken = json.loads(json.dumps(doc))
+    for sp in broken["solver"]["placements"]:
+        if sp["item_id"] == gid:
+            sp["position"][2] += lift
+            sp["nested_in"]["position"][2] += lift
+            sp["nested_in"]["dims"][2] -= lift
+    for bp in broken["plan"]["placements"]:
+        if bp["itemId"] == gid:               # bag frame: y is up, packer z
+            bp["position"]["y"] = float(bp["position"]["y"]) + lift
+            bp["nestedIn"]["cavity"]["position"]["y"] = float(bp["nestedIn"]["cavity"]["position"]["y"]) + lift
+            bp["nestedIn"]["cavity"]["size"]["y"] = float(bp["nestedIn"]["cavity"]["size"]["y"]) - lift
+    b = nested_support(broken, ref)[gid]
+    caught = b["plinth"] is not None and abs(b["base"] - b["plinth"]) > CONTACT
+    by_id = {q["itemId"]: q for q in broken["plan"]["placements"]}
+    still_permitted = permitted(by_id[gid], by_id[b["host"]])
+    old_excuse = abs(vec(by_id[gid]["position"])[1]
+                     - vec(by_id[gid]["nestedIn"]["cavity"]["position"])[1])
+    binary = plan3d_binary()
+    seam = (f"a guest floating inside a correctly-declared cavity is caught by the plinth rule, and "
+            f"by nothing else ({label})")
+    if not binary:
+        rep(seam, False, "no plan3d binary: set PLAN3D_BIN (see this file's docstring)")
+        return
+    code, out, said = plan3d_run(binary, broken)
+    rep(seam, caught and still_permitted and code == 0 and "geometry issues: none" in out,
+        f"{gid} lifted {lift * 1000:.0f} mm with its declared floor: base z={b['base']:.4f}, "
+        f"declared floor z={b['floor']:.4f} (still equal, so the old "
+        f"|guest.y - cavity.y| excuse reads {old_excuse:.4f} m and would still excuse it), "
+        f"{b['host']}'s solids under it top at z={b['plinth']:.4f}\n        "
+        f"plinth rule: {'CAUGHT, air beneath it' if caught else 'SILENT -- the plinth is not checked'}"
+        f" | pair rule: still permitted={still_permitted}"
+        f" | Swift decoder: exit={code} {said or '(no output)'}")
+
+
 def check_multi_cavity(rep: Report, doc: dict, plan: dict, label: str) -> None:
     """The seam only a host with SEVERAL cavities can reach: the cavity cell in `nestedIn` has to
     be the guest's OWN cell, not "somewhere in this host".
@@ -934,7 +1074,7 @@ def main() -> int:
     check_steps(rep, plan)
     check_unpacked(rep, doc, plan)
     check_decomposition(rep, doc, plan)
-    check_physics_agrees(rep, doc, plan)
+    check_physics_agrees(rep, doc, plan, support=nested_support(doc, {it.id: it for it in ref}))
     check_swift_decoder(rep, doc)
 
     # the cavity seam, on plans the real solver produced. `--perturb` only ever touches the main
@@ -958,8 +1098,9 @@ def main() -> int:
         if its is MULTI_ITEMS:
             check_multi_cavity(rep, d2, p2, name)
         if any(p.get("nested_in") for p in d2["solver"]["placements"]):
+            check_nested_support(rep, d2, p2, ref2, name)
             check_decomposition(rep, d2, p2, its)
-            check_physics_agrees(rep, d2, p2, bag, its)
+            check_physics_agrees(rep, d2, p2, bag, its, support=nested_support(d2, ref2))
 
     print()
     if rep.failures:

@@ -26,6 +26,19 @@ public enum GeometryIssue: Hashable, Sendable {
     /// but a host ID that names nothing is a producer bug worth seeing.
     case unknownNestingHost(itemID: String, hostItemID: String)
 
+    /// The placement declares a cavity whose floor it is not resting on: its base
+    /// is `gap` metres above the declared floor (positive: air beneath it) or
+    /// below it (negative: sunk into it). See `restingContactTolerance` for the
+    /// slack, and the block comment in `geometryIssues()` for what this catches
+    /// and — just as importantly — what it does not.
+    case nestedOffCavityFloor(itemID: String, hostItemID: String, gap: Float)
+
+    /// The placement declares a cavity that is not inside the host it names,
+    /// poking out of the host's box by `overshoot` metres per axis. A cavity is a
+    /// void in the host, so one hanging outside it describes nothing — and it
+    /// would still license the pair's overlap and hold the guest up.
+    case cavityOutsideHost(itemID: String, hostItemID: String, overshoot: Vector3)
+
     // MARK: - Stability (see `stabilityIssues()`)
     //
     // Reported separately from the cases above: those mean the solver emitted
@@ -64,6 +77,16 @@ extension GeometryIssue: CustomStringConvertible {
             return "\(itemID) has a non-positive size \(size)"
         case let .unknownNestingHost(itemID, hostItemID):
             return "\(itemID) claims to nest in '\(hostItemID)', which the plan does not contain"
+        case let .nestedOffCavityFloor(itemID, hostItemID, gap):
+            return String(
+                format: "%@ sits %.3f m %@ the floor of the cavity it declares in '%@'",
+                itemID,
+                abs(gap),
+                gap > 0 ? "above" : "below",
+                hostItemID
+            )
+        case let .cavityOutsideHost(itemID, hostItemID, overshoot):
+            return "\(itemID) declares a cavity outside '\(hostItemID)' by \(overshoot) m"
         case let .floating(itemID, gap):
             return String(format: "%@ floats %.3f m above anything that could hold it up", itemID, gap)
         case let .unsupportedOverhang(itemID, supportedFraction):
@@ -123,6 +146,11 @@ public extension PackingPlan {
         let ordered = orderedPlacements
         let interior = container.interior
         let itemIDs = Set(ordered.map(\.itemID))
+        let nesting = honouredNesting()
+        let boxByID = Dictionary(
+            ordered.map { ($0.itemID, $0.box) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         for placement in ordered {
             let box = placement.box
@@ -156,10 +184,59 @@ public extension PackingPlan {
                     .unknownNestingHost(itemID: placement.itemID, hostItemID: nesting.itemID)
                 )
             }
+
+            // The declaration checked against the plan's own numbers. WHAT THIS CAN
+            // AND CANNOT CATCH, because it is easy to read it as more than it is:
+            //
+            // The plan carries boxes and the declared cavity cell. It does NOT carry
+            // the host's solid decomposition — the max-pooled blocks the solver
+            // actually placed against (`oriented_solid_boxes`). So:
+            //
+            //   CAUGHT: the declaration contradicting the plan itself. A guest whose
+            //   base is not resting on the floor it claims, and a cavity that is not
+            //   inside the host it names. Both are producer bugs, and both would
+            //   otherwise be invisible, because the cavity is exactly what licenses
+            //   the host/guest overlap below and what builds the plinth that
+            //   suppresses `.floating` in `stabilityIssues()`. Before this, the
+            //   cavity only had to exist.
+            //
+            //   NOT CAUGHT, and not catchable from a plan: a declaration that is
+            //   self-consistent and still wrong — guest and declared floor both
+            //   lifted 8 mm, so the guest rests exactly on the floor it claims and
+            //   there is real air between it and the host's material. Only the host's
+            //   solids can tell, so that case belongs to `check_nested_support` in
+            //   tools/pipeline_check/check_seams.py, which asks the solver's own
+            //   decomposition. Do not "strengthen" the two checks here into claiming
+            //   it; they cannot see the host's insides.
+            if let nesting = nesting[placement.itemID] {
+                let cavity = nesting.cavity.box
+                let gap = box.minCorner.y - cavity.minCorner.y
+                if abs(gap) > restingContactTolerance {
+                    issues.append(
+                        .nestedOffCavityFloor(
+                            itemID: placement.itemID,
+                            hostItemID: nesting.itemID,
+                            gap: gap
+                        )
+                    )
+                }
+                // Honoured nesting names a host the plan contains, so the lookup holds.
+                if let host = boxByID[nesting.itemID] {
+                    let outside = cavity.overshoot(outOf: host, tolerance: tolerance)
+                    if outside != .zero {
+                        issues.append(
+                            .cavityOutsideHost(
+                                itemID: placement.itemID,
+                                hostItemID: nesting.itemID,
+                                overshoot: outside
+                            )
+                        )
+                    }
+                }
+            }
         }
 
         // Pairwise: n is the number of items a person packs, so O(n²) is fine.
-        let nesting = honouredNesting()
         for i in ordered.indices {
             for j in ordered.index(after: i)..<ordered.endIndex {
                 let a = ordered[i]
@@ -248,6 +325,14 @@ public extension PackingPlan {
             // A nested item is held up by the floor of its host's cavity, which is
             // a void inside the host's own box — the host box is therefore *not*
             // below it, and without this the socks in a shoe read as floating.
+            //
+            // The plinth comes from the declaration, so it is only as good as the
+            // declaration: `geometryIssues()` now reports the guest whose base is
+            // not on the floor it claims (`.nestedOffCavityFloor`) and the cavity
+            // that is not inside its host (`.cavityOutsideHost`), which is what
+            // keeps this from being a blank exemption. What neither can check is
+            // whether the declared floor is where the host's material actually is —
+            // the plan does not carry the host's solids. See that block comment.
             var supporters = others.map(\.box)
             if let cavity = nesting[placement.itemID]?.cavity.box {
                 supporters.append(plinth(under: cavity))
@@ -312,6 +397,18 @@ public extension PackingPlan {
         return issues
     }
 }
+
+/// Resting-contact slack for a nested guest's base against its declared cavity
+/// floor: 1 mm, deliberately NOT the 1e-6 float slack the rest of the geometry
+/// checks use, because it answers a different question. 1e-6 asks "are these two
+/// floats the same number"; this asks "is this thing resting on that thing",
+/// across two independently authored faces that survived a frame swap and a
+/// Float32 round-trip. It is the physics layer's own `RESTING_CONTACT_EPS_M`
+/// (`physics/constraints.py`), which `tools/pipeline_check/check_seams.py` asks
+/// the same question with, so the Python and Swift halves of the seam agree on
+/// what resting means. A scan's cell size is 1 cm, so nothing finer than a
+/// millimetre is a discrepancy a producer could act on anyway.
+private let restingContactTolerance: Float = 1e-3
 
 /// The box two boxes share. Only meaningful when they do intersect; a separated
 /// pair gives a box with a negative extent.

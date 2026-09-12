@@ -1301,7 +1301,20 @@ def main() -> int:
             items_by_id[doc["id"]] = Item.from_scanned_heightmap(doc)
             fp_note = f"footprint {len(fit['footprint'])}v" if fit.get("footprint") is not None else "footprint none"
             print(f"      + {it['name']:<12} {doc['dimensions'][0]:.3f}x{doc['dimensions'][1]:.3f}x"
-                  f"{doc['dimensions'][2]:.3f} m  label={resp['label']}  {fp_note}")
+                  f"{doc['dimensions'][2]:.3f} m  label={resp['label']} "
+                  f"[{resp.get('labelStatus')}]  {fp_note}")
+            # This run strips XAI_API_KEY/ANTHROPIC_API_KEY, so no model is configured and the
+            # server must report the terminal "unidentified" state with a hint saying so -- not
+            # "done" with a bogus "unknown" guess. Spike/ScanValidation.swift's
+            # labelStatusMessage shows identifyHint verbatim, so a wrong hint here is what the
+            # user reads at the booth. Nothing else asserts this wire contract.
+            if resp.get("labelStatus") != "unidentified":
+                fail(f"{it['name']}: labelStatus is {resp.get('labelStatus')!r} with no model "
+                     f"configured; expected 'unidentified' (server/main.py's status_for)")
+            hint = resp.get("identifyHint")
+            if not hint or "labelling is off" not in hint:
+                fail(f"{it['name']}: identifyHint is {hint!r}; with no model configured the "
+                     f"server should say labelling is off, not advise rotating or rescanning")
 
         # 4) POST /plan
         status, plan_doc = post_json(f"{base}/suitcases/{suitcase_doc['id']}/plan", {})

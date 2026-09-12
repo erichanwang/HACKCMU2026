@@ -112,22 +112,24 @@ This is the one real, working credential in the repo, and it authenticates a tex
 
 ## (e) Next steps for whoever obtains real access
 
-1. Fill in the real request schema in **`_build_payload`** in `pan/world_model.py` — map our
-   `SimulationRequest` (see `pan/types.py`: `Observation`, `PackingAction`, `Viewpoint`) onto
-   the real wire format. The observation is an image plus a natural-language action string,
-   which matches the paper's per-step contract in (c).
-2. Fill in the real response parsing in **`_parse_response`** in `pan/world_model.py` — map
-   the returned frames/video onto `SimulationResult` (`video_path`, `final_frame_path`,
-   `metadata`, `latency_ms`, `backend`).
-3. Set `PAN_BASE_URL` / `PAN_MODEL` and put `PAN_API_KEY` in a local `.env` (git-ignored).
-   Nothing else in the codebase should need to change — the rest of the app depends only on
-   the `WorldModel` protocol in `pan/types.py`.
-4. If the real interface accepts the previous prediction as the next input, enable multi-step
-   chaining; the paper says PAN supports it, but our client must not assume it until tested.
-5. `pan/world_model.py` now exists with both function names in place, but still unwired
-   (`PAN_ENDPOINT_PATH` unset, see (d)) — it is the dead seam this whole section describes.
-   Another agent may delete it entirely; if it's gone, these steps are moot and the real
-   integration lives in `physics/pan.py` instead (text-only, per the investigation below).
+1. Add a visual backend class beside `RealPanBackend` in `pan/world_model.py` that satisfies
+   the `WorldModel` protocol in `pan/types.py` (`name`, `supports_continuation`, `available()`,
+   `simulate(request: SimulationRequest) -> SimulationResult`). Its request mapping takes our
+   `Observation` (an image) plus `PackingAction.text` onto the real wire format, which matches
+   the paper's per-step contract in (c).
+2. Its response mapping fills `SimulationResult` (`video_path`, `final_frame_path`,
+   `metadata`, `latency_ms`, `backend`) from the returned frames or video.
+3. Put the key in a local `.env` (git-ignored); the client reads `IFM_API_KEY` or `PAN_API_KEY`
+   (`pan/__main__.py` lists the names). Nothing else in the codebase should need to change:
+   the rest of the app depends only on the `WorldModel` protocol, and `get_world_model` in
+   `pan/world_model.py` picks the first available backend, falling back to the mock.
+4. If the real interface accepts the previous prediction as the next input, set
+   `supports_continuation` and enable multi-step chaining; the paper says PAN supports it, but
+   our client must not assume it until tested.
+5. The HTTP seam this section used to describe (`_build_payload`, `_parse_response`, an
+   endpoint path) was deleted in 53a6b97 as dead code. Today's only real backend is
+   `RealPanBackend`, the text-only K2-Horizon client (investigation below); there is no
+   half-wired visual client left to fill in.
 
 ## (f) Rate limits and latency expectations
 

@@ -158,6 +158,26 @@ enum API {
         try JSONDecoder().decode([ScannedItem].self, from: try await body(of: request("inventory", "GET")))
     }
 
+    /// One of the caller's suitcases, as `GET /suitcases` lists them (newest first).
+    struct Suitcase: Decodable, Identifiable, Equatable {
+        let id: String
+        let name: String
+        let dimensions: [Float]  // [width, height, depth] in metres
+    }
+
+    static func suitcases() async throws -> [Suitcase] {
+        try JSONDecoder().decode([Suitcase].self, from: try await body(of: request("suitcases", "GET")))
+    }
+
+    /// Puts an item into another of the caller's suitcases, or takes it out of any (`nil`). The
+    /// server drops the stored plan of both bags, since neither matches its items any more.
+    static func move(id: String, toSuitcase suitcaseId: String?) async throws -> ScannedItem {
+        var req = request("items/\(id)", "PATCH")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(["suitcaseId": suitcaseId])  // nil encodes as JSON null
+        return try await send(req)
+    }
+
     /// Removes one item (and the suitcase's stored plan, which no longer matches).
     static func delete(itemId: String) async throws {
         _ = try await body(of: request("items/\(itemId)", "DELETE"))

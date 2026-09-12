@@ -51,7 +51,7 @@ verification artefact, not a build product.
 Each file prints one line:
 
 ```
-three-quarter.svg  boxes=6 container-first=yes bbox=(60.5,28.0)-(839.5,672.0)
+three-quarter.svg  boxes=7 container-first=yes bbox=(36.0,54.6)-(864.0,645.4)
 ```
 
 That is enough to catch a regression without opening anything: a box count that does not

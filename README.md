@@ -50,7 +50,7 @@ Endpoints (port 8000):
 | `GET /items` | All items, or one suitcase's with `?suitcaseId=…`. |
 | `GET /items/{id}` | One item; the app polls this while `labelStatus` is `"pending"`. |
 | `GET /inventory` | Everything the signed-in user has scanned, across suitcases, newest first. Survives a suitcase delete. |
-| `PATCH /items/{id}` | JSON with any of `label`, `rigidity` (`rigid`/`soft`/`fragile`), `compressibility`, `mass`, `keepUpright` — user override. |
+| `PATCH /items/{id}` | JSON with any of `label`, `rigidity` (`rigid`/`soft`/`fragile`), `compressibility`, `mass`, `keepUpright` — user override — or `suitcaseId` (one of your suitcases, or `null` to take the item out of any); a move drops both bags' stored plans. |
 | `DELETE /items/{id}` | Drops the item and invalidates the suitcase's stored plan. |
 
 Mutating routes take an Auth0 bearer token; with `AUTH0_DOMAIN`/`AUTH0_AUDIENCE` unset (the

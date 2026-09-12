@@ -218,8 +218,16 @@ struct ScanView: UIViewRepresentable {
                         do {
                             let uploaded = try await API.upload(scanned, image: UIImage(cgImage: cg))
                             self.item = uploaded
-                            self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
-                            if uploaded.labelStatus == "pending" { await self.pollLabel(id: uploaded.id) }
+                            if uploaded.labelStatus == "pending" {
+                                self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
+                                await self.pollLabel(id: uploaded.id)
+                            } else {
+                                // Terminal already: "unidentified" and "failed" never poll, and
+                                // before this they fell through showing "labelled unknown".
+                                self.status = labelStatusMessage(labelStatus: uploaded.labelStatus,
+                                                                 label: uploaded.label,
+                                                                 identifyHint: uploaded.identifyHint)
+                            }
                         } catch {
                             self.status = "server: \(error.localizedDescription)"
                         }
@@ -238,7 +246,8 @@ struct ScanView: UIViewRepresentable {
                 try? await Task.sleep(for: .seconds(3))
                 guard let fresh = try? await API.get(id: id), fresh.labelStatus != "pending" else { continue }
                 item = fresh
-                status = "labelled \(fresh.label ?? "?")"
+                status = labelStatusMessage(labelStatus: fresh.labelStatus, label: fresh.label,
+                                            identifyHint: fresh.identifyHint)
                 return
             }
             status = "still unlabelled — type it in"

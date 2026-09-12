@@ -62,6 +62,8 @@ open class Entity {
 @MainActor
 public final class AnchorEntity: Entity, HasAnchoring {
     public init(world position: SIMD3<Float>) { super.init() }
+    /// developer.apple.com/documentation/realitykit/anchorentity/init(anchor:) -- mirrors the
+    /// given ARAnchor's transform, so ARKit's corrections reach the content for free.
     public init(anchor: ARAnchor) { super.init() }
 }
 

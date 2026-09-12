@@ -18,8 +18,13 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
   ],
   "label": "running shoe",
   "labelSource": "auto",
+  "description": "Mesh running shoe with a rubber sole; the opening can hold socks.",
+  "mass": 0.3,
+  "keepUpright": false,
   "rigidity": "soft",
   "rigiditySource": "user",
+  "compressibility": 2.0,
+  "compressibilitySource": "auto",
   "createdAt": "2026-09-12T03:14:15+00:00"
 }
 ```
@@ -31,7 +36,11 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 | `cellSize` | Side length of one heightmap cell (default 0.01 m). |
 | `heights` | 2D grid, `ceil(width / cellSize)` rows × `ceil(depth / cellSize)` columns. `heights[i][j]` is the height of the object's surface above the table at that cell. `0` means nothing is there. |
 | `label` | Short name of the object. Guessed from the photo by Grok (`labelSource: "auto"`) or typed by the user (`"user"`). |
-| `rigidity` | `rigid`, `soft` (compressible — clothes, bags) or `fragile` (breaks if crushed/dropped). Guessed by Grok or chosen by the user; `rigiditySource` says which. A user choice is never overwritten by detection. |
+| `description` | One sentence from Grok: what the object is, its material, anything that matters for packing. Display only. |
+| `mass` | Grok's estimated mass in kg, clamped to `[0, 50]`; `0` = unknown. The solver uses it for centre-of-mass balancing. |
+| `keepUpright` | `true` if the object must stay this side up (liquids, open containers). The solver then never lays it on its side. |
+| `rigidity` | `rigid`, `soft` (compressible — clothes, bags) or `fragile` (breaks if crushed/dropped; the solver stacks nothing on it). Guessed by Grok or chosen by the user; `rigiditySource` says which. A user choice is never overwritten by detection. |
+| `compressibility` | `k` ≥ 1: the item's loose volume divided by its volume when squeezed hard (1 = doesn't compress; a t-shirt ≈ 2, a down jacket ≈ 3). Guessed per item by Grok, clamped to `[1, 10]`, always `1` unless `rigidity` is `soft`; `compressibilitySource` says whether it was `auto` or `user`. The solver packs a soft item at `height / k` (`packer3d.Item.compressed`). |
 | `createdAt` | ISO-8601 UTC timestamp, set by the server. |
 
 ### Coordinate convention
@@ -79,8 +88,8 @@ Tuning constants live at the top of `Spike/ScanView.swift`: `paddingMeters`, `mi
 4. Points are flood-filled from the seed through a 2 cm grid so neighbouring objects are excluded.
 5. A minimum-area rectangle is fitted to the footprint → `width`, `depth`; the tallest point → `height`.
 6. Each point is dropped into its cell and the maximum height per cell is kept → `heights`.
-7. The camera view is cropped to the object and sent with the JSON to `POST /items`; the server asks Grok for `label` and `rigidity`, stores the document, and returns it. Edits in the app go to `PATCH /items/{id}`.
+7. The camera view is cropped to the object and sent with the JSON to `POST /items`; the server asks Grok for `label`, `description`, `rigidity`, `compressibility`, `mass` and `keepUpright`, stores the document, and returns it. Edits in the app go to `PATCH /items/{id}`.
 
 ## Server
 
-`server/main.py` — FastAPI + pymongo. Run with `cd server && uv run uvicorn main:app --host 0.0.0.0`. Environment: `SUITCASE_MONGODB_URI` (default `mongodb://localhost:27017`), `MONGO_DB` (default `suitcase`), `XAI_API_KEY` (no key → label `unknown`, rigidity `rigid`), `GROK_MODEL` (default `grok-4`). The phone's server address is `API.base` in `Spike/API.swift`.
+`server/main.py` — FastAPI + pymongo. Run with `cd server && uv run uvicorn main:app --host 0.0.0.0`. Environment: `SUITCASE_MONGODB_URI` (default `mongodb://localhost:27017`), `MONGO_DB` (default `suitcase`), `XAI_API_KEY` (no key → label `unknown`, rigidity `rigid`, compressibility `1`, mass `0`), `GROK_MODEL` (default `grok-4`). The phone's server address is `API.base` in `Spike/API.swift`.

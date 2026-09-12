@@ -1,12 +1,14 @@
 import base64
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
+from typing import Annotated
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from pymongo import MongoClient
 
 from planner import plan as solve
@@ -105,6 +107,16 @@ def get_suitcase(suitcase_id: str):
     return public(doc) | {"items": [public(d) for d in db.items.find({"suitcaseId": suitcase_id})]}
 
 
+@app.delete("/suitcases/{suitcase_id}")
+def delete_suitcase(suitcase_id: str):
+    """Remove a suitcase with its items and plan, so demo runs do not pile up."""
+    if db.suitcases.delete_one({"_id": suitcase_id}).deleted_count == 0:
+        raise HTTPException(404, "no such suitcase")
+    db.items.delete_many({"suitcaseId": suitcase_id})
+    db.plans.delete_one({"_id": suitcase_id})
+    return {"deleted": suitcase_id}
+
+
 @app.post("/suitcases/{suitcase_id}/plan")
 def create_plan(suitcase_id: str):
     suitcase = db.suitcases.find_one({"_id": suitcase_id})
@@ -126,16 +138,40 @@ def get_plan(suitcase_id: str):
     return public(doc)
 
 
+Positive = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+
+
+class Scan(BaseModel, extra="allow"):
+    """The phone's ScannedItem (SCAN_OUTPUT.md); anything malformed is refused at upload, not inside the solver."""
+    id: str = Field(min_length=1, max_length=100)
+    suitcaseId: str = Field(min_length=1, max_length=100)
+    dimensions: tuple[Positive, Positive, Positive]
+    cellSize: Positive
+    heights: list[list[Annotated[float, Field(ge=0, allow_inf_nan=False)]]]
+
+    @model_validator(mode="after")
+    def rectangular(self):
+        widths = {len(row) for row in self.heights}
+        if len(widths) != 1 or 0 in widths or len(self.heights) * widths.pop() > 100_000:
+            raise ValueError("heights must be a nonempty rectangular grid of at most 100000 cells")
+        return self
+
+
 @app.post("/items")
 def create_item(item: str = Form(...), image: UploadFile = File(...)):
     try:
-        doc = json.loads(item)
-        item_id, suitcase_id = str(doc["id"]), str(doc["suitcaseId"])
-    except (ValueError, KeyError, TypeError):
-        raise HTTPException(400, "item must be JSON with id and suitcaseId")
+        doc = Scan.model_validate_json(item).model_dump(mode="json")
+    except ValidationError as exc:
+        raise HTTPException(422, str(exc))
+    item_id, suitcase_id = doc["id"], doc["suitcaseId"]
     if db.suitcases.find_one({"_id": suitcase_id}) is None:
         raise HTTPException(404, "no such suitcase")
-    guess = detect(image.file.read())
+    try:
+        guess = detect(image.file.read())
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+        # x.ai down, rate-limited or returning garbage must not lose the scan; the app's editor fixes the label.
+        logging.warning("grok labelling failed, item %s saved as unknown: %s", item_id, exc)
+        guess = dict(UNKNOWN)
     doc |= guess | {
         "_id": item_id,
         "labelSource": "auto", "rigiditySource": "auto", "compressibilitySource": "auto",
@@ -181,3 +217,12 @@ def update_item(item_id: str, patch: Patch):
 @app.get("/items")
 def list_items(suitcaseId: str | None = None):
     return [public(d) for d in db.items.find({"suitcaseId": suitcaseId} if suitcaseId else {})]
+
+
+@app.delete("/items/{item_id}")
+def delete_item(item_id: str):
+    doc = db.items.find_one_and_delete({"_id": item_id})
+    if doc is None:
+        raise HTTPException(404, "no such item")
+    db.plans.delete_one({"_id": doc["suitcaseId"]})  # the stored plan no longer matches the items
+    return {"deleted": item_id}

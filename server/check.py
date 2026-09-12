@@ -1,10 +1,17 @@
-"""Smoke test against a local Mongo. Run: MONGO_DB=suitcase_test uv run python check.py"""
+"""End-to-end check against an in-memory Mongo (mongomock). Run: cd server && uv run python check.py"""
 import json
 import math
 import os
+from unittest.mock import patch
+
+import httpx
+import mongomock
+import pymongo
+
 os.environ.setdefault("MONGO_DB", "suitcase_test")
 from fastapi.testclient import TestClient
-import main
+with patch.object(pymongo, "MongoClient", mongomock.MongoClient):
+    import main
 
 ROTATIONS = {"XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"}  # AxisRotation.swift
 
@@ -41,7 +48,20 @@ assert c.patch("/items/t1", json={"compressibility": 0.5}).status_code == 422
 assert main.compressibility("3", "soft") == 3.0 and main.compressibility(3, "rigid") == 1.0
 assert main.compressibility("lots", "soft") == 1.0 and main.compressibility(99, "soft") == 10.0
 assert c.patch("/items/nope", json={"label": "x"}).status_code == 404
-assert c.post("/items", data={"item": "not json"}, files={"image": ("o.jpg", b"", "image/jpeg")}).status_code == 400
+assert c.post("/items", data={"item": "not json"}, files={"image": ("o.jpg", b"", "image/jpeg")}).status_code == 422
+bad = {"id": "bad", "suitcaseId": sc["id"], "dimensions": [0.2, 0.1, 0.1], "cellSize": 0.01, "heights": [[0.1]]}
+for broken in ({"dimensions": [0.2, 0.1]}, {"dimensions": [0.2, 0.1, -0.1]}, {"cellSize": 0},
+               {"heights": []}, {"heights": [[]]}, {"heights": [[0.1], [0.1, 0.1]]}, {"heights": [[-1]]}, {"id": ""}):
+    r = c.post("/items", data={"item": json.dumps(bad | broken)}, files=img)
+    assert r.status_code == 422, (broken, r.status_code, r.text)
+assert c.get("/items", params={"suitcaseId": sc["id"]}).json()[0]["id"] == "t1", "a refused scan must not be stored"
+
+# Grok down must not lose the scan: the item is saved as "unknown" for the app's editor to fix.
+with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "post", side_effect=httpx.ConnectError("down")):
+    r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1b"})}, files=img)
+assert r.status_code == 200 and r.json()["label"] == "unknown" and r.json()["rigidity"] == "rigid", r.text
+assert c.delete("/items/t1b").json() == {"deleted": "t1b"}
+assert c.delete("/items/t1b").status_code == 404
 
 items = c.get("/items").json()
 assert len(items) == 1 and items[0]["heights"] == [[0.1]] and "_id" not in items[0], items
@@ -93,6 +113,14 @@ for q in p["placements"]:
     if it["keepUpright"]:
         assert q["rotation"][1] == "Y", ("keepUpright item was tipped over", q)
 assert c.get(f"/suitcases/{sc['id']}/plan").json() == plan, "GET must return the stored plan"
+
+# --- delete ----------------------------------------------------------------------
+assert c.delete("/items/t4").json() == {"deleted": "t4"}
+assert c.get(f"/suitcases/{sc['id']}/plan").status_code == 404, "deleting an item drops the now-stale plan"
+assert c.delete(f"/suitcases/{sc['id']}").json() == {"deleted": sc["id"]}
+assert c.get(f"/suitcases/{sc['id']}").status_code == 404 and c.get("/items", params={"suitcaseId": sc["id"]}).json() == []
+assert c.delete(f"/suitcases/{sc['id']}").status_code == 404
+assert c.get("/suitcases").json() == [{k: v for k, v in empty.items()}], "only the untouched suitcase remains"
 
 main.db.items.drop(); main.db.suitcases.drop(); main.db.plans.drop()
 print("server ok")

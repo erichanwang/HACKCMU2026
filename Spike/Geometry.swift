@@ -82,11 +82,42 @@ func trimmedRange(_ xs: [Float]) -> (lo: Float, hi: Float) {
     return (s[k], s[s.count - 1 - k])
 }
 
+/// Window width for `rimHeight`'s search: a fixed physical size, not a share of the object's
+/// own height, so a short item's top-face noise band (a few mm) isn't squeezed by a tiny window,
+/// and a single far-off outlier (a stray mesh spike) can't widen it either -- both broke a
+/// percentage-of-range window in practice. Wide enough to swallow real LiDAR jitter at any
+/// object height; narrow enough to still separate an open lid's climb from the rim it hinges
+/// off (Spike/ScanView.swift's own scans put a rim comfortably below this per side).
+let rimBandMeters: Float = 0.015
+
+/// Top of the height band holding the most points: the rim of a cavity (open suitcase) or the
+/// top face (a closed item) -- whichever, that's where the bulk of the scan sits, in a tight
+/// plateau. An open lid hinged off the back rim rises past it, but never joins its density,
+/// so it never controls this band. A closed scan has nothing above its own rim, so nothing
+/// above the returned height exists to drop -- there is no way for this to touch a closed scan.
+/// ponytail: pure height signature, one fixed-width sliding window. A lid flopped nearly flat
+/// against the rim (rising less than `rimBandMeters`) would sit inside the rim's own band and
+/// survive; footprint-vs-rim segmentation would be needed to catch that if a real bag ever does it.
+func rimHeight(_ heights: [Float]) -> Float {
+    let s = heights.sorted()
+    guard let hi = s.last else { return 0 }
+    var loI = 0, bestCount = 0, bestHi = hi
+    for hiI in 0..<s.count {
+        while s[hiI] - s[loI] > rimBandMeters { loI += 1 }
+        let count = hiI - loI + 1
+        if count > bestCount { bestCount = count; bestHi = s[hiI] }
+    }
+    return bestHi
+}
+
 /// Fit a box to world-space points sitting on a horizontal plane at `planeY`.
 /// nil when there is no 2D footprint to fit (see `minAreaRect`), so the tap reports
 /// "nothing above the table here" rather than shipping a degenerate item.
 func fitBox(points: [SIMD3<Float>], planeY: Float, padding: Float) -> BoxFit? {
     guard !points.isEmpty else { return nil }
+    // Drop anything above the rim -- an open suitcase lid hinged in frame, not the cavity itself.
+    let rim = rimHeight(points.map { $0.y - planeY })
+    let points = points.filter { $0.y - planeY <= rim }
     let flat = points.map { SIMD2<Float>($0.x, $0.z) }
     guard let r = minAreaRect(flat) else { return nil }
     // The hull only picks the rectangle's axis — jitter barely turns it. The extents come from

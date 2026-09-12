@@ -2,6 +2,13 @@
 # PlanOverlayState's pure step/colour/unpacked model, checked on Linux. The RealityKit builder in
 # Spike/PlanOverlay.swift only gets a parse check — ARKit/RealityKit don't exist here.
 set -euo pipefail
+
+# overlay: Linux-only. Spike/PlanOverlay.swift imports UIKit inside #if canImport(RealityKit);
+#   on Linux that block is skipped, on macOS RealityKit exists but UIKit does not. CI runs it on ubuntu.
+if [ "$(uname -s)" != "Linux" ]; then
+    echo "skip: overlay only runs on Linux (see the note above); CI runs it on ubuntu-24.04"
+    exit 0
+fi
 cd "$(dirname "$0")/../../.."
 if ! command -v swift >/dev/null 2>&1; then . swift/PackPhysics/swiftenv.sh; fi
 

@@ -223,7 +223,7 @@ struct LayeredPlanSceneView: View {
         VStack(spacing: 6) {
             Text(containerCaption)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Sheet.ink.opacity(0.55))
             Text(layerCaption)
                 .font(.system(.footnote, design: .monospaced))
             if controller.layerCount > 1 {
@@ -235,10 +235,10 @@ struct LayeredPlanSceneView: View {
             }
             Text("Drag to orbit · pinch to zoom")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Sheet.ink.opacity(0.55))
         }
         .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .background(Sheet.card, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
         .padding()
     }
 
@@ -334,7 +334,7 @@ struct PlanSheet: View {
                 diagram = diagram.other
             } label: {
                 Label(diagram.title, systemImage: "arrow.triangle.2.circlepath")
-                    .font(.body.monospacedDigit())
+                    .font(.body)
             }
             .buttonStyle(.bordered)
             .accessibilityHint("Switches to \(diagram.other.title)")
@@ -356,23 +356,23 @@ struct PlanSheet: View {
     private func noticeBanner(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(Sheet.warn)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Showing the bundled mock plan")
                     .font(.caption.weight(.semibold))
                 Text(text)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Sheet.ink.opacity(0.55))
                     .textSelection(.enabled)
                 Text(API.base.absoluteString)
                     .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Sheet.ink.opacity(0.4))
                     .textSelection(.enabled)
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .background(Sheet.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
         .padding([.horizontal, .top])
     }
 }

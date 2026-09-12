@@ -203,14 +203,14 @@ struct ScanScreen: View {
             Image(systemName: showingInventory ? "xmark" : "backpack.fill")
                 .font(.body.weight(.semibold))
                 .frame(width: 48, height: 48)
-                .background(.regularMaterial, in: Circle())
+                .background(Sheet.paper.opacity(0.94), in: Circle())
                 .overlay(alignment: .topTrailing) {
                     if !inventory.isEmpty {
                         Text("\(inventory.count)")
                             .font(.caption2.bold().monospacedDigit())
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Sheet.accent, in: Capsule())
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Sheet.onAccent)
                     }
                 }
         }
@@ -241,7 +241,7 @@ struct ScanScreen: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text("New item").font(.headline)
                         Spacer()
-                        Text(item.sizeText).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                        Text(item.sizeText).font(.subheadline.monospacedDigit()).foregroundStyle(Sheet.ink.opacity(0.55))
                     }
                 }
             }
@@ -281,13 +281,13 @@ struct ScanScreen: View {
             Button { pack() } label: {
                 Group {
                     if packing {
-                        ProgressView().tint(.white)
+                        ProgressView().tint(Sheet.onAccent)
                     } else {
                         Label("Pack", systemImage: "shippingbox.fill")
                             .font(.subheadline.weight(.semibold))
                     }
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(Sheet.onAccent)
                 .frame(maxWidth: .infinity, minHeight: 46)
                 .background(canPack ? Sheet.accent : Sheet.ink.opacity(0.15), in: Capsule())
             }
@@ -333,7 +333,7 @@ struct ScanScreen: View {
                             .font(.body.weight(.medium))
                         Text("\(scanned.sizeText) · \(scanned.rigidity ?? "rigidity unknown")")
                             .font(.subheadline.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Sheet.ink.opacity(0.55))
                     }
                     // Move only: swipe already deletes here, and the Delete dialog lives under this sheet.
                     .contextMenu { moveMenu(scanned) }
@@ -508,7 +508,7 @@ struct ItemEditor: View {
                 .onAppear { label = item.label ?? "" }
                 .onChange(of: item.id) { _, _ in label = item.label ?? "" }
                 .onSubmit { Task { item = try await API.update(id: item.id, label: label, rigidity: nil) } }
-            Text(item.sizeText).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+            Text(item.sizeText).font(.subheadline.monospacedDigit()).foregroundStyle(Sheet.ink.opacity(0.55))
         }
         Picker("Rigidity", selection: Binding(get: { item.rigidity ?? "rigid" }, set: { r in
             Task { item = try await API.update(id: item.id, label: nil, rigidity: r) }
@@ -517,14 +517,14 @@ struct ItemEditor: View {
         }
         .pickerStyle(.segmented)
         if let d = item.description, !d.isEmpty {
-            Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            Text(d).font(.caption).foregroundStyle(Sheet.ink.opacity(0.55)).lineLimit(2)
         }
         Text("~\(String(format: "%.1f", item.mass ?? 0)) kg · squeezes \(String(format: "%.1f", item.compressibility ?? 1))×\(item.keepUpright == true ? " · keep upright" : "")")
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Sheet.ink.opacity(0.55))
         Text("\(item.labelSource ?? "") label · \(item.rigiditySource ?? "") rigidity")
             .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(Sheet.ink.opacity(0.4))
     }
 }
 

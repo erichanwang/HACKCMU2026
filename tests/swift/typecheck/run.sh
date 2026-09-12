@@ -31,6 +31,13 @@
 #    against these shims. If Xcode actually builds this target in Swift 5 mode, one of the
 #    findings below (the `UIColor`-array Sendable one) will not reproduce there.
 set -uo pipefail
+
+# typecheck: Linux-only. It builds hand-written ARKit/RealityKit/UIKit/SwiftUI shim modules
+#   against a swiftly toolchain, neither of which applies on macOS. CI runs it on ubuntu.
+if [ "$(uname -s)" != "Linux" ]; then
+    echo "skip: typecheck only runs on Linux (see the note above); CI runs it on ubuntu-24.04"
+    exit 0
+fi
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$root"
 if ! command -v swiftc >/dev/null 2>&1; then

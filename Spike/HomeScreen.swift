@@ -66,7 +66,7 @@ struct HomeScreen: View {
                 // so what you followed on the way in is still the thing you arrive at.
                 Image(systemName: "viewfinder")
                     .font(.system(size: 46, weight: .light))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Sheet.onAccent)
                     .scaleEffect(1 + entry * 5.5)
                     .opacity(entry > 0 ? (1 - entry * entry) : 0)
             }
@@ -141,7 +141,7 @@ struct HomeScreen: View {
     private var statusRow: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(reachable == nil ? Sheet.ink.opacity(0.25) : (reachable! ? .green : Sheet.warn))
+                .fill(reachable == nil ? Sheet.ink.opacity(0.25) : (reachable! ? Sheet.ok : Sheet.warn))
                 .frame(width: 7, height: 7)
             Text(linkState)
                 .font(.footnote)
@@ -262,6 +262,11 @@ enum Sheet {
     static var ink: Color { adaptive(light: 0.102, 0.122, 0.169, dark: 0.949, 0.957, 0.969) }
     static var hairline: Color { ink.opacity(0.12) }
     static var warn: Color { adaptive(light: 0.702, 0.443, 0.031, dark: 0.886, 0.647, 0.235) }
+    /// The one positive signal: a reachable server. Named rather than reached for, so it
+    /// belongs to the system instead of being the only stray hue in it.
+    static var ok: Color { adaptive(light: 0.098, 0.545, 0.298, dark: 0.298, 0.776, 0.475) }
+    /// What sits on top of the accent. White carries every undertone in `accents`.
+    static let onAccent = Color.white
 
     /// The undertone. One saturated colour carries the whole app, so it is the only
     /// thing worth letting someone change.

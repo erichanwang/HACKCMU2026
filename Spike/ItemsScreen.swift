@@ -25,7 +25,7 @@ struct ItemsScreen: View {
                 if !status.isEmpty {
                     Label(status, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Sheet.warn)
                 }
                 ForEach($items) { $scanned in
                     NavigationLink { detail($scanned) } label: { row(scanned) }
@@ -66,7 +66,7 @@ struct ItemsScreen: View {
                     .font(.body.weight(.medium))
                 Text("\(scanned.manifestSize) cm · \(shortBagName(for: scanned.suitcaseId))")
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Sheet.ink.opacity(0.55))
             }
         }
         .padding(.vertical, 3)
@@ -86,7 +86,7 @@ struct ItemsScreen: View {
                 } else {
                     Text("No scan geometry stored for this item.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Sheet.ink.opacity(0.55))
                 }
             }
             Section { ItemEditor(item: scanned) }

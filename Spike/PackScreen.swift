@@ -91,7 +91,7 @@ struct PackScreen: View {
                 Button { pack(bag) } label: {
                     Image(systemName: "play.fill")
                         .font(.subheadline)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Sheet.onAccent)
                         .frame(width: 44, height: 44)
                         .background(aboard.isEmpty ? Sheet.ink.opacity(0.18) : Sheet.accent, in: Circle())
                 }
@@ -268,7 +268,7 @@ struct BagContentsSheet: View {
         NavigationStack {
             List {
                 if items.isEmpty {
-                    Text("Nothing scanned yet.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Nothing scanned yet.").font(.footnote).foregroundStyle(Sheet.ink.opacity(0.55))
                 }
                 ForEach(items) { item in
                     let inBag = item.suitcaseId == bag.id

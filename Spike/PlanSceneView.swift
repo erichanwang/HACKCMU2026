@@ -292,25 +292,113 @@ struct PlanSceneView: View {
     }
 }
 
-/// Entry point from the app's root: the bundled mock plan.
+/// Entry point from the app's root: the live plan for one suitcase.
+///
+/// The server runs the solver and returns the real plan. The bundled mock is a
+/// fallback for when that fetch fails — and when it does, the failure is shown
+/// rather than swallowed, because a mock that silently stands in for a live plan
+/// is indistinguishable from a working one.
 struct PlanSceneScreen: View {
-    var body: some View {
-        if let plan = Self.plan() {
-            PlanSceneView(plan: plan)
-        } else {
-            ContentUnavailableView("No plan", systemImage: "shippingbox", description: Text("The bundled mock plan could not be loaded."))
-        }
+    let suitcaseID: String?
+
+    @State private var state: LoadState = .loading
+
+    enum LoadState {
+        case loading
+        /// The real plan, straight from the server.
+        case live(PackingPlan)
+        /// The server failed; this is the mock, and why.
+        case fallback(PackingPlan, reason: String)
+        /// Neither the server nor the mock produced anything.
+        case unavailable(String)
     }
 
-    /// The mock plan in the scanned bag when one is available, otherwise in its
-    /// own mock container. The placements are the mock's either way — only the
-    /// shell around them changes.
-    private static func plan() -> PackingPlan? {
+    var body: some View {
+        Group {
+            switch state {
+            case .loading:
+                ProgressView("Planning…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            case let .live(plan):
+                PlanSceneView(plan: plan)
+                    .id(identity(of: plan))
+
+            case let .fallback(plan, reason):
+                PlanSceneView(plan: plan)
+                    .id(identity(of: plan))
+                    .overlay(alignment: .top) { banner(reason) }
+
+            case let .unavailable(reason):
+                ContentUnavailableView(
+                    "No plan",
+                    systemImage: "shippingbox",
+                    description: Text(reason)
+                )
+            }
+        }
+        .task { await load() }
+    }
+
+    /// The scene is built once per plan, so a plan arriving after the view is on
+    /// screen rebuilds it instead of leaving the first one rendered.
+    private func identity(of plan: PackingPlan) -> String {
+        "\(plan.container.id)-\(plan.placements.count)"
+    }
+
+    private func banner(_ reason: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Showing the bundled mock plan")
+                    .font(.caption.weight(.semibold))
+                Text(reason)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding()
+    }
+
+    private func load() async {
+        if let suitcaseID {
+            do {
+                state = .live(try await API.plan(suitcaseId: suitcaseID))
+                return
+            } catch {
+                state = fallbackState(reason: Self.message(for: error))
+                return
+            }
+        }
+        state = fallbackState(reason: "No suitcase selected.")
+    }
+
+    private func fallbackState(reason: String) -> LoadState {
+        guard let mock = Self.mockPlan() else {
+            return .unavailable("\(reason)\n\nThe bundled mock plan could not be loaded either.")
+        }
+        return .fallback(mock, reason: reason)
+    }
+
+    /// The mock, in the scanned bag when one is bundled.
+    private static func mockPlan() -> PackingPlan? {
         guard let mock = try? PlanLoader.mockPlan() else { return nil }
         guard let scanned = try? ScannedContainerLoader.bundled(),
               let rehomed = mock.replacingContainer(with: scanned)
         else { return mock }
         return rehomed
+    }
+
+    /// `API` puts the server's own `{"detail": …}` message in the error, which is
+    /// far more useful than "operation could not be completed".
+    private static func message(for error: Error) -> String {
+        let described = (error as NSError).localizedDescription
+        return described.isEmpty ? String(describing: error) : described
     }
 }
 

@@ -13,11 +13,17 @@ struct ContentView: View {
             List {
                 NavigationLink("Scan a box") { ScanScreen() }
                 NavigationLink("Plan AR frame") { PlanARView() }
-                NavigationLink("Plan 3D scene") { PlanSceneScreen() }
+                NavigationLink("Plan 3D scene") { PlanSceneScreen(suitcaseID: Self.demoSuitcaseID) }
                 NavigationLink("Scanned item") { ScannedItemScreen() }
             }
             .navigationTitle("Spike")
         }
+    }
+
+    /// The suitcase the bundled scan belongs to, so the 3D scene has something to
+    /// ask the server for without a picker in front of it.
+    private static var demoSuitcaseID: String? {
+        try? ScannedContainerLoader.bundled().id
     }
 }
 

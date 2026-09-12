@@ -1,10 +1,13 @@
 import json
+import os
+import urllib.error
 from unittest.mock import patch
 
 from physics.pan import (
     MockPanBackend,
     PanAction,
     RealPanBackend,
+    _load_ifm_api_key,
     build_observation,
     describe_action,
     result_note,
@@ -122,6 +125,29 @@ def test_real_pan_backend_parses_json_schema_response():
     # The display path (examples/pan_demo.py) prints this verbatim: a K2-Horizon
     # answer must never be shown as if it were a visual PAN rollout.
     assert result_note(result) == "textual reasoning, not a visual PAN rollout"
+
+
+def test_timeout_is_retried_once_then_reported_failed():
+    backend = RealPanBackend(api_key="fake-key")
+    assert backend.timeout == 20.0  # per call, so the worst case is 40s not one 45s hang
+    with patch("physics.pan.urllib.request.urlopen", side_effect=TimeoutError("timed out")) as urlopen:
+        result = backend.simulate({"scene_id": "s"}, "place the shoe")
+    assert urlopen.call_count == 2  # one retry, not an infinite loop
+    assert result.status == "failed"
+
+
+def test_http_401_is_not_retried():
+    err = urllib.error.HTTPError("https://api.ifm.ai/v1/chat/completions", 401, "Unauthorized", {}, None)
+    backend = RealPanBackend(api_key="fake-key")
+    with patch("physics.pan.urllib.request.urlopen", side_effect=err) as urlopen:
+        result = backend.simulate({"scene_id": "s"}, "place the shoe")
+    assert urlopen.call_count == 1  # a bad key is not fixed by asking again
+    assert result.status == "failed"
+
+
+def test_pan_api_key_is_an_accepted_alias_for_ifm_api_key():
+    with patch.dict(os.environ, {"PAN_API_KEY": "aliased-key"}, clear=True):
+        assert _load_ifm_api_key() == "aliased-key"
 
 
 def test_result_note_labels_every_displayable_result():

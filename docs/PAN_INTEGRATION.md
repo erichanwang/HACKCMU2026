@@ -45,7 +45,7 @@ impossible (PAN.md sec 17).
 | `pan/types.py` | Provider-neutral contract | `Observation`, `PackingAction`, `SimulationRequest/Result`, `CandidateReport`, `WorldModel` protocol |
 | `pan/observation.py` | Scene -> RGB observation (Mode A: real iPhone frame, Mode B: rendered digital twin) | `observation_from_scene`, `observation_from_image`, `save_observation` |
 | `pan/actions.py` | Grounded, deterministic action language | `describe_action`, `describe_sequence`, `fill_action_text` |
-| `pan/world_model.py` | Backends: mock (offline, deterministic), real (HTTP seam), caching wrapper | `MockPanBackend`, `RealPanBackend`, `CachingWorldModel`, `get_world_model` |
+| `pan/world_model.py` | Backends: mock (offline, deterministic), real (IFM K2-Horizon text, via `physics.pan`), caching wrapper | `MockPanBackend`, `RealPanBackend`, `CachingWorldModel`, `get_world_model` |
 | `pan/evaluate.py` | Rollout frames -> structured, honest risk signals | `evaluate_rollout`, `compose_side_by_side`, `save_png` |
 | `pan/rollouts.py` | Async counterfactual rollout manager | `RolloutManager.simulate_candidate_actions`, `RolloutBatch.reports`/`candidate_reports`, `rank_candidates`/`rank_candidate_rollups`, `packing_subset` |
 | `pan/demo.py` | Deterministic end-to-end demo pipeline (this deliverable) | `build_demo_state`, `run_demo`, `persist_result` |
@@ -87,16 +87,24 @@ the PNG/GIF paths inside it.
 
 ## Access status
 
-**No real PAN API/SDK exists anywhere yet** -- see `docs/PAN_ACCESS.md` for the full
+**No visual PAN API/SDK exists anywhere** -- see `docs/PAN_ACCESS.md` for the full
 recon (31 links on ifm.ai, PyPI, GitHub, HuggingFace, HackCMU/Devpost -- all checked,
-none found). `RealPanBackend` is real plumbing (timeouts, retries, redacted
-errors) sitting behind two explicitly marked seams in `pan/world_model.py`:
-`_build_payload` (request shape) and `_parse_response` (response shape), each
-tagged `# TODO(verify against docs/PAN_ACCESS.md)`. When real access appears,
-only those two functions need to change. Configuration is `.env.example`'s
-`PAN_API_KEY` / `PAN_BASE_URL` / `PAN_MODEL` / `PAN_TIMEOUT_S` / `PAN_ENDPOINT_PATH`
--- our own convention, not IFM's. **The mock backend is the entire demo path
-today; nothing in this repo has ever called real PAN inference.**
+none found). What IFM does host is `IFM/K2-Horizon-375B-A23B`, an OpenAI-style chat
+model at `https://api.ifm.ai/v1` -- **text reasoning, no image or video output**.
+
+So there is exactly one real backend, and it is that model:
+`physics.pan.RealPanBackend` (the HTTP client, prompt and `execution_risk` JSON
+schema), wrapped by `pan.world_model.RealPanBackend` so the `pan/` rollout
+manager can drive it. A completed real result carries risk signals in
+`metadata["risk"]` and **no frames** -- `pan.evaluate` reads that as "no risk
+information" rather than inventing pixels, and `honesty_note` labels every
+displayed result "textual reasoning, not a visual PAN rollout".
+
+Configuration is one variable: `IFM_API_KEY` (`PAN_API_KEY` is accepted as an
+alias -- `.env` names it that). Unset ⇒ `get_world_model` falls back to the
+mock. Calls use a 20 s per-call timeout and are retried once on a timeout/5xx.
+**The mock backend is the entire offline/CI demo path; no visual PAN rollout
+exists in this repo, real or otherwise.**
 
 ## Failure tolerance
 

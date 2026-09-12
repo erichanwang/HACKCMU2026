@@ -5,10 +5,11 @@ outside this file, per PAN.md SS11 -- the rest of the app must not know PAN's
 SDK/HTTP shape):
 
     MockPanBackend     -- deterministic, offline, instant. Always available.
-    RealPanBackend      -- the HTTP seam. The real HackCMU PAN route is not yet
-                          known (PAN.md SS10 forbids inventing it); every
-                          PAN-specific guess lives in the two functions marked
-                          `# TODO(verify against docs/PAN_ACCESS.md)` below.
+    RealPanBackend      -- the ONE real backend: `physics.pan.RealPanBackend`,
+                          IFM's hosted K2-Horizon TEXT reasoning model, behind
+                          this interface. It returns risk signals, never
+                          frames -- no visual PAN endpoint exists
+                          (docs/PAN_ACCESS.md).
     CachingWorldModel   -- wraps any backend, persists completed rollouts to
                           disk so expensive/slow inference is never repeated
                           for the same (observation, action, history).
@@ -18,7 +19,6 @@ in Caching.
 """
 from __future__ import annotations
 
-import base64
 import hashlib
 import io
 import json
@@ -26,17 +26,16 @@ import logging
 import math
 import os
 import time
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-import requests
-from PIL import Image, ImageSequence
+from PIL import Image
 
 from pan.evaluate import DEFAULT_THRESHOLDS, segment_by_color
 from pan.observation import project_points
 from pan.types import Observation, PackingAction, SimulationRequest, SimulationResult, WorldModel
+from physics.pan import RealPanBackend as _IfmClient
 
 logger = logging.getLogger("pan")
 
@@ -537,237 +536,47 @@ class MockPanBackend:
         read as every object shifting -> medium risk for every candidate.)"""
         return [frame0] + [_add_noise(frame0, rng) for _ in range(num_frames - 1)]
 
-    def persist(self, result: SimulationResult, out_dir: str | os.PathLike) -> SimulationResult:
-        """Write frame_00.png .. frame_NN.png + rollout.gif into `out_dir`.
-        Returns a copy of `result` with video_path/final_frame_path filled."""
-        out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        if not result.frames:
-            return result
-
-        frame_paths = []
-        for i, frame in enumerate(result.frames):
-            p = out_dir / f"frame_{i:02d}.png"
-            Image.fromarray(np.asarray(frame, dtype=np.uint8)).save(p)
-            frame_paths.append(str(p))
-
-        gif_path = out_dir / "rollout.gif"
-        images = [Image.fromarray(np.asarray(f, dtype=np.uint8)) for f in result.frames]
-        images[0].save(gif_path, save_all=True, append_images=images[1:], duration=150, loop=0)
-
-        return replace(result, video_path=str(gif_path), final_frame_path=frame_paths[-1])
-
 
 # =============================================================== real backend
 
-_RETRYABLE_CONNECTION_ERRORS = (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
-
-
-def _backoff_seconds(attempt: int) -> float:
-    return min(0.05 * (2 ** (attempt - 1)), 1.0)
-
-
-def _build_payload(request: SimulationRequest) -> dict:
-    """Pack a SimulationRequest into the JSON body sent to PAN.
-
-    # TODO(verify against docs/PAN_ACCESS.md): the real HackCMU PAN request
-    shape is not yet known (PAN.md SS10 -- do not invent an endpoint or
-    payload contract). This currently assumes: current frame as base64 PNG,
-    the grounded action as plain text, and free-form `options` passed through
-    verbatim. Adjust field names/structure once the real docs/starter code
-    are found; nothing else in this module should need to change.
-    """
-    buf = io.BytesIO()
-    Image.fromarray(np.asarray(request.observation.image, dtype=np.uint8)).save(buf, format="PNG")
-    image_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-
-    history_b64 = []
-    for prior in request.history:
-        frame = prior.final_frame
-        if frame is not None:
-            hbuf = io.BytesIO()
-            Image.fromarray(np.asarray(frame, dtype=np.uint8)).save(hbuf, format="PNG")
-            history_b64.append(base64.b64encode(hbuf.getvalue()).decode("ascii"))
-
-    return {
-        "image_png_base64": image_b64,
-        "action_text": request.action.text,
-        "history_frames_png_base64": history_b64,
-        "options": dict(request.options),
-    }
-
-
-def _decode_png_b64(b64: str) -> np.ndarray:
-    raw = base64.b64decode(b64)
-    return np.array(Image.open(io.BytesIO(raw)).convert("RGB"), dtype=np.uint8)
-
-
-def _decode_animated_bytes(data: bytes) -> list[np.ndarray]:
-    im = Image.open(io.BytesIO(data))
-    return [np.array(frame.convert("RGB"), dtype=np.uint8) for frame in ImageSequence.Iterator(im)]
-
-
-def _parse_response(payload) -> list[np.ndarray]:
-    """Normalize a PAN response body into a list of (H, W, 3) uint8 frames.
-
-    # TODO(verify against docs/PAN_ACCESS.md): the real response shape is not
-    yet known. This currently accepts either `{"frames": [base64 PNG, ...]}`
-    or `{"video_url": "...gif"}` (downloaded and decoded with Pillow). An
-    `.mp4` video_url raises -- no cv2/imageio available in this environment,
-    so MP4 decoding is not supported; callers map that to status="failed".
-    """
-    if isinstance(payload, bytes):
-        return _decode_animated_bytes(payload)
-
-    if isinstance(payload, dict):
-        if "frames" in payload:
-            return [_decode_png_b64(b) for b in payload["frames"]]
-        if "video_url" in payload:
-            url = payload["video_url"]
-            if url.lower().endswith(".mp4"):
-                raise RuntimeError("mp4 decoding not available")
-            resp = requests.get(url, timeout=30)
-            resp.raise_for_status()
-            return _decode_animated_bytes(resp.content)
-
-    raise ValueError("unrecognized PAN response shape")
-
 
 class RealPanBackend:
-    """HTTP seam for the real PAN service.
+    """The real world model, behind `pan.types.WorldModel`: IFM's hosted
+    K2-Horizon, a TEXT reasoning model (`physics.pan.RealPanBackend`). There is
+    no visual PAN endpoint to call (docs/PAN_ACCESS.md), so a completed result
+    carries risk signals in `metadata["risk"]` and NO frames -- the evaluator
+    reads that as "no risk information" rather than inventing pixels.
 
-    Configured from environment variables. This is OUR convention for the
-    HackCMU integration, not something IFM documents:
-
-        PAN_API_KEY       -- secret, sent as `Authorization: Bearer <key>`
-        PAN_BASE_URL       -- e.g. "https://pan.example.com"
-        PAN_MODEL          -- optional model/version identifier
-        PAN_TIMEOUT_S      -- per-request timeout, default 60
-        PAN_ENDPOINT_PATH  -- e.g. "/v1/simulate"; its absence means nobody
-                              has confirmed the real route yet, so `available()`
-                              stays False and `simulate` refuses to guess a URL.
-
-    Env vars are read once, at construction time.
+    Available iff an IFM key is configured (`IFM_API_KEY`, or `PAN_API_KEY` as
+    an alias); otherwise `get_world_model` falls back to the mock.
     """
 
-    name = "pan"
-    supports_continuation = False  # unverified; flip once continuation is confirmed against real docs
+    name = _IfmClient.name  # "ifm-k2-horizon"
+    supports_continuation = False  # text reasoning: nothing to continue from
 
-    _MAX_RETRIES = 2  # up to 2 retries (3 attempts total) on 429/5xx/connection errors
-
-    def __init__(self) -> None:
-        self.api_key = os.environ.get("PAN_API_KEY")
-        self.base_url = os.environ.get("PAN_BASE_URL")
-        self.model = os.environ.get("PAN_MODEL")
-        self.endpoint_path = os.environ.get("PAN_ENDPOINT_PATH")
-        self.timeout_s = float(os.environ.get("PAN_TIMEOUT_S", "60"))
-        self.session = requests.Session()
+    def __init__(self, client: Optional[_IfmClient] = None) -> None:
+        self.client = client or _IfmClient()
 
     def available(self) -> bool:
-        return bool(self.api_key and self.base_url and self.endpoint_path)
-
-    def _unavailable_reason(self) -> str:
-        missing = [
-            name
-            for name, val in (
-                ("PAN_API_KEY", self.api_key),
-                ("PAN_BASE_URL", self.base_url),
-                ("PAN_ENDPOINT_PATH", self.endpoint_path),
-            )
-            if not val
-        ]
-        return "PAN backend unavailable: unset " + ", ".join(missing)
+        return bool(self.client.api_key)
 
     def simulate(self, request: SimulationRequest) -> SimulationResult:
-        start = time.perf_counter()
-
-        if not self.available():
-            latency_ms = (time.perf_counter() - start) * 1000.0
-            logger.info(
-                "backend=pan request_id=%s status=unavailable latency_ms=%.2f",
-                request.request_id, latency_ms,
-            )
-            return SimulationResult(
-                request_id=request.request_id,
-                status="unavailable",
-                backend="pan",
-                error=self._unavailable_reason(),
-                latency_ms=latency_ms,
-            )
-
-        url = f"{self.base_url.rstrip('/')}{self.endpoint_path}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "X-Request-Id": request.request_id,
-            "Content-Type": "application/json",
-        }
-        payload = _build_payload(request)
-        if self.model:
-            payload["model"] = self.model
-
-        attempts = 0
-        last_error = "unknown error"
-        max_attempts = 1 + self._MAX_RETRIES
-        while attempts < max_attempts:
-            attempts += 1
-            try:
-                resp = self.session.post(url, json=payload, headers=headers, timeout=self.timeout_s)
-            except _RETRYABLE_CONNECTION_ERRORS as exc:
-                last_error = f"connection error ({type(exc).__name__})"
-                if attempts < max_attempts:
-                    time.sleep(_backoff_seconds(attempts))
-                    continue
-                return self._fail(request, start, last_error, attempts)
-
-            if resp.status_code == 200:
-                try:
-                    try:
-                        body = resp.json()
-                    except ValueError:
-                        body = resp.content
-                    frames = _parse_response(body)
-                except Exception as exc:
-                    error = "mp4 decoding not available" if "mp4" in str(exc).lower() else \
-                        f"failed to parse PAN response ({type(exc).__name__})"
-                    return self._fail(request, start, error, attempts)
-                latency_ms = (time.perf_counter() - start) * 1000.0
-                logger.info(
-                    "backend=pan request_id=%s status=complete latency_ms=%.2f attempts=%d",
-                    request.request_id, latency_ms, attempts,
-                )
-                return SimulationResult(
-                    request_id=request.request_id,
-                    status="complete",
-                    backend="pan",
-                    frames=frames,
-                    latency_ms=latency_ms,
-                    metadata={"attempts": attempts},
-                )
-
-            retryable = resp.status_code == 429 or resp.status_code >= 500
-            # Never include the response body/headers/URL query string -- they
-            # can echo back tokens (PAN.md SS25). Status code only.
-            last_error = f"pan backend returned HTTP {resp.status_code}"
-            if retryable and attempts < max_attempts:
-                time.sleep(_backoff_seconds(attempts))
-                continue
-            return self._fail(request, start, last_error, attempts)
-
-        return self._fail(request, start, last_error, attempts)  # pragma: no cover - unreachable
-
-    def _fail(self, request: SimulationRequest, start: float, error: str, attempts: int) -> SimulationResult:
-        latency_ms = (time.perf_counter() - start) * 1000.0
+        obs = request.observation
+        inner = self.client.simulate(
+            {"scene_id": obs.scene_id, "image_source": obs.source, "image_path": obs.image_path},
+            request.action.text,
+        )
         logger.info(
-            "backend=pan request_id=%s status=failed latency_ms=%.2f attempts=%d",
-            request.request_id, latency_ms, attempts,
+            "backend=%s request_id=%s status=%s latency_ms=%.2f",
+            self.name, request.request_id, inner.status, inner.latency_ms,
         )
         return SimulationResult(
             request_id=request.request_id,
-            status="failed",
-            backend="pan",
-            error=error,
-            latency_ms=latency_ms,
-            metadata={"attempts": attempts},
+            status=inner.status,
+            backend=self.name,
+            latency_ms=inner.latency_ms,
+            error=inner.error,
+            metadata=dict(inner.metadata),
         )
 
 
@@ -861,7 +670,8 @@ class CachingWorldModel:
 # =========================================================================== factory
 
 def get_world_model(prefer: str = "auto", cache_dir: Optional[str | os.PathLike] = None) -> WorldModel:
-    """Pick a backend: "mock" | "pan" | "auto" (Real if available() else Mock).
+    """Pick a backend: "mock" | "pan" | "auto" ("pan" = the IFM K2-Horizon
+    client if a key is configured, else Mock).
     Wrapped in CachingWorldModel iff `cache_dir` is given."""
     if prefer == "mock":
         model: WorldModel = MockPanBackend()

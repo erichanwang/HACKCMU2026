@@ -29,7 +29,10 @@ PROMPT = (
     "fragile = breaks if crushed or dropped; soft = compresses (clothes, bags); rigid = everything else. "
     "compressibility = the item's loose volume divided by its volume when squeezed hard into a suitcase: "
     "1 for rigid or fragile items; for soft items roughly 1.3 (jeans, towel), 2 (t-shirt, socks), 3 (down jacket, pillow). "
-    "mass = your best estimate in kg. keepUpright = true only if it must stay this side up (liquids, open containers)."
+    "mass = your best estimate in kg. keepUpright = true only for liquid containers or open vessels that must stay "
+    "upright (bottles, cups, jars, vases); false for every other item no matter how fragile. "
+    "If the photo has no clear packable object, or is too small or blurry to identify one confidently, reply "
+    '{"label": "unknown", "rigidity": "rigid", "compressibility": 1, "mass": 0, "keepUpright": false} rather than guessing.'
 )
 UNKNOWN = {"label": "unknown", "description": "", "rigidity": "rigid", "compressibility": 1.0, "mass": 0.0, "keepUpright": False}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # a LiDAR scan's photo has no business being bigger than this

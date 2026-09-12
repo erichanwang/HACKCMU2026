@@ -70,18 +70,11 @@ class TestRotationTable(unittest.TestCase):
         self.assertEqual(seen, {k for k in _ROTATION if not k.startswith("cyl_")})  # distinct dims => all six box orientations are legal
 
 
-class TestCylinderRotationFallback(unittest.TestCase):
-    """BUG, not fixed here (app_plan.py is owned by another agent): `_ROTATION` has no entry
-    for a cylinder's orientation strings, so `_ROTATION.get(orientation, "XYZ")` always
-    falls back to identity. That is only correct for `cyl_axis_z` (the cylinder's own
-    long/height axis already runs along bag Z == up, same as an upright box needing no
-    rotation). For `cyl_axis_x` / `cyl_axis_y` the cylinder is lying on its side -- its long
-    axis runs along bag X or bag Y -- so "XYZ" mislabels which local axis is the long one.
-    `size` (the bounding box) stays correct; only `rotation`, which a renderer uses via
-    `AxisRotation.localAxis(forBagAxis:)` to orient the mesh/label, is wrong -- it would draw
-    the item standing upright instead of lying on its side. Left failing on purpose; see the
-    task report for the exact input/output pair.
-    """
+class TestCylinderRotations(unittest.TestCase):
+    """Pins the cylinder entries of `_ROTATION`: `cyl_axis_z` is identity (the cylinder's height
+    axis already runs along bag Y, up), while `cyl_axis_x` / `cyl_axis_y` lay it on its side, so
+    the height axis is the one on bag X (`YXZ`) or bag Z (`XZY`). Before dcae7c3 every cylinder
+    fell back to `XYZ`, and a bottle packed on its side would have rendered standing up."""
 
     def test_cylinder_lying_on_its_side_gets_a_wrong_rotation(self):
         diameter, cyl_height = 0.08, 0.30  # distinct, so a wrong permutation shows a wrong number

@@ -114,9 +114,19 @@ class PackState:
         return True
 
     def _point_in_solid(self, p) -> bool:
+        """True if an item placed with min corner ``p`` must overlap a solid.
+
+        The test is ``smin <= p < smax`` (not "strictly interior"): an item at ``p`` occupies
+        ``[p, p+d]`` with every ``d > 0``, so it always contains the corner wedge just past
+        ``p``, and a solid covering that wedge always overlaps it.  Corner-of-a-box points are
+        therefore dead on arrival, which keeps the extreme-point set proportional to the open
+        surface rather than to the number of items placed.
+        ponytail: assumes every item dim > EPS, same assumption the ``ov > EPS`` overlap test
+        already makes; a sub-micron item would be treated as non-overlapping either way.
+        """
         if len(self.smin) == 0:
             return False
-        return bool(np.any(np.all((p > self.smin + EPS) & (p < self.smax - EPS), axis=1)))
+        return bool(np.any(np.all((p >= self.smin - EPS) & (p < self.smax - EPS), axis=1)))
 
     def _wall(self, a: int, p) -> float:
         """Coordinate of the container wall when projecting point p along -axis a."""
@@ -144,10 +154,10 @@ class PackState:
         self.smin = np.vstack([self.smin, lo[None, :]])
         self.smax = np.vstack([self.smax, hi[None, :]])
         self.sfrag = np.append(self.sfrag, bool(fragile))
-        # extreme points strictly inside the new solid are dead
+        # extreme points the new solid swallows are dead (same test as _point_in_solid)
         if self._eps:
             arr = self._ep_array()
-            inside = np.all((arr > lo + EPS) & (arr < hi - EPS), axis=1)
+            inside = np.all((arr >= lo - EPS) & (arr < hi - EPS), axis=1)
             if inside.any():
                 keys = list(self._eps.keys())
                 for i in np.nonzero(inside)[0]:
@@ -232,46 +242,64 @@ class PackState:
                     ok &= (cx - R) ** 2 + (cy - R) ** 2 <= lim
         surf = 2.0 * (d[0] * d[1] + d[1] * d[2] + d[0] * d[2])
         base_area = d[0] * d[1]
+        # The contact term enters the score as ``-w_contact * (touch / surf)``; when w_contact is
+        # exactly 0 (NAIVE_PARAMS) that product is exactly 0.0 for any finite touch, so the whole
+        # touch tally -- the widest part of the (C,S) work -- can be skipped bit-for-bit safely.
+        want_touch = self.p.w_contact != 0.0
         touch = np.zeros(C)
-        touch += ((lo[:, 2] < EPS) | (np.abs(hi[:, 2] - H) < EPS)) * base_area
-        if not self.is_cyl:
-            touch += ((lo[:, 0] < EPS) | (np.abs(hi[:, 0] - L) < EPS)) * (d[1] * d[2])
-            touch += ((lo[:, 1] < EPS) | (np.abs(hi[:, 1] - W) < EPS)) * (d[0] * d[2])
+        if want_touch:
+            touch += ((lo[:, 2] < EPS) | (np.abs(hi[:, 2] - H) < EPS)) * base_area
+            if not self.is_cyl:
+                touch += ((lo[:, 0] < EPS) | (np.abs(hi[:, 0] - L) < EPS)) * (d[1] * d[2])
+                touch += ((lo[:, 1] < EPS) | (np.abs(hi[:, 1] - W) < EPS)) * (d[0] * d[2])
         support = np.zeros(C)
         if len(self.smin):
-            smin = self.smin[None, :, :]
-            smax = self.smax[None, :, :]
+            # Only solids whose AABB meets this batch's envelope can matter.  A solid outside it
+            # is separated along some axis by more than EPS from every candidate, so its clipped
+            # overlap on that axis is exactly zero *and* neither of its faces on that axis can be
+            # flush with the item -- it contributes nothing to overlap, support, fragile or touch.
+            # Dropping it is exact, not an approximation, and keeps the (C,S,3) temporaries
+            # proportional to the working surface instead of to everything packed so far.
+            near = np.all((self.smax >= lo.min(axis=0) - EPS)
+                          & (self.smin <= hi.max(axis=0) + EPS), axis=1)
+            smin = self.smin[near][None, :, :]
+            smax = self.smax[near][None, :, :]
+            sfrag = self.sfrag[near]
             l3 = lo[:, None, :]
             h3 = hi[:, None, :]
             ov = np.clip(np.minimum(h3, smax) - np.maximum(l3, smin), 0.0, None)  # (C,S,3)
             ok &= ~np.any(np.all(ov > EPS, axis=2), axis=1)                        # no overlap
             axy = ov[:, :, 0] * ov[:, :, 1]
-            ayz = ov[:, :, 1] * ov[:, :, 2]
-            axz = ov[:, :, 0] * ov[:, :, 2]
             below = np.abs(smax[:, :, 2] - l3[:, :, 2]) < EPS       # solid top flush with base
             contact_below = axy * below
-            ok &= ~np.any((contact_below > EPS) & self.sfrag[None, :], axis=1)     # fragile below
+            ok &= ~np.any((contact_below > EPS) & sfrag[None, :], axis=1)          # fragile below
             sb = contact_below.sum(axis=1)
             support = sb / base_area
-            touch += sb
-            contact_above = axy * (np.abs(smin[:, :, 2] - h3[:, :, 2]) < EPS)  # solid base flush with top
-            if fragile:  # nothing may already rest on a fragile item's top face
-                ok &= ~np.any(contact_above > EPS, axis=1)
-            touch += contact_above.sum(axis=1)
-            touch += (ayz * ((np.abs(smax[:, :, 0] - l3[:, :, 0]) < EPS)
-                             | (np.abs(smin[:, :, 0] - h3[:, :, 0]) < EPS))).sum(axis=1)
-            touch += (axz * ((np.abs(smax[:, :, 1] - l3[:, :, 1]) < EPS)
-                             | (np.abs(smin[:, :, 1] - h3[:, :, 1]) < EPS))).sum(axis=1)
+            if fragile or want_touch:
+                contact_above = axy * (np.abs(smin[:, :, 2] - h3[:, :, 2]) < EPS)  # solid base flush with top
+                if fragile:  # nothing may already rest on a fragile item's top face
+                    ok &= ~np.any(contact_above > EPS, axis=1)
+            if want_touch:
+                ayz = ov[:, :, 1] * ov[:, :, 2]
+                axz = ov[:, :, 0] * ov[:, :, 2]
+                touch += sb
+                touch += contact_above.sum(axis=1)
+                touch += (ayz * ((np.abs(smax[:, :, 0] - l3[:, :, 0]) < EPS)
+                                 | (np.abs(smin[:, :, 0] - h3[:, :, 0]) < EPS))).sum(axis=1)
+                touch += (axz * ((np.abs(smax[:, :, 1] - l3[:, :, 1]) < EPS)
+                                 | (np.abs(smin[:, :, 1] - h3[:, :, 1]) < EPS))).sum(axis=1)
         if self.gravity:
             ok &= (lo[:, 2] < EPS) | (support >= self.min_support - EPS)
-        center = lo + d / 2.0
-        if self.total_mass + m > EPS:
-            com_after = (self.mass_moment + m * center) / (self.total_mass + m)
-        else:
-            com_after = (self.vol_moment + bbox_vol * center) / (self.total_bbox_vol + bbox_vol)
-        dv = (com_after - self.target) / self.dims
-        dev = np.sqrt(np.sum(self.axis_w * dv * dv, axis=1))
-        score = pos - self.p.w_contact * (touch / surf) + self.p.w_com * dev
+        score = pos - self.p.w_contact * (touch / surf) if want_touch else pos
+        if self.p.w_com != 0.0:   # likewise: a zero CoM weight contributes exactly 0.0
+            center = lo + d / 2.0
+            if self.total_mass + m > EPS:
+                com_after = (self.mass_moment + m * center) / (self.total_mass + m)
+            else:
+                com_after = (self.vol_moment + bbox_vol * center) / (self.total_bbox_vol + bbox_vol)
+            dv = (com_after - self.target) / self.dims
+            dev = np.sqrt(np.sum(self.axis_w * dv * dv, axis=1))
+            score = score + self.p.w_com * dev
         return ok, score
 
     def _best_candidate(self, cands, d, m, bbox_vol, best=math.inf, fragile=False):

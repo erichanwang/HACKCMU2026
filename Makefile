@@ -25,7 +25,7 @@ mongo:
 
 server:
 	@if [ -f .env ]; then \
-		cd server && uv run uvicorn main:app --port 8000 --env-file ../.env; \
+		cd server && uv run --env-file ../.env uvicorn main:app --port 8000; \
 	else \
 		cd server && uv run uvicorn main:app --port 8000; \
 	fi

@@ -104,6 +104,12 @@ step_swift_app() {
   make test-swift-app
 }
 
+step_plan_contract() {
+  [ -e tests/plan_contract/run.sh ] || { echo "no tests/plan_contract/run.sh"; return $SKIP_RC; }
+  if [ "${SKIP_SWIFT:-0}" = 1 ]; then echo "SKIP_SWIFT=1: skipping plan contract (swift build of packing-core)"; return $SKIP_RC; fi
+  bash tests/plan_contract/run.sh
+}
+
 STARTED_SERVER=0
 cleanup_server() {
   [ "$STARTED_SERVER" = 1 ] && fuser -k 8000/tcp >/dev/null 2>&1
@@ -119,7 +125,7 @@ step_live_e2e() {
 
   if ! port_open 8000; then
     if [ -f .env ]; then
-      ( cd server && uv run uvicorn main:app --port 8000 --env-file ../.env ) >"$OUT_DIR/server.log" 2>&1 &
+      ( cd server && uv run --env-file ../.env uvicorn main:app --port 8000 ) >"$OUT_DIR/server.log" 2>&1 &
     else
       ( cd server && uv run uvicorn main:app --port 8000 ) >"$OUT_DIR/server.log" 2>&1 &
     fi
@@ -146,6 +152,7 @@ run "packer3d-suite" step_packer3d
 run "server-check" step_server_check
 run "swift" step_swift
 run "swift-app" step_swift_app
+run "plan-contract" step_plan_contract
 run "live-e2e" step_live_e2e
 
 echo

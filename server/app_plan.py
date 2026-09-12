@@ -35,7 +35,10 @@ bag X <- packer x, bag Y <- packer z, bag Z <- packer y, with the item letters r
 x -> X, y -> Z, z -> Y. That gives the table below.
 """
 
-_ROTATION = {"xyz": "XYZ", "xzy": "XZY", "yxz": "ZYX", "yzx": "ZXY", "zxy": "YZX", "zyx": "YXZ"}
+_ROTATION = {"xyz": "XYZ", "xzy": "XZY", "yxz": "ZYX", "yzx": "ZXY", "zxy": "YZX", "zyx": "YXZ",
+             # cylinders: packer3d's `height` runs along its own z (app Y) when upright, so
+             # cyl_axis_z is identity; on its side the height axis goes to bag X or bag Z.
+             "cyl_axis_z": "XYZ", "cyl_axis_x": "YXZ", "cyl_axis_y": "XZY"}
 
 
 def _v(x, y, z) -> dict:

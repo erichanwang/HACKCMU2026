@@ -39,7 +39,7 @@ jobs:
       - name: Server check
         working-directory: server
         run: |
-          pip install fastapi uvicorn pymongo httpx python-multipart numpy
+          pip install fastapi uvicorn pymongo httpx python-multipart numpy mongomock "python-jose[cryptography]"
           python check.py
 
       - name: Upload PAN demo output
@@ -93,3 +93,8 @@ jobs:
             echo "running $f"
             bash "$f"
           done
+
+      - name: Plan contract (server plan through the real Swift decoder)
+        run: |
+          pip install -r requirements.txt
+          bash tests/plan_contract/run.sh

@@ -67,7 +67,7 @@ class TestRotationTable(unittest.TestCase):
             for axis, letter in zip("xyz", out["rotation"]):
                 self.assertAlmostEqual(out["size"][axis], local[letter],
                                         msg=(o.name, out["rotation"], out["size"], local))
-        self.assertEqual(seen, set(_ROTATION))  # distinct dims => all six orientations are legal
+        self.assertEqual(seen, {k for k in _ROTATION if not k.startswith("cyl_")})  # distinct dims => all six box orientations are legal
 
 
 class TestCylinderRotationFallback(unittest.TestCase):

@@ -149,6 +149,8 @@ class Patch(BaseModel):
     label: str | None = None
     rigidity: str | None = None
     compressibility: float | None = None
+    mass: float | None = None
+    keepUpright: bool | None = None
 
 
 @app.patch("/items/{item_id}")
@@ -157,7 +159,13 @@ def update_item(item_id: str, patch: Patch):
         raise HTTPException(422, f"rigidity must be one of {RIGIDITIES}")
     if patch.compressibility is not None and not patch.compressibility >= 1:
         raise HTTPException(422, "compressibility must be >= 1")
+    if patch.mass is not None and not patch.mass >= 0:
+        raise HTTPException(422, "mass must be >= 0")
     fields = {}
+    if patch.mass is not None:
+        fields |= {"mass": float(patch.mass)}
+    if patch.keepUpright is not None:
+        fields |= {"keepUpright": patch.keepUpright}
     if patch.label is not None:
         fields |= {"label": patch.label.strip()[:60], "labelSource": "user"}
     if patch.rigidity is not None:

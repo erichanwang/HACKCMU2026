@@ -61,6 +61,9 @@ for item_id, (w, h, d) in {"t2": (0.3, 0.1, 0.2), "t3": (0.25, 0.12, 0.18), "t4"
     r = c.post("/items", data={"item": scan(item_id, sc["id"], w, h, d)}, files=img)
     assert r.status_code == 200, r.text
 assert c.patch("/items/t3", json={"rigidity": "soft", "compressibility": 2}).json()["compressibility"] == 2
+r = c.patch("/items/t4", json={"mass": 1.5, "keepUpright": True}).json()
+assert r["mass"] == 1.5 and r["keepUpright"] is True, r
+assert c.patch("/items/t4", json={"mass": -1}).status_code == 422
 
 r = c.post(f"/suitcases/{sc['id']}/plan")
 assert r.status_code == 200, r.text
@@ -85,6 +88,8 @@ for q in p["placements"]:
     local = {"X": w, "Y": h / it["compressibility"] if it["rigidity"] == "soft" else h, "Z": d}
     assert all(math.isclose(q["size"][a], local[k], abs_tol=1e-9)
                for a, k in zip("xyz", q["rotation"])), (q, local)
+    if it["keepUpright"]:
+        assert q["rotation"][1] == "Y", ("keepUpright item was tipped over", q)
 assert c.get(f"/suitcases/{sc['id']}/plan").json() == plan, "GET must return the stored plan"
 
 main.db.items.drop(); main.db.suitcases.drop(); main.db.plans.drop()

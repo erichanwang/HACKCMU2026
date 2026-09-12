@@ -19,6 +19,15 @@ func interiorBox(_ outer: BoxFit, wall: Float, wallHeight: Float? = nil, wallDep
            center: outer.center + SIMD3<Float>(0, wallHeight / 2, 0), axis: outer.axis)
 }
 
+/// Average several single-tap axis fits into one steadier direction. Each tap's `minAreaRect`
+/// fit is one noisy sample (a few degrees of spread is normal); vector-mean-then-renormalize
+/// approximates a circular mean well for that spread (no wraparound risk) and cuts the error by
+/// roughly sqrt(N) — see tests/swift/drift for the measured before/after. Called from
+/// Spike/ScanView.swift once per suitcase tap, accumulating over however many taps the user makes.
+func averageAxis(_ samples: [SIMD3<Float>]) -> SIMD3<Float> {
+    simd_normalize(samples.reduce(SIMD3<Float>.zero, +))
+}
+
 /// Maps a plan's bag-frame coordinates onto AR world space. Bag X = the suitcase's `axis`,
 /// bag Y = world up, bag Z = `perp`; the bag origin is the interior's min corner on the table
 /// (packing-core option (a), right-handed). Pure on purpose — no ARKit, no quaternions, so it

@@ -169,7 +169,90 @@ trialMax.sort()
 func percentile(_ p: Double) -> Float { trialMax[min(trialMax.count - 1, Int(Double(trialMax.count) * p))] }
 print("max corner error across trials: median \(fmt(percentile(0.5)))m  p95 \(fmt(percentile(0.95)))m  worst \(fmt(trialMax.last!))m")
 
-// --- Section 4: the gate assertion -----------------------------------------------------------------
+// --- Section 4: before/after — Spike/ScanView.swift's planeY fix ----------------------------------
+// The fix (see Spike/ScanView.swift `refreshPlaneY`/`currentPlaneY`) stops freezing the table
+// plane's y at the suitcase tap and re-reads ARKit's *live* ARPlaneAnchor every frame instead.
+// That changes two things, honestly modelled separately:
+//   - dPlaneY (one instant's plane-detection noise) is NOT reduced — a fresh reading is still a
+//     finite-precision estimate, just as noisy as the frozen one was. Kept identical below.
+//   - the vertical component of `drift` (world-origin drift accumulated between the suitcase tap
+//     and whenever the overlay is drawn) IS removed: a frozen `Float` has no way to hear about
+//     any correction ARKit makes to that plane after the tap, but a live ARPlaneAnchor is
+//     continuously refined/re-tracked by ARKit against the real table, so reading it fresh each
+//     frame reports today's estimate, not the tap-time one. The horizontal (x/z) position of the
+//     bag is untouched by this fix — re-resolving "the bag's floor" only ever affects height — so
+//     any x/z drift still applies in full, in both rows.
+// The existing sweeps above only exercise horizontal drift (illustrative choice, not a limitation
+// of the model), so this section adds vertical-drift scenarios to make the fixed mechanism visible.
+print("")
+print("== before/after: re-resolving planeY vs. the old frozen value (Spike/ScanView.swift) ==")
+func reResolved(_ pert: Perturbation) -> Perturbation {
+    var p = pert; p.drift.y = 0; return p
+}
+let beforeAfterScenarios: [(String, Perturbation)] = [
+    ("1cm plane error + 2cm vertical world drift",
+     Perturbation(dPlaneY: 0.01, drift: SIMD3(0, 0.02, 0))),
+    ("2cm plane error + 3cm vertical drift + 2deg axis",
+     Perturbation(dPlaneY: 0.02, dAxisDeg: 2, drift: SIMD3(0, 0.03, 0))),
+    ("worst realistic: 3cm plane + 5cm vertical drift + 5deg axis + 1cm dims",
+     Perturbation(dPlaneY: 0.03, dAxisDeg: 5, dWidth: 0.01, drift: SIMD3(0, 0.05, 0))),
+    ("horizontal-only drift, for contrast (this fix does NOT touch x/z)",
+     Perturbation(dPlaneY: 0.01, drift: SIMD3(1, 0, 1) / Float(2).squareRoot() * 0.02)),
+]
+for (label, p) in beforeAfterScenarios {
+    let before = evaluate(p), after = evaluate(reResolved(p))
+    print("\(label):")
+    print("  before (frozen planeY):  max \(fmt(before.maxErr))m  believable \(pct(before.believableFrac))")
+    print("  after  (re-resolved):    max \(fmt(after.maxErr))m  believable \(pct(after.believableFrac))")
+}
+
+// Monte Carlo, same shape as Section 3 but with an added vertical-drift term (0-5cm, same range
+// the horizontal sweep already uses) so the fix's effect shows up in an aggregate distribution too.
+print("")
+print("== before/after monte carlo: 500 trials, vertical drift 0-5cm added to the existing factors ==")
+var beforeMax: [Float] = [], afterMax: [Float] = []
+for _ in 0..<500 {
+    let dPlaneY = Float.random(in: -0.03...0.03, using: &rng)
+    let dAxis = Float.random(in: -5...5, using: &rng)
+    let dWidth = Float.random(in: -0.01...0.01, using: &rng)
+    let horizDriftMag = Float.random(in: 0.01...0.05, using: &rng)
+    let horizAngle = Float.random(in: 0..<(2 * .pi), using: &rng)
+    let vertDrift = Float.random(in: -0.05...0.05, using: &rng)
+    let horiz = SIMD3(cos(horizAngle), 0, sin(horizAngle)) * horizDriftMag
+    let p = Perturbation(dPlaneY: dPlaneY, dAxisDeg: dAxis, dWidth: dWidth,
+                          drift: horiz + SIMD3(0, vertDrift, 0))
+    beforeMax.append(evaluate(p).maxErr)
+    afterMax.append(evaluate(reResolved(p)).maxErr)
+}
+beforeMax.sort(); afterMax.sort()
+func pctile(_ xs: [Float], _ p: Double) -> Float { xs[min(xs.count - 1, Int(Double(xs.count) * p))] }
+print("before: median \(fmt(pctile(beforeMax, 0.5)))m  p95 \(fmt(pctile(beforeMax, 0.95)))m")
+print("after:  median \(fmt(pctile(afterMax, 0.5)))m  p95 \(fmt(pctile(afterMax, 0.95)))m")
+
+// --- Section 4b: before/after — Spike/ScanView.swift's axis-averaging fix -------------------------
+// The fix (PlanAnchor.averageAxis, called from ScanView's suitcase tap handler) averages the bag's
+// axis fit over however many taps the user makes instead of trusting a single `minAreaRect` fit.
+// Model each tap's fit as the true axis angle plus independent noise (a real fit's typical spread),
+// average N of them with the actual production function, and measure the resulting placement error.
+print("")
+print("== before/after: axis averaging (PlanAnchor.averageAxis), 500 trials per N ==")
+let singleTapAxisNoiseDeg: Float = 3  // one minAreaRect fit's typical spread; matches the axis sweep's low end
+for n in [1, 2, 3, 5] {
+    var errs: [Float] = []
+    for _ in 0..<500 {
+        let samples: [SIMD3<Float>] = (0..<n).map { _ in
+            let noiseDeg = Float.random(in: -1...1, using: &rng) * singleTapAxisNoiseDeg
+            return rotateY(SIMD3(cos(trueAxisAngle), 0, sin(trueAxisAngle)), deg2rad(noiseDeg))
+        }
+        let avg = averageAxis(samples)
+        let measuredAngleDeg = atan2(avg.z, avg.x) * 180 / .pi - trueAxisAngle * 180 / .pi
+        errs.append(evaluate(Perturbation(dAxisDeg: measuredAngleDeg)).maxErr)
+    }
+    errs.sort()
+    print("  \(n) tap(s): median max corner err \(fmt(pctile(errs, 0.5)))m   p95 \(fmt(pctile(errs, 0.95)))m")
+}
+
+// --- Section 5: the gate assertion -----------------------------------------------------------------
 // Threshold picked from Section 1: at the low end of every stated range (0.5cm plane, 1deg axis,
 // 1cm dims, 1cm drift) the overlay must stay within 2.5 cm of truth on every corner. That is looser
 // than "sells the demo" (a few mm) but tighter than "looks broken" (3cm+) — see the report for why
@@ -182,3 +265,18 @@ let threshold: Float = 0.025
 assert(gateResult.maxErr < threshold,
        "regression: 0.5cm plane + 1deg axis + 1cm dims + 1cm drift now costs \(gateResult.maxErr)m, over \(threshold)m")
 print("with 0.5cm plane, 1deg axis, 1cm dims, 1cm drift: max corner error \(fmt(gateResult.maxErr))m < \(threshold)m — ok")
+
+// Second gate, for the mechanism the fix actually changes: this scenario adds a *vertical* drift
+// component the first gate has none of. Evaluated with `reResolved` — i.e. against the shipped,
+// fixed behaviour, not the old frozen one — since that's what's on `main` now. Threshold is tighter
+// than the first gate because the fix earns it here: vertical drift no longer costs anything once
+// planeY is re-resolved live (see Section 4), leaving only dPlaneY's own noise.
+print("")
+let verticalGate = Perturbation(dPlaneY: 0.005, dAxisDeg: 1, dWidth: 0.01, drift: SIMD3(0, 0.01, 0))
+let verticalGateResult = evaluate(reResolved(verticalGate))
+let verticalThreshold: Float = 0.015
+assert(verticalGateResult.maxErr < verticalThreshold,
+       "regression: with planeY re-resolved live, 0.5cm plane + 1deg axis + 1cm dims + 1cm vertical drift "
+       + "now costs \(verticalGateResult.maxErr)m, over \(verticalThreshold)m")
+print("re-resolved, with 0.5cm plane, 1deg axis, 1cm dims, 1cm vertical drift: "
+      + "max corner error \(fmt(verticalGateResult.maxErr))m < \(verticalThreshold)m — ok")

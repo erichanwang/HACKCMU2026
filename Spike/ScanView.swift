@@ -50,6 +50,7 @@ struct ScanView: UIViewRepresentable {
         view.debugOptions = [.showSceneUnderstanding]
         view.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap)))
         context.coordinator.view = view
+        view.session.delegate = context.coordinator
         return view
     }
 
@@ -59,7 +60,7 @@ struct ScanView: UIViewRepresentable {
     }
     func makeCoordinator() -> Coordinator { Coordinator(item: $item, status: $status, suitcaseId: $suitcaseId, mode: mode) }
 
-    final class Coordinator: NSObject {
+    @MainActor final class Coordinator: NSObject {
         @Binding var item: ScannedItem?
         @Binding var status: String
         @Binding var suitcaseId: String?
@@ -71,6 +72,9 @@ struct ScanView: UIViewRepresentable {
         var suitcase: (interior: BoxFit, planeY: Float)?
         var planOverlay: AnchorEntity?
         var shownPlan: PackingPlan?
+        /// One axis fit per suitcase-mode tap. Averaged (see PlanAnchor.averageAxis) so a single
+        /// noisy `minAreaRect` fit doesn't set the bag's rotation for the whole session.
+        var axisSamples: [SIMD3<Float>] = []
 
         init(item: Binding<ScannedItem?>, status: Binding<String>, suitcaseId: Binding<String?>, mode: ScanMode) {
             _item = item; _status = status; _suitcaseId = suitcaseId; self.mode = mode
@@ -126,10 +130,16 @@ struct ScanView: UIViewRepresentable {
             // Suitcase mode: the fitted box is the bag's outer shell; the interior is a wall thinner.
             // No heightmap, no photo, no label.
             if mode == .suitcase {
-                let interior = interiorBox(box, wall: suitcaseWallMeters)
+                // Average this tap's axis fit in with earlier ones — one fit alone is noisy
+                // enough to matter (see tests/swift/drift); a re-tap steadies it further.
+                axisSamples.append(box.axis)
+                let steadied = BoxFit(width: box.width, depth: box.depth, height: box.height,
+                                      center: box.center, axis: averageAxis(axisSamples))
+                let interior = interiorBox(steadied, wall: suitcaseWallMeters,
+                                            wallHeight: suitcaseFloorWallMeters, wallDepth: suitcaseHandleWallMeters)
                 suitcase = (interior, planeY + suitcaseWallMeters)
                 show(interior, in: view)
-                status = "Creating suitcase…"
+                status = "Creating suitcase… (tap the bag again to steady it, or switch to Item)"
                 Task { @MainActor in
                     do {
                         self.suitcaseId = try await API.createSuitcase(
@@ -232,7 +242,10 @@ struct ScanView: UIViewRepresentable {
             planOverlay?.removeFromParent()
             planOverlay = nil
             guard let plan, let suitcase else { return }
-            let frame = PlanAnchor(interior: suitcase.interior, planeY: suitcase.planeY)
+            // planeY: 0 here — the floor height is baked into the anchor's own position below,
+            // not into these local (bag-frame) coordinates, so refreshPlaneY can move the whole
+            // overlay by updating one number instead of rebuilding every box.
+            let frame = PlanAnchor(interior: suitcase.interior, planeY: 0)
             let orientation = simd_quatf(from: SIMD3<Float>(1, 0, 0), to: suitcase.interior.axis)
             let anchor = AnchorEntity(world: SIMD3<Float>(0, 0, 0))
             for p in plan.placements {
@@ -249,6 +262,34 @@ struct ScanView: UIViewRepresentable {
             }
             view.scene.addAnchor(anchor)
             planOverlay = anchor
+            refreshPlaneY()
         }
+
+        /// The table plane's y as ARKit currently estimates it — refined continuously as ARKit
+        /// tracks the plane, unlike the `Float` frozen in `suitcase` at scan time, which never
+        /// hears about any correction ARKit makes afterwards. Falls back to that stored value
+        /// when no plane is visible this frame (e.g. the table's out of view).
+        func currentPlaneY() -> Float? {
+            guard let suitcase, let frame = view?.session.currentFrame else { return nil }
+            let planeYs = frame.anchors.compactMap { anchor -> Float? in
+                guard let plane = anchor as? ARPlaneAnchor, plane.alignment == .horizontal else { return nil }
+                return plane.transform.columns.3.y
+            }
+            return pickTablePlane(planeYs: planeYs, seedY: suitcase.interior.center.y, maxDrop: maxTableDropMeters)
+        }
+
+        /// Re-anchors the plan overlay's height to the table plane ARKit reports *right now*,
+        /// called every AR frame via `ARSessionDelegate`. Only `planOverlay`'s own position
+        /// moves (cheap); the boxes underneath keep the bag-frame coordinates `showPlan` built.
+        func refreshPlaneY() {
+            guard let planOverlay, let suitcase else { return }
+            planOverlay.position.y = currentPlaneY() ?? suitcase.planeY
+        }
+    }
+}
+
+extension ScanView.Coordinator: ARSessionDelegate {
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        refreshPlaneY()
     }
 }

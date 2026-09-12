@@ -20,6 +20,14 @@ wall-clock budget applies and the plan varies with machine load. Set N to `stats
 from one normal run on the demo laptop (it depends on the laptop and its load, so measure it
 there, not here).
 
+Clear the rehearsals before going on. The inventory (backpack button) keeps every scan across
+Reset, so twenty rehearsal items would sit in the rings on stage. Either swipe them away in the
+Items sheet before each Reset, or wipe the collection once from the Mac:
+
+```sh
+docker exec suitcase-mongo mongosh suitcase --quiet --eval 'db.items.deleteMany({})'
+```
+
 Get the Mac's LAN IP and sanity-check the server before touching the phone:
 
 ```sh

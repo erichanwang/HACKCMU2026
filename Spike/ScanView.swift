@@ -12,10 +12,18 @@ let searchRadiusMeters: Float = 0.5
 let clusterCellMeters: Float = 0.02
 /// Resolution of the captured shape (heightmap cell). Mesh triangles are sampled at half this spacing.
 let shapeCellMeters: Float = 0.01
+/// A closed suitcase is scanned from outside; its interior is the exterior minus this much per side.
+let suitcaseShellMeters: Float = 0.02
+
+enum ScanMode { case item, suitcase }
 
 struct ScanView: UIViewRepresentable {
+    var mode: ScanMode = .item
+    var suitcaseId = ""
     @Binding var item: ScannedItem?
     @Binding var status: String
+    /// Interior [width, height, depth] of the last scanned suitcase (suitcase mode only).
+    var suitcaseDims: Binding<[Float]?> = .constant(nil)
 
     func makeUIView(context: Context) -> ARView {
         let view = ARView(frame: .zero)
@@ -26,10 +34,15 @@ struct ScanView: UIViewRepresentable {
         view.debugOptions = [.showSceneUnderstanding]
         view.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap)))
         context.coordinator.view = view
+        updateUIView(view, context: context)
         return view
     }
 
-    func updateUIView(_ uiView: ARView, context: Context) {}
+    func updateUIView(_ uiView: ARView, context: Context) {
+        context.coordinator.mode = mode
+        context.coordinator.suitcaseId = suitcaseId
+        context.coordinator.suitcaseDims = suitcaseDims
+    }
     func makeCoordinator() -> Coordinator { Coordinator(item: $item, status: $status) }
 
     final class Coordinator: NSObject {
@@ -37,6 +50,9 @@ struct ScanView: UIViewRepresentable {
         @Binding var status: String
         weak var view: ARView?
         var overlay: AnchorEntity?
+        var mode = ScanMode.item
+        var suitcaseId = ""
+        var suitcaseDims: Binding<[Float]?> = .constant(nil)
 
         init(item: Binding<ScannedItem?>, status: Binding<String>) { _item = item; _status = status }
 
@@ -60,7 +76,8 @@ struct ScanView: UIViewRepresentable {
 
             // Mesh surface above the table near the tap, sampled densely across each triangle.
             var pts: [SIMD3<Float>] = []
-            let r2 = searchRadiusMeters * searchRadiusMeters
+            let radius = mode == .suitcase ? searchRadiusMeters * 2 : searchRadiusMeters
+            let r2 = radius * radius
             for mesh in frame.anchors.compactMap({ $0 as? ARMeshAnchor }) {
                 let v = mesh.geometry.vertices, f = mesh.geometry.faces
                 func vertex(_ i: UInt32) -> SIMD3<Float> {
@@ -82,8 +99,15 @@ struct ScanView: UIViewRepresentable {
             guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
                 status = "Nothing above the table here (\(pts.count) pts)"; return
             }
+            if mode == .suitcase {
+                let t = suitcaseShellMeters * 2
+                suitcaseDims.wrappedValue = [box.width - t, box.height - t, box.depth - t]
+                status = String(format: "interior %.0f × %.0f × %.0f cm", (box.width - t) * 100, (box.height - t) * 100, (box.depth - t) * 100)
+                show(box, in: view)
+                return
+            }
             let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
-            let scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
+            let scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters, suitcaseId: suitcaseId)
             item = scanned
             status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
             print(scanned.asciiMap)

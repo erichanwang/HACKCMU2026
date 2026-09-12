@@ -9,6 +9,7 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 ```json
 {
   "id": "6F3A…",
+  "suitcaseId": "9B2C…",
   "dimensions": [0.213, 0.084, 0.121],
   "cellSize": 0.01,
   "heights": [
@@ -27,6 +28,7 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 | Field | Meaning |
 |---|---|
 | `id` | UUID string, unique per scan; also the Mongo `_id`. |
+| `suitcaseId` | The suitcase this item belongs to (`suitcases` collection, below). |
 | `dimensions` | `[width, height, depth]` of the minimum-area bounding box. Width and depth are the footprint on the table; height is the tallest point above it. Includes a small padding (default 0.5 cm) because LiDAR reads slightly inside true edges. |
 | `cellSize` | Side length of one heightmap cell (default 0.01 m). |
 | `heights` | 2D grid, `ceil(width / cellSize)` rows × `ceil(depth / cellSize)` columns. `heights[i][j]` is the height of the object's surface above the table at that cell. `0` means nothing is there. |
@@ -80,6 +82,16 @@ Tuning constants live at the top of `Spike/ScanView.swift`: `paddingMeters`, `mi
 5. A minimum-area rectangle is fitted to the footprint → `width`, `depth`; the tallest point → `height`.
 6. Each point is dropped into its cell and the maximum height per cell is kept → `heights`.
 7. The camera view is cropped to the object and sent with the JSON to `POST /items`; the server asks Grok for `label` and `rigidity`, stores the document, and returns it. Edits in the app go to `PATCH /items/{id}`.
+
+## Suitcases
+
+Items belong to a suitcase. A suitcase is typed in by the user (interior dimensions) and stored in the `suitcases` collection:
+
+```json
+{ "id": "9B2C…", "name": "Carry-on", "dimensions": [0.55, 0.22, 0.35], "createdAt": "…" }
+```
+
+`GET /suitcases/{id}` returns the suitcase with an `items` array — the complete input for the packing solver.
 
 ## Server
 

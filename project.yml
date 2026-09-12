@@ -6,8 +6,6 @@ options:
 packages:
   PackingPlan:
     path: packing-core
-  PackPhysics:
-    path: swift/PackPhysics
 targets:
   Spike:
     type: application
@@ -18,8 +16,6 @@ targets:
         product: PackingPlan
       - package: PackingPlan
         product: PackingPlanUI
-      - package: PackPhysics
-        product: PackPhysics
     info:
       path: Spike/Info.plist
       properties:

@@ -103,4 +103,6 @@ Environment: `SUITCASE_MONGODB_URI`, `MONGO_DB` (default `suitcase`), `XAI_API_K
 
 Routes beyond `POST /items` (this document's payload) and `GET /items`: `GET /items/{id}` (poll this while `labelStatus` is `"pending"`), `PATCH /items/{id}`, `DELETE /items/{id}`, `GET /inventory` (the caller's items across suitcases, newest first); `POST /suitcases` (`{name, dimensions}`), `GET /suitcases`, `GET /suitcases/{id}` (includes its items), `DELETE /suitcases/{id}` (drops the stored plan and detaches its items, which stay in the owner's inventory); `POST /suitcases/{id}/plan` (runs the solver and stores the result) and `GET /suitcases/{id}/plan` (the stored result, 404 until one exists).
 
-The phone's server address is `API.base` in `Spike/API.swift`.
+The phone's server address is typed into the app's settings sheet and kept in `UserDefaults`;
+`API.base` (`Spike/API.swift`) reads that first, then a `PACKAR_SERVER` scheme variable, then a
+hard-coded fallback.

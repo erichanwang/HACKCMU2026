@@ -86,7 +86,7 @@ fi
 
 # Spike/SpikeApp.swift: syntax only — see header for why (SwiftUI view-builder fidelity is out
 # of scope for this harness).
-swiftc -parse Spike/SpikeApp.swift || fail=1
+swiftc -parse Spike/SpikeApp.swift Spike/InventoryRings.swift || fail=1
 
 if [ $fail -eq 0 ]; then
     echo "typecheck: GREEN (2 known @objc/#selector diagnostics allowlisted, see header)"

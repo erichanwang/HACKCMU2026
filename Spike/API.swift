@@ -152,12 +152,18 @@ enum API {
         return try JSONDecoder().decode([ScannedItem].self, from: try await body(of: req))
     }
 
+    /// Everything the signed-in user has ever scanned, across suitcases, newest first; the
+    /// server keeps these when a suitcase is deleted, so this is the Inventory sheet's source.
+    static func inventory() async throws -> [ScannedItem] {
+        try JSONDecoder().decode([ScannedItem].self, from: try await body(of: request("inventory", "GET")))
+    }
+
     /// Removes one item (and the suitcase's stored plan, which no longer matches).
     static func delete(itemId: String) async throws {
         _ = try await body(of: request("items/\(itemId)", "DELETE"))
     }
 
-    /// Removes a suitcase with its items and plan — the app's Reset.
+    /// Removes a suitcase and its plan — the app's Reset. Its items are detached and stay in the inventory.
     static func deleteSuitcase(id: String) async throws {
         _ = try await body(of: request("suitcases/\(id)", "DELETE"))
     }

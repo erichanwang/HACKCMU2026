@@ -259,7 +259,9 @@ func heightMap(points: [SIMD3<Float>], box: BoxFit, planeY: Float, cell: Float) 
 /// Output of one scan, in metres (team contract). `dimensions` = [width, height, depth] of the bounding
 /// box (X right, Y up, Z forward). `heights[i][j]` is the surface height at cell (i along width, j along
 /// depth) — the object's real shape as seen from above. Label/rigidity are filled in by the server.
-struct ScannedItem: Codable, Identifiable {
+/// `Equatable` is for SpikeApp's `.onChange(of: item)`; the synthesised `==` walks `heights`, a few
+/// hundred floats, which is cheap enough next to one scan.
+struct ScannedItem: Codable, Identifiable, Equatable {
     var id = UUID().uuidString
     var suitcaseId: String?        // the suitcase this was scanned into; the server rejects items without one
     var dimensions: [Float]

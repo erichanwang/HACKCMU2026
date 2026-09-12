@@ -21,6 +21,10 @@ struct ContentView: View {
     /// Everything scanned into this suitcase, as of the last time the Items sheet was opened.
     @State private var items: [ScannedItem] = []
     @State private var showingItems = false
+    /// Everything this user has scanned, across suitcases, newest first; kept across Reset.
+    /// Shown as InventoryRings over the camera while the backpack is open.
+    @State private var inventory: [ScannedItem] = []
+    @State private var showingInventory = false
     @State private var confirmingReset = false
     /// Where the server is and how to authenticate; typed on the phone, kept across launches.
     @AppStorage("serverURL") private var serverURL = API.defaultBase
@@ -30,6 +34,10 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
+            if showingInventory {
+                InventoryRings(items: inventory, select: { item = $0 }, dismiss: { showingInventory = false })
+                    .transition(.opacity)
+            }
             VStack(spacing: 8) {
                 Picker("mode", selection: $mode) {
                     Text("Suitcase").tag(ScanMode.suitcase)
@@ -50,7 +58,7 @@ struct ContentView: View {
                     Button("Reset") { confirmingReset = true }.disabled(suitcaseId == nil)
                 }
                 .sheet(isPresented: $showingItems) { itemList }
-                .confirmationDialog("Delete this suitcase and everything scanned into it?",
+                .confirmationDialog("Delete this suitcase? Scanned items stay in your inventory.",
                                     isPresented: $confirmingReset, titleVisibility: .visible) {
                     Button("Reset", role: .destructive) { reset() }
                 }
@@ -61,6 +69,9 @@ struct ContentView: View {
                 .background(.black.opacity(0.6))
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
+                // The segmented picker makes the panel full-width, so the screen's bottom-right
+                // corner is the panel's; the backpack floats over it rather than beside it.
+                .overlay(alignment: .bottomTrailing) { backpack }
                 .padding(.bottom, 40)
                 .sheet(isPresented: $showSettings) {
                     Form {
@@ -74,6 +85,42 @@ struct ContentView: View {
         .sheet(isPresented: $showingDiagram) {
             if let plan { PlanDiagramView(plan: plan) }
         }
+        .animation(.easeOut(duration: 0.2), value: showingInventory)
+        // Quiet on launch: a server that isn't up yet must not replace the first-tap hint.
+        .task { if let saved = try? await API.inventory() { inventory = saved } }
+        .onChange(of: item) { _, new in
+            // ScanView sets `item` on the upload ack and again when the label arrives, and ItemEditor
+            // sets it on a PATCH, so both lists stay current without reopening a sheet. A `createdAt`
+            // is what makes it the server's document; the pre-upload local scan has none. An
+            // inventory circle tapped from an old suitcase sets `item` too; that one stays out of
+            // this bag's Items.
+            guard let new, new.createdAt != nil else { return }
+            if let i = inventory.firstIndex(where: { $0.id == new.id }) { inventory[i] = new } else { inventory.insert(new, at: 0) }
+            guard new.suitcaseId == suitcaseId else { return }
+            if let i = items.firstIndex(where: { $0.id == new.id }) { items[i] = new } else { items.append(new) }
+        }
+    }
+
+    /// Toggles the inventory rings; the count badge is what makes a scan visibly land somewhere.
+    private var backpack: some View {
+        Button {
+            showingInventory.toggle()
+        } label: {
+            Image(systemName: showingInventory ? "xmark" : "backpack.fill")
+                .frame(width: 48, height: 48)
+                .background(.white.opacity(showingInventory ? 0.25 : 0.12), in: Circle())
+                .overlay(alignment: .topTrailing) {
+                    if !inventory.isEmpty {
+                        Text("\(inventory.count)")
+                            .font(.system(.caption2, design: .monospaced).bold())
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(.white, in: Capsule())
+                            .foregroundStyle(.black)
+                    }
+                }
+        }
+        .accessibilityLabel(showingInventory ? "Close inventory" : "Inventory, \(inventory.count) items")
+        .padding(8)
     }
 
     /// What is in the suitcase right now, re-read from the server each time the sheet opens.
@@ -91,6 +138,7 @@ struct ContentView: View {
             .onDelete { offsets in
                 let ids = offsets.map { items[$0].id }
                 items.remove(atOffsets: offsets)
+                inventory.removeAll { ids.contains($0.id) }  // same item, both counts
                 Task {
                     for id in ids {
                         do { try await API.delete(itemId: id) } catch { status = "delete: \(error.localizedDescription)" }

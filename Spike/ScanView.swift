@@ -13,9 +13,16 @@ let clusterCellMeters: Float = 0.02
 /// Resolution of the captured shape (heightmap cell). Mesh triangles are sampled at half this spacing.
 let shapeCellMeters: Float = 0.01
 
+/// What the next tap captures: the bag itself, or something to put in it.
+enum ScanMode: Hashable {
+    case suitcase, item
+}
+
 struct ScanView: UIViewRepresentable {
     @Binding var item: ScannedItem?
     @Binding var status: String
+    @Binding var suitcaseId: String?
+    var mode: ScanMode
 
     func makeUIView(context: Context) -> ARView {
         let view = ARView(frame: .zero)
@@ -29,16 +36,20 @@ struct ScanView: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: ARView, context: Context) {}
-    func makeCoordinator() -> Coordinator { Coordinator(item: $item, status: $status) }
+    func updateUIView(_ uiView: ARView, context: Context) { context.coordinator.mode = mode }
+    func makeCoordinator() -> Coordinator { Coordinator(item: $item, status: $status, suitcaseId: $suitcaseId, mode: mode) }
 
     final class Coordinator: NSObject {
         @Binding var item: ScannedItem?
         @Binding var status: String
+        @Binding var suitcaseId: String?
+        var mode: ScanMode
         weak var view: ARView?
         var overlay: AnchorEntity?
 
-        init(item: Binding<ScannedItem?>, status: Binding<String>) { _item = item; _status = status }
+        init(item: Binding<ScannedItem?>, status: Binding<String>, suitcaseId: Binding<String?>, mode: ScanMode) {
+            _item = item; _status = status; _suitcaseId = suitcaseId; self.mode = mode
+        }
 
         @objc func tap(_ g: UITapGestureRecognizer) {
             guard let view, let frame = view.session.currentFrame else { return }
@@ -82,8 +93,26 @@ struct ScanView: UIViewRepresentable {
             guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
                 status = "Nothing above the table here (\(pts.count) pts)"; return
             }
+            // Suitcase mode: the fitted box *is* the bag interior. No heightmap, no photo, no label.
+            if mode == .suitcase {
+                show(box, in: view)
+                status = "Creating suitcase…"
+                Task { @MainActor in
+                    do {
+                        self.suitcaseId = try await API.createSuitcase(
+                            name: "scanned suitcase", dimensions: [box.width, box.height, box.depth])
+                        self.status = "Suitcase captured — switch to Item and tap what goes in"
+                    } catch {
+                        self.status = "server: \(error.localizedDescription)"
+                    }
+                }
+                return
+            }
+            guard let suitcaseId else { status = "Scan the suitcase first"; return }
+
             let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
-            let scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
+            var scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
+            scanned.suitcaseId = suitcaseId
             item = scanned
             status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
             print(scanned.asciiMap)

@@ -130,7 +130,8 @@ def test_real_pan_backend_parses_json_schema_response():
 def test_timeout_is_retried_once_then_reported_failed():
     backend = RealPanBackend(api_key="fake-key")
     assert backend.timeout == 20.0  # per call, so the worst case is 40s not one 45s hang
-    with patch("physics.pan.urllib.request.urlopen", side_effect=TimeoutError("timed out")) as urlopen:
+    with patch("physics.pan.urllib.request.urlopen", side_effect=TimeoutError("timed out")) as urlopen, \
+            patch("physics.pan.logger"):  # the retry warning is expected here, not a live call
         result = backend.simulate({"scene_id": "s"}, "place the shoe")
     assert urlopen.call_count == 2  # one retry, not an infinite loop
     assert result.status == "failed"

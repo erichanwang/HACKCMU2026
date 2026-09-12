@@ -50,8 +50,9 @@ _LOG = logging.getLogger("physics.pan")
 
 def _load_ifm_api_key() -> Optional[str]:
     """`IFM_API_KEY` env var (`PAN_API_KEY` is an accepted alias -- Eric's `.env`
-    names it that), else `.env` at the repo root (either `IFM_API_KEY=...` or a
-    bare token on its own line)."""
+    names it that), else an `IFM_API_KEY=...` line in `.env` at the repo root.
+    A bare token on its own line is NOT taken as the key: that once turned a pasted
+    unrelated secret into a live IFM key and made the test suite call the network."""
     key = os.environ.get("IFM_API_KEY") or os.environ.get("PAN_API_KEY")
     if key:
         return key.strip()
@@ -65,8 +66,6 @@ def _load_ifm_api_key() -> Optional[str]:
             name, _, value = line.partition("=")
             if name.strip() == "IFM_API_KEY":
                 return value.strip().strip('"')
-        else:
-            return line
     return None
 
 

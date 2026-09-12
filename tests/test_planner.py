@@ -1,8 +1,11 @@
 """`server/planner.py`: physics pre-pass -> several solver runs -> physics picks the plan."""
+import importlib
 import math
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
 import planner  # noqa: E402
@@ -48,6 +51,49 @@ class TestPlan(unittest.TestCase):
         sizes = {p["itemId"]: p["size"] for p in doc["plan"]["placements"]}
         self.assertAlmostEqual(min(sizes["shirts"].values()), 0.05)  # physics halved the shirts
         self.assertAlmostEqual(sizes["bottle"]["y"], 0.18)          # and kept the bottle upright
+
+
+class TestUnpacked(unittest.TestCase):
+    def test_unpacked_items_are_reported_outside_the_plan(self):
+        planner.TIME_BUDGET_S = 0.2
+        suitcase = {"_id": "s1", "name": "test", "dimensions": [0.4, 0.2, 0.3]}
+        items = [scan("book", 0.15, 0.04, 0.2),
+                 scan("giant", 0.5, 0.5, 0.5, label="Giant Bag")]  # bigger than the suitcase in every dimension
+        doc = planner.plan(suitcase, items)
+        self.assertEqual(doc["unpacked"], [{"itemId": "giant", "label": "Giant Bag"}])
+        self.assertNotIn("unpacked", doc["plan"])  # the PackingPlan contract is untouched
+
+    def test_unpacked_is_empty_when_everything_fits(self):
+        planner.TIME_BUDGET_S = 0.2
+        suitcase = {"_id": "s1", "name": "test", "dimensions": [0.4, 0.2, 0.3]}
+        doc = planner.plan(suitcase, [scan("book", 0.15, 0.04, 0.2)])
+        self.assertEqual(doc["unpacked"], [])
+
+
+class TestTimeBudgetEnv(unittest.TestCase):
+    def test_env_var_sets_time_budget(self):
+        with mock.patch.dict(os.environ, {"PLAN_TIME_BUDGET_S": "0.2"}):
+            importlib.reload(planner)
+            self.assertEqual(planner.TIME_BUDGET_S, 0.2)
+        importlib.reload(planner)  # restore the default for the rest of the suite
+
+
+class TestLock(unittest.TestCase):
+    def test_plan_holds_the_lock_while_solving(self):
+        real_pack_naive = planner.pack_naive
+        locked_during_solve = []
+
+        def wrapped(*args, **kwargs):
+            locked_during_solve.append(planner._lock.locked())
+            return real_pack_naive(*args, **kwargs)
+
+        planner.TIME_BUDGET_S = 0.1
+        suitcase = {"_id": "s1", "name": "test", "dimensions": [0.4, 0.2, 0.3]}
+        items = [scan("book", 0.15, 0.04, 0.2)]
+        with mock.patch.object(planner, "pack_naive", side_effect=wrapped):
+            planner.plan(suitcase, items)
+        self.assertTrue(locked_during_solve)
+        self.assertTrue(all(locked_during_solve))
 
 
 if __name__ == "__main__":

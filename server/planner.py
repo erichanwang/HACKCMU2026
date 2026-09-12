@@ -13,7 +13,11 @@
 on `sys.path` the same way `physics/packer3d_adapter.py::_load_scenario` does it.
 """
 import json
+import logging
+import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -28,8 +32,11 @@ from physics.prepack import prepare_items  # noqa: E402
 
 from app_plan import to_app_plan  # noqa: E402
 
-TIME_BUDGET_S = 3.0  # shared by the optimised candidates
+logger = logging.getLogger("suitcase")
+
+TIME_BUDGET_S = float(os.environ.get("PLAN_TIME_BUDGET_S", 3.0))  # shared by the optimised candidates
 CANDIDATES = (("naive", None), ("optimized", 0), ("optimized", 1), ("optimized", 2))
+_lock = threading.Lock()  # ponytail: one global lock; per-suitcase locks if a booth ever runs two bags
 
 
 def rank(candidate: dict) -> tuple:
@@ -57,21 +64,32 @@ def plan(suitcase: dict, items: list[dict]) -> dict:
     container, packer_items, _config, _weights = load_scenario(scenario)
     per_run = TIME_BUDGET_S / sum(1 for s, _ in CANDIDATES if s == "optimized")
     candidates = []
-    for strategy, seed in CANDIDATES:
-        if strategy == "naive":
-            result = pack_naive(container, packer_items)
-        else:
-            result = pack_optimized(container, packer_items, config=OptimizerConfig(time_budget_s=per_run, seed=seed))
-        # to_json rather than to_dict: the metrics carry numpy scalars, which pymongo cannot store
-        result_dict = json.loads(result.to_json())
-        candidates.append({"strategy": strategy, "seed": seed, "solver": result_dict,
-                           "validation": validate_packer3d(result_dict, items=scenario["items"])})
+    total_start = time.perf_counter()
+    with _lock:
+        for strategy, seed in CANDIDATES:
+            candidate_start = time.perf_counter()
+            if strategy == "naive":
+                result = pack_naive(container, packer_items)
+            else:
+                result = pack_optimized(container, packer_items, config=OptimizerConfig(time_budget_s=per_run, seed=seed))
+            # to_json rather than to_dict: the metrics carry numpy scalars, which pymongo cannot store
+            result_dict = json.loads(result.to_json())
+            validation = validate_packer3d(result_dict, items=scenario["items"])
+            logger.info("candidate strategy=%s seed=%s seconds=%.3f items_packed=%d physics_valid=%s",
+                        strategy, seed, time.perf_counter() - candidate_start,
+                        result_dict["metrics"]["items_packed"], validation["valid"])
+            candidates.append({"strategy": strategy, "seed": seed, "solver": result_dict, "validation": validation})
+    logger.info("plan total seconds=%.3f candidates=%d", time.perf_counter() - total_start, len(candidates))
     candidates.sort(key=rank, reverse=True)
     best = candidates[0]
+    items_by_id = {str(i["id"]): i for i in items}
     return {
         "solver": best["solver"],
         "validation": best["validation"],
-        "plan": to_app_plan(best["solver"], suitcase, {str(i["id"]): i for i in items}),
+        "plan": to_app_plan(best["solver"], suitcase, items_by_id),
         "chosen": {"strategy": best["strategy"], "seed": best["seed"]},
         "alternatives": [summary(c) for c in candidates],
+        # top-level, NOT inside "plan": that nested object is the iOS PackingPlan contract and must not change
+        "unpacked": [{"itemId": u["id"], "label": items_by_id.get(u["id"], {}).get("label") or u["id"]}
+                     for u in best["solver"]["unpacked"]],
     }

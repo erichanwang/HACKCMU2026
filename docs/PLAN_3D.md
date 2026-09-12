@@ -268,10 +268,9 @@ One honest gap left:
 ### Two scales, and which one answers which question — `--device`
 
 The default page is 900 px wide with a 560 × 680 column for the footprint, which puts the
-demo bag on screen at **1115 pt/m**. That is a comfortable picture, and it is roughly
-twice as generous as the phone. `--layers --device` renders the same layout through the
-same `FootprintProjection` at the scale the device actually gives it, and writes
-`device-layer-01.svg …` beside the desktop ones so the two can be compared:
+demo bag on screen at **1115 pt/m**. `--layers --device` renders the same layout through
+the same `FootprintProjection` at the scale the device actually gives it — **881 pt/m** —
+and writes `device-layer-01.svg …` beside the desktop ones so the two can be compared:
 
 ```sh
 /tmp/plan3d/debug/plan3d packing-core/Sources/PackingPlan/Resources/plan.json /tmp/out \
@@ -280,89 +279,100 @@ same `FootprintProjection` at the scale the device actually gives it, and writes
 
 **Which to trust.** Use the default page for *is the diagram right* — rectangles inside
 the footprint, protrusions correct, captions climbing. Use `--device` for *is the diagram
-readable* — which labels survive, how much of the screen the picture actually gets. Never
-judge legibility from the default page; it has never been the size of the thing on stage.
+readable, and how much of it is on screen at once*. The gap between the two is now 21%,
+not the 2× it was before `af90f89`; what `--device` is for has changed with it, from
+"does the label survive" to "how far do you scroll".
 
-**Where the device scale comes from.** Nothing is a constant here — every input is named
-in `Phone` in `main.swift`, and the run prints the whole subtraction, so a different phone
-or a different presentation is one number away:
+**Where the device scale comes from.**
 
 | | |
 |---|---|
 | screen | 390 × 844 pt — the iPhone 12/13/14/15 logical size, the narrowest current non-mini (15 Pro and 16 are 393 × 852, the SE 375 × 667) |
 | presentation | a `.sheet` at the `.large` detent, which is how `Spike/SpikeApp.swift` shows the view. 844 − 47 top safe − 10 detent peek − 34 home indicator = **753 pt** of frame |
-| column | `PlanDiagramView` has `.padding()`, iOS default 16, so **358 pt** wide |
-| chrome | header, the two `PlanIssueBanner`s, the layer picker, the caption, the legend, the collapsed "Pack details" row, and 14 pt of `VStack` spacing between each |
-| diagram | whatever is left, with `aspectRatio(0.4064 / 0.6096, .fit)` fitted inside it |
+| column | `planDiagramPadding` is 16, so **358 pt** wide |
+| diagram | `planDiagramHeight(footprint:width:)` = width × depth/width = **358 × 537 pt**, taken *first* |
+| scale | 358 / 0.4064 = **881 pt/m**, and the footprint fills its box exactly |
+| fixed chrome | header, layer picker, layer caption and their spacing: **162 pt**, above the `ScrollView` and never scrolls away |
+| scroll viewport | 753 − 162 − 16 bottom padding = **575 pt**; banners, diagram, legend and details scroll inside it |
 
-Two ways these numbers are the **optimistic** end. Presenting through `PlanViewer` rather
-than `PlanDiagramView` directly adds its own segmented mode picker and padding, about
-48 pt more chrome. And text wrapping is estimated at ~0.55 em per character rather than
-measured, which over-counts a line or two of caption here and there — the real chrome is
-never smaller than what is printed, only occasionally larger.
+**The diagram is not the residual, and that is the whole design.** `planDiagramHeight` is a
+function of width alone on purpose: a height that cannot see how much room is left cannot
+be negotiated down by an over-full `VStack`. So the scale is one number for a given
+footprint and screen width — the same on every layer of every plan — and chrome no longer
+costs picture, it costs *scrolling*. `--device` reports both: the budget line shows the
+diagram taking its fixed height and the chrome stacking around it, and a `scroll:` line
+says whether the bottom of the bag is on screen at rest.
 
-Two consequences the desktop page cannot show, both of which come straight out of the
-view's body having **no `ScrollView`**:
+* Demo plan, no banners: the diagram starts at the top of the scroll column, 537 pt of it
+  against a 575 pt viewport — **the whole bag is visible without scrolling**, on all three
+  layers.
+* `fixtures/nested-carry-on.json`, two banners: 90 pt each pushes the picture 208 pt down
+  the column, so **170 pt of the bag is below the fold**. Full size, full labels, one
+  flick away. The device render draws that fold as a dashed line across the picture.
 
-* **The scale is per layer, not per plan.** The legend is in the same stack and takes its
-  height first, so a layer of four chatty items gets a smaller picture than a layer of
-  one. On the demo plan: layer 1 is **494 pt/m**, layers 2 and 3 are **666 pt/m**.
-* **A banner is paid for out of the diagram.** On
-  `fixtures/nested-carry-on.json` — a deliberately broken plan — the geometry and
-  stability banners take 90 pt each and the picture collapses to **153 pt/m**: a 62 × 93 pt
-  postage stamp with four bare step numbers in it. The fallback is least readable exactly
-  when the plan is worst, which is when it is being read.
+`plan3d` copies `planDiagramPadding` and `planDiagramHeight` rather than calling them:
+both are declared outside the view's SwiftUI guard so Linux can check them, but both are
+`internal` to `PackingPlanUI` and this is a different module. They are named as copies in
+`Phone`, and the run asserts the one relationship that catches the formula being copied
+backwards — a height of width × depth/width is exactly what makes `FootprintProjection`'s
+two candidate scales equal.
 
-`--device` blocks the banners and the picker out at their real heights (dashed, labelled
-with what they cost) rather than leaving the band blank, because the room they take *is*
-the finding. It also prints a per-item table — the rectangle in points, then what the
-**view** puts in it against what this **SVG** puts in it. Those two columns differ in one
-direction only: the view wraps a label to two lines and shrinks it to 75%, SVG `<text>`
-does neither, so `view: label / svg: step only` means the phone is the *more* legible of
-the two and the picture is being pessimistic. There is no case the other way.
+**Two caveats, both in the optimistic direction.** Presenting through `PlanViewer` rather
+than `PlanDiagramView` adds its own mode picker and padding, about 48 pt more fixed chrome
+— which now costs scroll, not scale. And text wrapping is estimated at ~0.55 em per
+character rather than measured, which over-counts a caption line here and there; the demo
+header is budgeted at two lines and renders as one.
 
-Everything else `--device` changes is page furniture: the type sizes become the view's own
-(`.caption2` 11 pt in the rect, `system(size: 9)` for the dimensions line and the bare step
-number), the legend runs under the picture because at 358 pt there is no beside, and the
-`PlanStats` band is replaced by the one header line the view actually shows — the rest of
-those numbers live inside its collapsed "Pack details" row and are not on screen.
+The per-item table prints the rectangle in points, then what the **view** puts in it
+against what this **SVG** puts in it. The SVG now mirrors the view's
+`lineLimit(2).minimumScaleFactor(0.75)` — one line at full size, or two at 75%, marked
+`label*` — so the two columns agree on both plans at both scales. Before that it drew a
+bare step number wherever one line overflowed, which meant reporting `2` for the toiletry
+kit while the phone showed "2. Toiletry kit" over two lines: the picture under-reporting
+the device on the exact item the scale question was about.
 
-#### The verdict, and what would fix it
+#### The verdict
 
-On the bundled demo plan the fallback is **legible, but only just, and only because the
-plan is clean and small**. Four of its six items keep a label and a size; the toiletry kit
-is 10 cm wide, comes out 49 pt, and is a bare `2` on both layer 1 and every layer it
-protrudes into. At 494 pt/m the view's own 54 × 28 pt threshold is **10.9 cm across by
-5.7 cm deep** — an item narrower or shallower than that shows a step number and nothing
-else, and a good deal of what goes in a carry-on is.
+**Yes, on both plans, at every layer.** At 881 pt/m the view's 54 × 28 pt label threshold
+is **6.1 cm across by 3.2 cm deep**. On the demo plan every one of the six items clears it
+with room to spare and carries name *and* dimensions — including the toiletry kit, 10 cm
+wide and 88 pt on screen, which was the item that failed the old layout.
 
-On any plan with a banner it is **not legible**. That is not a marginal call: 153 pt/m
-puts the whole 40 cm bag in 62 pt of screen.
+One item in the tree loses its label: the fixture's **charger pouch, 6 × 8 cm → 52.9 ×
+70.5 pt**, 1.1 pt under the width gate, drawn as a bare `8`. That is the threshold working,
+not failing — and the item is 6 cm across.
 
-None of the fixes belong to `plan3d`. For whoever owns `PlanDiagramView`, roughly in order
-of how much they buy:
+Two smaller observations from reading the renders:
 
-1. **Put the body in a `ScrollView`.** One line, and it ends the whole class of problem:
-   the diagram stops being the residual and can take a floor (`.frame(minHeight:)`) while
-   the legend scrolls under it. Every number above is a consequence of the diagram being
-   whatever is left over.
-2. **Collapse the banners to one tappable line.** "2 geometry issues" as a row that opens
-   a sheet costs ~20 pt instead of 90, and the detail is still one tap away. Today three
-   wrapped `.caption2` lines of `issue.description` are the single largest thing on the
-   screen that is not the picture.
-3. **Move the legend behind the picture, or into a disclosure like "Pack details".** The
-   labels are already in the rectangles when they fit; the legend is only load-bearing for
-   the items that lost theirs.
-4. **Drop the label threshold and lean harder on `minimumScaleFactor`.** 54 × 28 pt is a
-   reasonable floor for two lines at 11 pt, but a one-line step number plus an abbreviated
-   label would fit a 49 pt rect and is strictly more than the bare `2` shown now.
+* **Protrusion outlines are fine.** Dashed grey and unfilled stay unmistakable against a
+  filled item, and at 881 pt/m their step-number tags are well clear of each other — the
+  nested pair on fixture layer 3 (`2` containing `8`) reads cleanly, and no tag lands on
+  the container wall.
+* **The bare step number is low-contrast.** It is drawn in the item's own palette colour at
+  9 pt on that item's 25%-opacity fill — a magenta `8` on dark purple. It is the only text
+  a too-small item gets, so it is the one place a white or high-contrast fill would be
+  worth more than colour-coding.
 
-A thing that does **not** need fixing: the protrusion outlines. Dashed grey, unfilled, are
-still unmistakable against a filled item at 153 pt/m — the fill/no-fill distinction
-survives the scale collapse completely. Their step-number tags do not: on
-`fixtures/nested-carry-on.json` layer 3 the tags for two nested protrusions (`2` inside
-`8`) land within a few points of each other, and the shoes' `1` sits on the container
-wall.
+#### The four suggestions, re-judged
+
+The first has been taken and is why the numbers above are what they are.
+
+1. ~~**Put the body in a `ScrollView`**~~ — **done in `af90f89`**, together with pinning the
+   diagram to `planDiagramHeight` so it cannot be squeezed. This is the change; the other
+   three were mostly ways of buying back the height it now takes unconditionally.
+2. **Collapse the banners to one tappable line.** Still worth something, but much less: it
+   no longer rescues the picture, it just removes the 170 pt scroll on a plan that has
+   issues. Cheap, not urgent.
+3. **Move the legend behind the picture.** Now pointless. The legend is below the diagram
+   in a scroll view, which is where a reference list belongs; it costs the picture nothing.
+4. **Lean harder on `minimumScaleFactor` below the threshold.** Still open, and now the
+   only one that changes what anybody can read: the charger pouch is 1.1 pt short of the
+   54 pt gate and gets a bare `8`. A one-line abbreviated label would fit. Small, real.
+
+One thing `--device` does *not* show, and should not be read as evidence about: the dotted
+inner border and the "in `<host>`" line that `af90f89` added to a nested item's rectangle.
+`plan3d`'s `--layers` draws nested items as ordinary rectangles, so its picture is missing
+that cue at both scales.
 
 ### Checking a layer diagram is right
 
@@ -389,9 +399,10 @@ implementations of the same 5 mm floor rule in the library, and the run prints a
 if their layer counts ever disagree.
 
 **6. Read it again at device scale.** `--device` is the same picture at the size it will
-be on stage, and the two are not interchangeable: an item that carries its name and size
-here can be a bare step number there, and a plan with an issue banner loses most of the
-picture to it. See **Two scales** above.
+be on stage. Since `af90f89` the difference is modest — 881 pt/m against 1115 — so the
+question it answers is no longer "does the label survive" but "how much of the bag is on
+screen at once": a plan with issue banners pushes the bottom of the picture below the
+fold. See **Two scales** above.
 
 **5. Nested items.** A nest is *not* a thing the 2D view knows about: a nested item is
 drawn as an ordinary rectangle in whatever layer its own floor puts it in, and its host is

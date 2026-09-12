@@ -333,7 +333,12 @@ what `physics.io.object_from_scanned_item` currently does with this same payload
 * **Classification**: footprint mostly filled and volume close to the full box -> `"box"`;
   roughly square footprint with a circular fill fraction (~ pi/4 of the box) -> `"cylinder"`;
   anything else (an L-bracket, an open shoe, a hole through the middle) -> `"irregular"`,
-  packed as its bounding box with `fragile=True` by default (its top isn't flat/complete).
+  packed as the sub-boxes its grid carves, `keep_upright=True` by default but **not**
+  `fragile` (unlike the mesh/dims paths above, which have no grid): the grid already says
+  where every surface is, and a blanket "nothing may rest on it" also forbids resting
+  anything on the floor of the item's own cavity, which is what kept nesting from ever firing
+  in a real solve. `rigidity: "fragile"` still sets it explicitly and still protects every
+  surface.
 * Still **only 2.5D**: a single top-down view, so undercuts and overhangs hidden from the
   scanner (a mushroom shape) aren't captured -- same limitation the scanner itself documents.
 

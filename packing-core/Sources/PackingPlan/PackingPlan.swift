@@ -203,11 +203,52 @@ public struct PackingPlan: Codable, Hashable, Sendable {
         placements.first { $0.step == step }
     }
 
-    /// Fraction of the interior cavity the plan fills, 0...1. Useful as a
-    /// sanity read-out and in the 2D view's summary.
+    /// Fraction of the interior cavity the plan fills, 0...1: the volume the
+    /// placement boxes occupy **counted once**, over the interior volume. Useful
+    /// as a sanity read-out and in the 2D view's summary.
+    ///
+    /// A nested item's box lies inside its host's (CLAUDE.md, "Nested
+    /// placements"), so the plain sum of the boxes counts those cubic metres
+    /// twice and claims the bag is fuller than it is — 13.46% against the true
+    /// 12.14% on the bundled bowl-and-cup fixture. The volume each honoured
+    /// nesting shares with its host is subtracted, making this the union of the
+    /// boxes, so it equals `PlanStats.fillFraction` for every plan;
+    /// `PlanStats.packedVolume` is the same quantity in cubic metres. Only
+    /// nesting `honouredNesting()` accepts counts: a dangling host, a
+    /// self-reference or a cycle is not a licence to discount volume.
+    ///
+    /// The solver's own `fill_ratio` (`packer3d`) still sums the boxes, so for a
+    /// nested plan the app now reports a *lower* figure than the document it
+    /// loaded until that is fixed too.
     public var packedVolumeFraction: Float {
         let interior = container.interior.volume
         guard interior > 0 else { return 0 }
-        return placements.reduce(0) { $0 + $1.box.volume } / interior
+        let sum = placements.reduce(0) { $0 + $1.box.volume }
+        return (sum - nestedOverlapVolume()) / interior
+    }
+
+    /// Volume a plain sum of the boxes counts twice: the part of each honoured
+    /// nested item's box lying inside its host's box, m³, `>= 0`.
+    ///
+    /// Measured against the host's *box*, not the declared cavity — the double
+    /// count is however much of the two boxes coincides, whether or not it stays
+    /// inside the cell the producer named. Overlap outside the cell is a
+    /// `.intersection` issue from `geometryIssues()`; reporting truthful volume
+    /// for it is not endorsing it.
+    ///
+    /// ponytail: pairwise, which is exact for one guest per host and for a chain
+    /// whose guests each sit inside their host's box. A guest poking out of its
+    /// host and into its host's host would be over-subtracted; no producer emits
+    /// that, and full inclusion–exclusion is the fix if one ever does.
+    func nestedOverlapVolume() -> Float {
+        let boxes = Dictionary(
+            placements.map { ($0.itemID, $0.box) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return honouredNesting().reduce(0) { total, entry in
+            guard let guest = boxes[entry.key], let host = boxes[entry.value.itemID] else { return total }
+            let overlap = guest.overlapExtents(with: host)
+            return total + max(overlap.x, 0) * max(overlap.y, 0) * max(overlap.z, 0)
+        }
     }
 }

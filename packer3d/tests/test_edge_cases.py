@@ -522,14 +522,17 @@ def test_from_scanned_heightmap_box_cylinder_irregular():
     assert can.shape == "cylinder" and can.scan_shape == "cylinder"
     assert can.radius == pytest.approx(0.15, abs=0.01)
 
-    # an L-shaped bracket: one quadrant missing -> irregular, fragile by default
+    # an L-shaped bracket: one quadrant missing -> irregular, and NOT fragile: a heightmap scan
+    # says where its surfaces are, so it needs no blanket "nothing may rest on it" (which also
+    # forbade resting anything in a scanned cavity -- see from_scanned_heightmap)
     heights = [[8.0] * 10 for _ in range(20)]
     for i in range(10, 20):
         for j in range(0, 5):
             heights[i][j] = 0.0
     l_scan = {"id": "bracket", "width": 20.0, "depth": 10.0, "height": 8.0, "cellSize": 1.0, "heights": heights}
     bracket = Item.from_scanned_heightmap(l_scan)
-    assert bracket.scan_shape == "irregular" and bracket.fragile
+    assert bracket.scan_shape == "irregular" and not bracket.fragile
+    assert bracket.keep_upright   # the other irregular default stands: never tipped on its side
     assert bracket.true_volume < bracket.bbox_volume
 
     items = [box, can, bracket]

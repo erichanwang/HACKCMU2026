@@ -45,7 +45,8 @@ assert r.status_code == 200, r.text
 assert r.json()["labelSource"] == "auto" and r.json()["rigidity"] in main.RIGIDITIES, r.json()
 assert r.json()["compressibility"] >= 1 and r.json()["compressibilitySource"] == "auto", r.json()
 assert r.json()["mass"] >= 0 and isinstance(r.json()["keepUpright"], bool) and "description" in r.json(), r.json()
-assert r.json()["labelStatus"] == "done", "no XAI_API_KEY means there is nothing to retry"
+assert r.json()["labelStatus"] == "unidentified", "no labelling model configured means nothing to retry, but nothing was identified either"
+assert "identifyHint" in r.json(), r.json()
 
 r = c.patch("/items/t1", json={"label": "hair dryer", "rigidity": "fragile", "compressibility": 2.5})
 assert r.json()["label"] == "hair dryer" and r.json()["rigiditySource"] == "user", r.json()
@@ -116,6 +117,39 @@ with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "pos
         assert main.relabel_pending() == 0
 assert c.get("/items/t1d").json()["labelStatus"] == "failed", "a non-object answer must count as a failed attempt"
 assert c.get("/items/t1e").json()["labelStatus"] == "failed", "an unreadable item must not block the ones behind it"
+
+# --- dual-model labelling: Grok + Claude, Claude wins disagreements, "unidentified" is terminal -
+def claude_says(label: str):
+    body = {"label": label, "description": "d", "rigidity": "rigid", "compressibility": 1, "mass": 0.1, "keepUpright": False}
+    return lambda url, *a, **k: httpx.Response(200, request=httpx.Request("POST", url), json={"content": [{"text": json.dumps(body)}]})
+
+def grok_says(label: str):
+    body = {"label": label, "rigidity": "rigid", "compressibility": 1, "mass": 0, "keepUpright": False}
+    return lambda url, *a, **k: httpx.Response(200, request=httpx.Request("POST", url), json={"choices": [{"message": {"content": json.dumps(body)}}]})
+
+def route(grok_mock, claude_mock):
+    return lambda url, *a, **k: (claude_mock if "anthropic.com" in url else grok_mock)(url, *a, **k)
+
+with patch.dict(os.environ, {"XAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}), patch.object(main.httpx, "post", route(grok, claude_says("wool scarf"))):
+    r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1h"})}, files=img)
+assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["label"] == "wool scarf", "agreement: either answer, item is done"
+
+with patch.dict(os.environ, {"XAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}), patch.object(main.httpx, "post", route(grok, claude_says("hiking boot"))):
+    r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1i"})}, files=img)
+assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["label"] == "hiking boot", "disagreement: Claude wins"
+
+with patch.dict(os.environ, {"XAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}), patch.object(main.httpx, "post", route(grok_says("unknown"), claude_says("umbrella"))):
+    r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1j"})}, files=img)
+assert r.status_code == 200 and r.json()["labelStatus"] == "done" and r.json()["label"] == "umbrella", "one model declining is not a disagreement"
+
+with patch.dict(os.environ, {"XAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}), patch.object(main.httpx, "post", route(grok_says("unknown"), claude_says("unknown"))):
+    r = c.post("/items", data={"item": json.dumps(bad | {"id": "t1k"})}, files=img)
+assert r.status_code == 200 and r.json()["labelStatus"] == "unidentified" and r.json()["label"] == "unknown", r.text
+assert r.json().get("identifyHint"), "the app needs visible text, not a bare 'unknown'"
+assert main.relabel_pending() == 0, "unidentified is terminal: a retry on the same photo cannot change a model's mind"
+
+for i in ("t1h", "t1i", "t1j", "t1k"):
+    assert c.delete(f"/items/{i}").status_code == 200
 
 # --- ?async=1: the upload returns before Grok answers ------------------------------------------
 # TestClient runs a BackgroundTasks job before returning, so the item is already labelled by the

@@ -88,10 +88,20 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-def detect(jpeg: bytes) -> dict:
-    key = os.environ.get("XAI_API_KEY")
-    if not key:
-        return dict(UNKNOWN)
+def _parse_guess(out: dict, source: str) -> dict:
+    if not isinstance(out, dict):  # a JSON array or bare string is garbage like any other bad answer
+        raise ValueError(f"expected a JSON object from {source}, got {type(out).__name__}")
+    rigidity = out.get("rigidity") if out.get("rigidity") in RIGIDITIES else "rigid"
+    try:
+        mass = min(50.0, max(0.0, float(out.get("mass", 0))))
+    except (TypeError, ValueError):
+        mass = 0.0
+    return {"label": str(out.get("label", "unknown"))[:60], "description": str(out.get("description", ""))[:200],
+            "rigidity": rigidity, "compressibility": compressibility(out.get("compressibility"), rigidity),
+            "mass": mass, "keepUpright": out.get("keepUpright") is True}
+
+
+def _grok_detect(jpeg: bytes, key: str) -> dict:
     r = httpx.post(
         "https://api.x.ai/v1/chat/completions",
         headers={"Authorization": f"Bearer {key}"},
@@ -106,17 +116,81 @@ def detect(jpeg: bytes) -> dict:
         timeout=30,
     )
     r.raise_for_status()
-    out = json.loads(r.json()["choices"][0]["message"]["content"])
-    if not isinstance(out, dict):  # a JSON array or bare string is garbage like any other bad answer
-        raise ValueError(f"expected a JSON object from Grok, got {type(out).__name__}")
-    rigidity = out.get("rigidity") if out.get("rigidity") in RIGIDITIES else "rigid"
-    try:
-        mass = min(50.0, max(0.0, float(out.get("mass", 0))))
-    except (TypeError, ValueError):
-        mass = 0.0
-    return {"label": str(out.get("label", "unknown"))[:60], "description": str(out.get("description", ""))[:200],
-            "rigidity": rigidity, "compressibility": compressibility(out.get("compressibility"), rigidity),
-            "mass": mass, "keepUpright": out.get("keepUpright") is True}
+    return _parse_guess(json.loads(r.json()["choices"][0]["message"]["content"]), "Grok")
+
+
+def _claude_detect(jpeg: bytes, key: str) -> dict:
+    r = httpx.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+        json={
+            "model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5"),
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(jpeg).decode()}},
+                {"type": "text", "text": PROMPT},
+            ]}],
+        },
+        timeout=30,
+    )
+    r.raise_for_status()
+    text = r.json()["content"][0]["text"].strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return _parse_guess(json.loads(text), "Claude")
+
+
+def _is_unknown(guess: dict) -> bool:
+    return guess["label"].strip().lower() == "unknown"
+
+
+def detect(jpeg: bytes) -> dict:
+    """Ask whichever of Grok/Claude is configured.
+
+    If only one identifies the item, use it — the other declining is not a disagreement. If both
+    identify it but name it differently, trust Claude. Only if every configured model declines (or
+    none is configured) does the result come back "unknown"; the caller turns that into a distinct,
+    terminal labelStatus, since a retry against the same stored photo cannot change a model's mind.
+    """
+    grok_key, claude_key = os.environ.get("XAI_API_KEY"), os.environ.get("ANTHROPIC_API_KEY")
+    if not grok_key and not claude_key:
+        return dict(UNKNOWN)
+    grok_guess = grok_err = claude_guess = claude_err = None
+    if grok_key:
+        try:
+            grok_guess = _grok_detect(jpeg, grok_key)
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            grok_err = exc
+    if claude_key:
+        try:
+            claude_guess = _claude_detect(jpeg, claude_key)
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            claude_err = exc
+    if grok_guess is None and claude_guess is None:
+        raise grok_err or claude_err
+    if grok_guess is None or claude_guess is None:
+        return grok_guess if claude_guess is None else claude_guess
+    if _is_unknown(grok_guess) != _is_unknown(claude_guess):  # one declined, the other didn't: use the one that answered
+        return claude_guess if _is_unknown(grok_guess) else grok_guess
+    if not _is_unknown(grok_guess) and grok_guess["label"].strip().lower() != claude_guess["label"].strip().lower():
+        logger.info("label disagreement: grok=%r claude=%r, trusting claude", grok_guess["label"], claude_guess["label"])
+        return claude_guess
+    return grok_guess  # both agree (including both "unknown")
+
+
+def identify_hint(dims: list[float], heights: list[list[float]]) -> str:
+    """Best guess at why identification failed, from the scan geometry alone — the crop is only as
+    good as the scan, so a degenerate scan gets "rescan" advice rather than the misleading "rotate it"."""
+    flat = [h for row in heights for h in row]
+    if min(dims) < 0.03 or max(flat) - min(flat) < 0.01:
+        return "the scan looks too flat or small to show the object clearly — try rescanning it"
+    return "couldn't tell what this is — try rotating it for a clearer angle"
+
+
+def resolve_label_status(doc: dict, guess: dict) -> str:
+    """"done" once a real label sticks (ours or one the user already typed), else the terminal "unidentified"
+
+    — a retry against the same stored photo cannot change a model's mind, so this never goes back to
+    "pending"."""
+    return "done" if doc.get("labelSource", "auto") != "auto" or not _is_unknown(guess) else "unidentified"
 
 
 def label_item(doc: dict) -> bool:
@@ -140,8 +214,11 @@ def label_item(doc: dict) -> bool:
         db.items.update_one({"_id": item_id}, {"$inc": {"labelAttempts": 1}, "$set": {"labelStatus": status}})
         return False
     fields = {k: v for k, v in guess.items() if k not in SOURCES or doc.get(SOURCES[k], "auto") == "auto"}
-    db.items.update_one({"_id": item_id}, {"$set": fields | {"labelStatus": "done"}})
-    return True
+    status = resolve_label_status(doc, guess)
+    if status == "unidentified":
+        fields["identifyHint"] = identify_hint(doc["dimensions"], doc["heights"])
+    db.items.update_one({"_id": item_id}, {"$set": fields | {"labelStatus": status}})
+    return status == "done"
 
 
 def relabel_pending() -> int:
@@ -269,15 +346,18 @@ def create_item(background: BackgroundTasks, item: str = Form(...), image: Uploa
     jpeg = image.file.read(MAX_IMAGE_BYTES + 1)
     if len(jpeg) > MAX_IMAGE_BYTES:
         raise HTTPException(413, f"image must be at most {MAX_IMAGE_BYTES} bytes")
-    background_label = later and bool(os.environ.get("XAI_API_KEY"))  # ?async=1: don't make the phone wait 6 s for Grok
+    # ?async=1: don't make the phone wait for a labelling model to answer.
+    background_label = later and bool(os.environ.get("XAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
     if background_label:
         guess, status = dict(UNKNOWN), "pending"
     else:
         try:
-            guess, status = detect(jpeg), "done"
+            guess = detect(jpeg)
+            status = resolve_label_status(doc, guess)
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
-            # x.ai down, rate-limited or returning garbage must not lose the scan; relabel_pending retries it.
-            logging.warning("grok labelling failed, item %s saved as unknown: %s", item_id, exc)
+            # every configured model's call itself failed (down, rate-limited, garbage) — this is not
+            # the same as a model confidently declining, and relabel_pending can still retry it.
+            logging.warning("labelling failed, item %s saved as unknown: %s", item_id, exc)
             guess, status = dict(UNKNOWN), "pending"
     doc |= guess | {
         "_id": item_id, "owner_id": user, "photo": jpeg, "labelStatus": status,
@@ -285,6 +365,8 @@ def create_item(background: BackgroundTasks, item: str = Form(...), image: Uploa
         "massSource": "auto", "keepUprightSource": "auto",
         "createdAt": now(),
     }
+    if status == "unidentified":
+        doc["identifyHint"] = identify_hint(doc["dimensions"], doc["heights"])
     if background_label:
         doc["labelAttempts"] = 0
         background.add_task(label_item, doc)  # runs after this response is sent; a failure leaves it to the sweep

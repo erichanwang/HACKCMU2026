@@ -1,5 +1,13 @@
 # scripts/
 
+`pipeline_check.sh` — one command that exercises the whole pipeline: the root `unittest`
+suite, the packer3d pytest suite, `server/check.py`, `make test-swift`, every
+`tests/swift/*/run.sh`, and the live end-to-end demo below (starting Mongo/the server if
+nothing is already listening). Every step runs even if an earlier one failed; it prints a
+PASS/FAIL/SKIP table and exits 1 if anything FAILed. Run it as `make pipeline` or
+`bash scripts/pipeline_check.sh` from the repo root. `SKIP_SWIFT=1` skips the `swift test`
+step (a first build in a fresh worktree can take many minutes); everything else always runs.
+
 `demo_e2e.py` — the live demo in one process: fixture scan → server → solver + physics
 validator → PAN rollout → the iOS `plan.json`. Run it from the repo root.
 

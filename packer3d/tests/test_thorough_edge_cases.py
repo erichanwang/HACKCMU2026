@@ -418,6 +418,7 @@ def test_min_support_full_requires_complete_support():
 
 
 # ============================================================== scale / perf sanity
+@pytest.mark.slow
 def test_thousand_items_naive_completes_quickly_and_verifies():
     import time
     items = [Item.box(f"t{i}", 1, 1, 1, mass=1) for i in range(1000)]

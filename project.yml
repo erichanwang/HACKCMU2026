@@ -33,3 +33,5 @@ targets:
       base:
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: com.aaravlala.suitcase.spike2026
+        DEVELOPMENT_TEAM: GVWSS8DC98

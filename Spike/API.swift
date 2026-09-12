@@ -18,7 +18,7 @@ private struct ServerError: Decodable {
 
 /// The FastAPI server in server/. Set to this Mac's LAN IP; phone and Mac must share a Wi-Fi network.
 enum API {
-    static let base = URL(string: "http://172.26.48.172:8000")!
+    static let base = URL(string: "http://172.26.120.200:8000")!
 
     static func createSuitcase(name: String, dimensions: [Float]) async throws -> String {
         var req = URLRequest(url: base.appending(path: "suitcases"))

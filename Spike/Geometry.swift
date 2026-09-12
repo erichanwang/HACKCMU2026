@@ -132,6 +132,9 @@ struct ScannedItem: Codable, Identifiable {
     var compressibility: Double?   // loose volume / squeezed volume, >= 1; 1 unless soft
     var compressibilitySource: String?
     var createdAt: String?
+    var voxels: VoxelPayload?       // coloured 3D shape from walking the LiDAR around the object
+    var mesh: MeshPayload?          // same scan as filled, coloured triangles, for a solid-looking render
+    var viewCoverage: Float?        // 0...1 share of the object's azimuth ring actually seen
 
     init(_ box: BoxFit, heights: [[Float]], cell: Float) {
         dimensions = [box.width, box.height, box.depth]

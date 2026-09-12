@@ -12,6 +12,16 @@ let searchRadiusMeters: Float = 0.5
 let clusterCellMeters: Float = 0.02
 /// Resolution of the captured shape (heightmap cell). Mesh triangles are sampled at half this spacing.
 let shapeCellMeters: Float = 0.01
+/// Edge length of one colour/occupancy voxel. 5 mm is about the useful floor for iPhone
+/// LiDAR: finer mostly records noise, since a single depth sample is only good to ~1 cm.
+let voxelSizeMeters: Float = 0.005
+/// A voxel seen fewer times than this is dropped as noise when the scan is finished.
+let minVoxelObservations: UInt32 = 2
+/// Integrate a frame only after the camera has moved this far, so a still phone does not
+/// pile thousands of identical observations into the same voxels.
+let reintegrateDistanceMeters: Float = 0.02
+/// ...or turned this far, which matters when orbiting a small object up close.
+let reintegrateRadians: Float = 0.10
 
 /// What the next tap captures: the bag itself, or something to put in it.
 enum ScanMode: Hashable {
@@ -30,6 +40,7 @@ struct ScanView: UIViewRepresentable {
         config.planeDetection = .horizontal
         config.sceneReconstruction = .mesh
         view.session.run(config)
+        view.session.delegate = context.coordinator
         view.debugOptions = [.showSceneUnderstanding]
         view.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap)))
         context.coordinator.view = view
@@ -39,7 +50,15 @@ struct ScanView: UIViewRepresentable {
     func updateUIView(_ uiView: ARView, context: Context) { context.coordinator.mode = mode }
     func makeCoordinator() -> Coordinator { Coordinator(item: $item, status: $status, suitcaseId: $suitcaseId, mode: mode) }
 
-    final class Coordinator: NSObject {
+    /// Walking a LiDAR-equipped phone around an object and fusing every posed frame into one
+    /// coloured voxel grid is the same idea photogrammetry rigs use to build a textured 3D
+    /// model from photos (see the treehcks-style pipeline this borrows the pixel-projection
+    /// math from) -- except there is no photo set and no offline reconstruction step. ARKit
+    /// already gives the geometry (the mesh) and the pose for free every frame, so the only
+    /// thing borrowed is "project a 3D point into a posed camera image and read its colour"
+    /// (`FrameSampler.swift`); it runs live, on-device, as part of the same tap-to-scan gesture
+    /// the app already had -- there is no separate scanning mode to trigger.
+    final class Coordinator: NSObject, ARSessionDelegate {
         @Binding var item: ScannedItem?
         @Binding var status: String
         @Binding var suitcaseId: String?
@@ -47,31 +66,92 @@ struct ScanView: UIViewRepresentable {
         weak var view: ARView?
         var overlay: AnchorEntity?
 
+        /// Everything accumulated since the scan started. One grid, many viewpoints -- fusing
+        /// passes is just writing into it again, because ARKit reports every frame in the same
+        /// world frame.
+        private var grid = VoxelGrid(voxelSize: voxelSizeMeters)
+        /// The same triangles ARKit already gives us, coloured per vertex -- kept alongside
+        /// the voxel grid so the item can be rendered as a filled surface, not just points.
+        private var coloredMesh = ColoredMesh()
+        private var coverage = ViewCoverage()
+        private var seed: SIMD3<Float>?
+        private var planeY: Float = 0
+        private var lastPose: simd_float4x4?
+        private var isScanning = false
+
         init(item: Binding<ScannedItem?>, status: Binding<String>, suitcaseId: Binding<String?>, mode: ScanMode) {
             _item = item; _status = status; _suitcaseId = suitcaseId; self.mode = mode
         }
 
+        // MARK: - Tap: start, then finish
+
         @objc func tap(_ g: UITapGestureRecognizer) {
             guard let view, let frame = view.session.currentFrame else { return }
-            let point = g.location(in: view)
+            if isScanning { finish(frame: frame) } else { begin(at: g.location(in: view), frame: frame) }
+        }
 
+        private func begin(at point: CGPoint, frame: ARFrame) {
+            guard let view else { return }
             // Seed: whatever surface the ray hits (object top, most likely).
             guard let hit = view.raycast(from: point, allowing: .estimatedPlane, alignment: .any).first else {
                 status = "No surface under tap"; return
             }
-            let seed = SIMD3<Float>(hit.worldTransform.columns.3.x, hit.worldTransform.columns.3.y, hit.worldTransform.columns.3.z)
+            let s = SIMD3<Float>(hit.worldTransform.columns.3.x, hit.worldTransform.columns.3.y, hit.worldTransform.columns.3.z)
 
             // Table: the horizontal plane just below the seed. Largest such plane wins.
             let planes = frame.anchors.compactMap { $0 as? ARPlaneAnchor }
-                .filter { $0.alignment == .horizontal && $0.transform.columns.3.y < seed.y }
+                .filter { $0.alignment == .horizontal && $0.transform.columns.3.y < s.y }
             guard let table = planes.max(by: { $0.planeExtent.width * $0.planeExtent.height < $1.planeExtent.width * $1.planeExtent.height }) else {
                 status = "No table plane yet — pan around"; return
             }
-            let planeY = table.transform.columns.3.y
 
-            // Mesh surface above the table near the tap, sampled densely across each triangle.
-            var pts: [SIMD3<Float>] = []
-            let r2 = searchRadiusMeters * searchRadiusMeters
+            seed = s
+            planeY = table.transform.columns.3.y
+            grid = VoxelGrid(voxelSize: voxelSizeMeters)
+            coloredMesh = ColoredMesh()
+            coverage = ViewCoverage()
+            lastPose = nil
+            isScanning = true
+            overlay?.removeFromParent()
+            status = "Scanning — walk around the object, tap again when done"
+            integrate(frame: frame)
+        }
+
+        // MARK: - Per-frame accumulation
+
+        func session(_ session: ARSession, didUpdate frame: ARFrame) {
+            guard isScanning else { return }
+            // Only integrate once the viewpoint has actually changed. Repeated samples from a
+            // stationary phone inflate observation counts without adding information, which
+            // would defeat the noise filter that keys on those counts.
+            let pose = frame.camera.transform
+            if let last = lastPose {
+                let moved = simd_length(pose.columns.3.xyz - last.columns.3.xyz)
+                // Angle between the two camera forward axes (ARKit looks down -Z).
+                let a = simd_normalize(-last.columns.2.xyz), b = simd_normalize(-pose.columns.2.xyz)
+                let turned = acos(max(-1, min(1, simd_dot(a, b))))
+                guard moved > reintegrateDistanceMeters || turned > reintegrateRadians else { return }
+            }
+            lastPose = pose
+            integrate(frame: frame)
+        }
+
+        private func integrate(frame: ARFrame) {
+            guard let seed else { return }
+            let posed = PosedFrame(
+                viewMatrix: frame.camera.transform.inverse,
+                intrinsics: frame.camera.intrinsics,
+                imageSize: SIMD2(Float(frame.camera.imageResolution.width),
+                                 Float(frame.camera.imageResolution.height))
+            )
+            // One lock for the whole frame; locking per point would dominate the cost.
+            let sampler = PixelSampler(frame.capturedImage)
+            defer { sampler?.release() }
+
+            let radius = mode == .suitcase ? searchRadiusMeters * 2 : searchRadiusMeters
+            let r2 = radius * radius
+            var added = 0
+
             for mesh in frame.anchors.compactMap({ $0 as? ARMeshAnchor }) {
                 let v = mesh.geometry.vertices, f = mesh.geometry.faces
                 func vertex(_ i: UInt32) -> SIMD3<Float> {
@@ -85,14 +165,40 @@ struct ScanView: UIViewRepresentable {
                     let m = (a + b + c) / 3
                     let dx = m.x - seed.x, dz = m.z - seed.z
                     guard dx * dx + dz * dz < r2, max(a.y, b.y, c.y) - planeY > minHeightMeters else { continue }
-                    pts += densify(a, b, c, spacing: shapeCellMeters / 2).filter { $0.y - planeY > minHeightMeters }
+                    for p in densify(a, b, c, spacing: voxelSizeMeters) where p.y - planeY > minHeightMeters {
+                        var colour: SIMD3<Float>?
+                        if let sampler, let px = posed.project(p) { colour = sampler.colour(at: px) }
+                        grid.add(p, colour: colour)
+                        added += 1
+                    }
+                    // Same triangle ARKit already triangulated -- keep it, coloured per vertex,
+                    // for a filled render instead of re-deriving a sparse point cloud from it.
+                    coloredMesh.add(anchorID: mesh.identifier, triangleIndex: t, a: a, b: b, c: c) { p in
+                        guard let sampler, let px = posed.project(p) else { return nil }
+                        return sampler.colour(at: px)
+                    }
                 }
             }
+            guard added > 0 else { return }
 
-            let cluster = connectedCluster(pts, seed: seed, cell: clusterCellMeters)
-            guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
-                status = "Nothing above the table here (\(pts.count) pts)"; return
+            coverage.record(direction: posed.directionToCamera(from: seed))
+            status = String(format: "%d voxels · %.0f%% covered", grid.count, coverage.fraction * 100)
+        }
+
+        // MARK: - Finish
+
+        private func finish(frame: ARFrame) {
+            isScanning = false
+            guard let view, let seed else { return }
+
+            // Noise first, then connectivity: pruning removes the stray single-sample voxels
+            // that would otherwise bridge the object to its surroundings.
+            let solid = grid.pruned(minObservations: minVoxelObservations).component(containing: seed)
+            guard !solid.isEmpty, let box = fitBox(points: solid.points, planeY: planeY, padding: paddingMeters) else {
+                status = "Nothing solid captured — try scanning again, more slowly"
+                return
             }
+
             // Suitcase mode: the fitted box *is* the bag interior. No heightmap, no photo, no label.
             if mode == .suitcase {
                 show(box, in: view)
@@ -110,13 +216,16 @@ struct ScanView: UIViewRepresentable {
             }
             guard let suitcaseId else { status = "Scan the suitcase first"; return }
 
-            let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
+            let heights = heightMap(points: solid.points, box: box, planeY: planeY, cell: shapeCellMeters)
             var scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
             scanned.suitcaseId = suitcaseId
+            scanned.voxels = solid.payload()
+            scanned.mesh = coloredMesh.filtered(by: solid).payload()
+            scanned.viewCoverage = coverage.fraction
             item = scanned
-            status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
+            status = String(format: "%d voxels, %d triangles, %.0f%% coloured — labelling…",
+                             solid.count, scanned.mesh?.triangleCount ?? 0, solid.colourCoverage * 100)
             print(scanned.asciiMap)
-            print(String(data: try! JSONEncoder().encode(scanned), encoding: .utf8)!)
 
             // Photograph the object before the overlay covers it, then ask the server for label + rigidity.
             let crop = screenRect(of: box, in: view)
@@ -125,7 +234,7 @@ struct ScanView: UIViewRepresentable {
                 Task { @MainActor in
                     do {
                         self.item = try await API.upload(scanned, image: UIImage(cgImage: cg))
-                        self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
+                        self.status = String(format: "%d voxels stored, %.0f%% coloured", solid.count, solid.colourCoverage * 100)
                     } catch {
                         self.status = "server: \(error.localizedDescription)"
                     }
@@ -161,4 +270,8 @@ struct ScanView: UIViewRepresentable {
             overlay = anchor
         }
     }
+}
+
+private extension SIMD4 where Scalar == Float {
+    var xyz: SIMD3<Float> { SIMD3(x, y, z) }
 }

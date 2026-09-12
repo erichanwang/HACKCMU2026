@@ -51,6 +51,24 @@ public enum PlanLoader {
         return plan
     }
 
+    /// The live path: decodes the document the server returns from
+    /// `POST/GET /suitcases/{id}/plan` — `{suitcaseId, createdAt, solver,
+    /// validation, plan}` — of which only `plan` is a `PackingPlan`.
+    public static func plan(fromServerDocument data: Data) throws -> PackingPlan {
+        let document: ServerPlanDocument
+        do {
+            document = try JSONDecoder().decode(ServerPlanDocument.self, from: data)
+        } catch let error as DecodingError {
+            throw PlanError.malformedJSON(description: Self.describe(error))
+        }
+        try validateStructure(of: document.plan)
+        return document.plan
+    }
+
+    private struct ServerPlanDocument: Decodable {
+        let plan: PackingPlan
+    }
+
     public static func plan(at url: URL) throws -> PackingPlan {
         let data: Data
         do {
@@ -77,7 +95,8 @@ public enum PlanLoader {
     /// The hand-authored mock plan: the demo carry-on interior, 0.4064 × 0.1524 ×
     /// 0.6096 m (16 × 6 × 24 in), with six items.
     /// Used by tests and by the 2D view's previews, so the UI can be built
-    /// without a live solver.
+    /// without a live solver. Never the app's live path — that is
+    /// `plan(fromServerDocument:)` against the server's plan endpoint.
     public static func mockPlan() throws -> PackingPlan {
         try plan(resourceNamed: mockPlanResourceName, in: .module)
     }

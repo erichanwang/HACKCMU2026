@@ -1,5 +1,6 @@
 {
   "backend": "cache(mock)",
+  "backend_note": "synthetic frames drawn by the mock, not a world-model prediction",
   "pan_available": true,
   "returned_after_ms": 27.818100003059953,
   "candidates": [
@@ -416,7 +417,9 @@
         "pan_risk": 0.00321,
         "execution_risk_weight": 0.5,
         "n_steps": 1
-      }
+      },
+      "backend": "mock",
+      "backend_note": "synthetic frames drawn by the mock, not a world-model prediction"
     },
     {
       "candidate_id": "B",
@@ -831,7 +834,9 @@
         "pan_risk": 0.0,
         "execution_risk_weight": 0.5,
         "n_steps": 1
-      }
+      },
+      "backend": "mock",
+      "backend_note": "synthetic frames drawn by the mock, not a world-model prediction"
     },
     {
       "candidate_id": "C",
@@ -854,7 +859,9 @@
         "pan_risk": null,
         "execution_risk_weight": 0.5,
         "n_steps": 1
-      }
+      },
+      "backend": null,
+      "backend_note": null
     }
   ],
   "steps": [
@@ -1266,7 +1273,9 @@
         "pan_risk": 0.00321,
         "execution_risk_weight": 0.5,
         "total": 1.998395
-      }
+      },
+      "backend": "mock",
+      "backend_note": "synthetic frames drawn by the mock, not a world-model prediction"
     },
     {
       "candidate_id": "B",
@@ -1676,7 +1685,9 @@
         "pan_risk": 0.0,
         "execution_risk_weight": 0.5,
         "total": 2.0
-      }
+      },
+      "backend": "mock",
+      "backend_note": "synthetic frames drawn by the mock, not a world-model prediction"
     },
     {
       "candidate_id": "C",
@@ -1694,7 +1705,9 @@
         "pan_risk": null,
         "execution_risk_weight": 0.5,
         "total": 1.9487179487179487
-      }
+      },
+      "backend": null,
+      "backend_note": null
     }
   ]
 }

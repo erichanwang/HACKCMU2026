@@ -1,4 +1,4 @@
-# HackCMU 2026 — Travel Track PRD: AR Packing Assistant
+# HackCMU 2026 — Travel Track PRD: PackAR
 
 ## Product vision and track focus
 

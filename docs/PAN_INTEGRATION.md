@@ -59,6 +59,7 @@ impossible (PAN.md sec 17).
 ```jsonc
 {
   "backend": "cache(mock)",       // world_model.name -- string, not an API detail
+  "backend_note": "synthetic frames drawn by the mock, not a world-model prediction",
   "pan_available": true,          // world_model.available()
   "returned_after_ms": 34.9,      // the solver path never waited on PAN for this
   "candidates": [ /* one CandidateReport.to_dict() per candidate, rolled up over steps */ ],
@@ -73,6 +74,10 @@ Each report (candidate or step) is plain JSON, per PAN.md sec 20/19:
 - `execution_risk`: `"low" | "medium" | "high" | null` -- a learned hint, never a gate.
 - `action_text`: the grounded natural-language instruction sent to PAN.
 - `pan_preview_video` / `pan_final_frame`: relative paths (GIF / PNG) under `out_dir`, or `null`.
+- `backend` / `backend_note`: which world model produced that rollout and what it actually is
+  (`pan.types.honesty_note`), `null` when no rollout ran. **Show these wherever you show the
+  preview/status/risk** -- the mock is not a PAN prediction and must never be displayed as one.
+  `summary.txt`, `comparison.png`'s banner and each asset dir's `backend.txt` carry the same line.
 - `risk_metadata`: the full `RiskSignals` evidence/notes, so a human can audit the number, not just trust it.
 - `score_components`: `geometry_score`, `stability_score`, `pan_risk`, `execution_risk_weight`, `total` --
   **always logged separately** (PAN.md sec 19: never one opaque "AI score").

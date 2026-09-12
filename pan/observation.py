@@ -1,7 +1,7 @@
 """Scene -> PAN observation adapter (PAN.md section 7).
 
 Mode B renders a deterministic RGB frame from the reconstructed scene (a tiny
-software rasterizer -- pinhole projection + painter's algorithm, no OpenGL/cv2
+software rasterizer -- pinhole projection + a numpy z-buffer, no OpenGL/cv2
 needed). Mode A wraps a real iPhone RGB frame into the same `Observation`
 shape. `build_pan_input` packs either into a `SimulationRequest` without
 inventing action text (that is `pan.actions`' job, not ours).
@@ -26,14 +26,15 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import asdict, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from pan.types import Observation, PackingAction, SimulationRequest, Viewpoint
-from physics.geometry import OBB, obb_from, obb_vertices
+from physics.geometry import obb_from, obb_vertices
 from physics.schema import Container, Object, Scene
 
 # --------------------------------------------------------------------- palette
@@ -48,31 +49,44 @@ _PALETTE: tuple[tuple[int, int, int], ...] = (
 )
 
 
+@lru_cache(maxsize=4096)
 def color_for_id(object_id: str) -> tuple[int, int, int]:
     idx = hashlib.sha256(object_id.encode("utf-8")).digest()[0] % len(_PALETTE)
     return _PALETTE[idx]
 
 
 # ----------------------------------------------------------------- rasterizer
-# Face definitions: (obb_vertices index order forming a planar quad, local
-# outward normal). Vertex order matches physics.geometry.obb_vertices' sign
-# ordering [sx in (-1,1) for sy in (-1,1) for sz in (-1,1)] -> index
-# 0..7 = (---,--+,-+-,-++,+--,+-+,++-,+++).
-_FACES: dict[str, tuple[tuple[int, int, int, int], tuple[float, float, float]]] = {
-    "-x": ((0, 1, 3, 2), (-1.0, 0.0, 0.0)),
-    "+x": ((4, 5, 7, 6), (1.0, 0.0, 0.0)),
-    "-y": ((0, 1, 5, 4), (0.0, -1.0, 0.0)),
-    "+y": ((2, 3, 7, 6), (0.0, 1.0, 0.0)),
-    "-z": ((0, 2, 6, 4), (0.0, 0.0, -1.0)),
-    "+z": ((1, 3, 7, 5), (0.0, 0.0, 1.0)),
-}
+# Box faces as obb_vertices index rings + local outward normals. Vertex order
+# matches physics.geometry.obb_vertices' sign ordering [sx for sy for sz] ->
+# index 0..7 = (---,--+,-+-,-++,+--,+-+,++-,+++). Each quad is listed as a
+# closed ring (consecutive entries share an edge), which the edge-function
+# inside test in `_raster_faces` relies on.
+_FACE_IDX = np.array([(0, 1, 3, 2), (4, 5, 7, 6), (0, 1, 5, 4), (2, 3, 7, 6), (0, 2, 6, 4), (1, 3, 7, 5)])
+_FACE_NORMALS = np.array([(-1.0, 0, 0), (1.0, 0, 0), (0, -1.0, 0), (0, 1.0, 0), (0, 0, -1.0), (0, 0, 1.0)])
 _EDGES: tuple[tuple[int, int], ...] = (
     (0, 1), (2, 3), (4, 5), (6, 7),
     (0, 2), (1, 3), (4, 6), (5, 7),
     (0, 4), (1, 5), (2, 6), (3, 7),
 )
-_LIGHT_DIR = np.array([0.4, 1.0, 0.3])
+# Light straight above-front, no X component: both default cameras sit at the
+# container's centre X, so a box only ever shows ONE of its X sides and the two
+# sharing a shade costs nothing visually. Levels are deliberately mild (top
+# 1.0, front 0.9, side 0.82): `pan.evaluate.segment_by_color` assigns pixels to
+# the nearest palette colour within a 60-RGB radius, and darker shades of one
+# palette colour drift into another's radius (olive x0.7 reads as brown,
+# pink x0.7 as brown). The dark 1 px edges carry the rest of the depth cue.
+_LIGHT_DIR = np.array([0.0, 1.0, 0.35])
 _LIGHT_DIR = _LIGHT_DIR / np.linalg.norm(_LIGHT_DIR)
+
+_BG = (245, 245, 245)
+_TABLE = (228, 224, 216)  # far from every palette color, so it never segments as an object
+_GRID = (209, 206, 199)
+_CONTAINER = (120, 160, 200)
+_EDGE = np.array((34, 34, 34), dtype=np.uint8)
+_LABEL = (22, 22, 22)
+_HALO = (255, 255, 255)
+_FONT = ImageFont.load_default(11)  # loaded once; per-call font lookups were a measurable cost
+_GRID_DIVISIONS = 6
 
 
 def _normalize(v: np.ndarray) -> np.ndarray:
@@ -80,12 +94,19 @@ def _normalize(v: np.ndarray) -> np.ndarray:
     return v / n if n > 0 else v
 
 
-def _shade(world_normal: np.ndarray) -> float:
-    """Flat per-face shading factor; clamped so the base hue stays identifiable
-    (never fully dark) and the brightest (light-facing) face keeps the exact
-    palette color."""
-    factor = float(np.dot(_normalize(world_normal), _LIGHT_DIR))
-    return max(0.35, min(1.0, 0.65 + 0.5 * factor))
+def _cross(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    # np.cross costs ~0.14 ms a call (axis shuffling); this is the same arithmetic
+    return np.array([a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]])
+
+
+def _shade(world_normal: np.ndarray) -> np.ndarray:
+    """Flat per-face shading factor(s) from one fixed light, for any (..., 3)
+    array of normals. The light-facing (top) face keeps the exact palette
+    color (factor 1.0), fronts land at 0.9 and sides at 0.82 (see _LIGHT_DIR
+    for why not darker)."""
+    n = np.asarray(world_normal, dtype=float)
+    n = n / np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-12)
+    return np.clip(0.82 + 0.24 * (n @ _LIGHT_DIR), 0.6, 1.0)
 
 
 def _view_direction(name: str) -> np.ndarray:
@@ -99,87 +120,17 @@ def _view_direction(name: str) -> np.ndarray:
     raise ValueError(f"unknown viewpoint name: {name!r}")
 
 
-def viewpoint_for_container(
-    container: Container,
-    name: str,
-    *,
-    width: int = 512,
-    height: int = 512,
-    fov_deg: float = 60.0,
+def _fit_viewpoint(
+    name: str, lo: np.ndarray, hi: np.ndarray, *, width: int, height: int, fov_deg: float, margin: float
 ) -> Viewpoint:
-    """Deterministic camera framing the whole container with margin, computed
-    from its own dimensions/position so it works for any container size.
-
-    ponytail: assumes an axis-aligned container (identity rotation), which is
-    true of every fixture; add rotation support if a tilted container shows up.
-    """
-    cx, cy, cz = container.position
-    hx, hy, hz = (d / 2.0 for d in container.dimensions)
-    center = (cx, cy, cz)
-    radius = math.sqrt(hx * hx + hy * hy + hz * hz)
-    margin = 1.6
-    distance = radius / math.tan(math.radians(fov_deg / 2.0)) * margin
-
-    cam_pos = np.array(center) + _view_direction(name) * distance
-    return Viewpoint(
-        name=name,
-        camera_position=tuple(float(v) for v in cam_pos),
-        look_at=center,
-        up=(0.0, 1.0, 0.0),
-        fov_deg=fov_deg,
-        width=width,
-        height=height,
-    )
-
-
-def _scene_bounds(scene: Scene) -> tuple[np.ndarray, np.ndarray]:
-    """World AABB (lo, hi) enclosing the container AND every object, rotations
-    included (objects still on the table are part of it -- that is the point)."""
-    verts = [obb_vertices(obb_from(scene.container))]
-    verts += [obb_vertices(obb_from(o)) for o in scene.objects]
-    allv = np.concatenate(verts)
-    return allv.min(axis=0), allv.max(axis=0)
-
-
-def _ground_rect(scene: Scene, pad: float = 0.04) -> tuple[float, float, float, float, float]:
-    """(x0, x1, z0, z1, floor_y) of the table surface: the scene's XZ bounds
-    padded a little, at the container's floor height. Objects beside the
-    suitcase therefore sit ON something instead of floating over the void."""
-    lo, hi = _scene_bounds(scene)
-    cy = scene.container.position[1]
-    hy = scene.container.dimensions[1] / 2.0
-    return float(lo[0] - pad), float(hi[0] + pad), float(lo[2] - pad), float(hi[2] + pad), float(cy - hy)
-
-
-def viewpoint_for_scene(
-    scene: Scene,
-    name: str,
-    *,
-    width: int = 512,
-    height: int = 512,
-    fov_deg: float = 60.0,
-    margin: float = 0.15,
-) -> Viewpoint:
-    """Deterministic camera framing the union AABB of the container and every
-    object (plus the drawn table surface), so unpacked items lying beside the
-    suitcase are IN SHOT -- unlike `viewpoint_for_container`, which crops them.
-
-    Same named geometries and same camera convention as `viewpoint_for_container`
-    (+X right, +Z toward the image bottom); only the distance and look-at point
-    differ. `margin` is the fractional standoff added to the tightest distance
-    that still fits all 8 union-AABB corners in frame, so nothing is clipped at
-    any aspect ratio.
-    """
-    lo, hi = _scene_bounds(scene)
-    x0, x1, z0, z1, floor_y = _ground_rect(scene)
-    lo = np.minimum(lo, [x0, floor_y, z0])
-    hi = np.maximum(hi, [x1, floor_y, z1])
+    """Camera on the named direction from the AABB's centre, at the tightest
+    distance that keeps all 8 corners in frame at this aspect ratio, backed off
+    by the fractional `margin` -- so the box fills the canvas without clipping."""
     center = (lo + hi) / 2.0
-
     direction = _view_direction(name)
     forward = -direction
-    right = _normalize(np.cross(forward, np.array([0.0, 1.0, 0.0])))
-    up = np.cross(right, forward)
+    right = _normalize(_cross(forward, np.array([0.0, 1.0, 0.0])))
+    up = _cross(right, forward)
     tan_v = math.tan(math.radians(fov_deg / 2.0))
     tan_h = tan_v * (width / height)
 
@@ -202,6 +153,74 @@ def viewpoint_for_scene(
     )
 
 
+def viewpoint_for_container(
+    container: Container,
+    name: str,
+    *,
+    width: int = 512,
+    height: int = 512,
+    fov_deg: float = 60.0,
+) -> Viewpoint:
+    """Deterministic camera framing the whole container with margin, computed
+    from its own dimensions/position so it works for any container size.
+
+    ponytail: assumes an axis-aligned container (identity rotation), which is
+    true of every fixture; add rotation support if a tilted container shows up.
+    """
+    pos = np.asarray(container.position, dtype=float)
+    half = np.asarray(container.dimensions, dtype=float) / 2.0
+    # a looser margin than scene framing: items packed above the rim still fit
+    return _fit_viewpoint(name, pos - half, pos + half, width=width, height=height, fov_deg=fov_deg, margin=0.25)
+
+
+def _scene_bounds(scene: Scene) -> tuple[np.ndarray, np.ndarray]:
+    """World AABB (lo, hi) enclosing the container AND every object, rotations
+    included (objects still on the table are part of it -- that is the point)."""
+    verts = [obb_vertices(obb_from(scene.container))]
+    verts += [obb_vertices(obb_from(o)) for o in scene.objects]
+    allv = np.concatenate(verts)
+    return allv.min(axis=0), allv.max(axis=0)
+
+
+def _ground_rect(
+    scene: Scene, pad: float = 0.04, bounds: Optional[tuple[np.ndarray, np.ndarray]] = None
+) -> tuple[float, float, float, float, float]:
+    """(x0, x1, z0, z1, floor_y) of the table surface: the scene's XZ bounds
+    padded a little, at the container's floor height. Objects beside the
+    suitcase therefore sit ON something instead of floating over the void.
+    `bounds` lets a caller that already has `_scene_bounds` skip recomputing it."""
+    lo, hi = bounds if bounds is not None else _scene_bounds(scene)
+    cy = scene.container.position[1]
+    hy = scene.container.dimensions[1] / 2.0
+    return float(lo[0] - pad), float(hi[0] + pad), float(lo[2] - pad), float(hi[2] + pad), float(cy - hy)
+
+
+def viewpoint_for_scene(
+    scene: Scene,
+    name: str,
+    *,
+    width: int = 512,
+    height: int = 512,
+    fov_deg: float = 60.0,
+    margin: float = 0.1,
+) -> Viewpoint:
+    """Deterministic camera framing the union AABB of the container and every
+    object (plus the drawn table surface), so unpacked items lying beside the
+    suitcase are IN SHOT -- unlike `viewpoint_for_container`, which crops them.
+
+    Same named geometries and same camera convention as `viewpoint_for_container`
+    (+X right, +Z toward the image bottom); only the distance and look-at point
+    differ. `margin` is the fractional standoff added to the tightest distance
+    that still fits all 8 union-AABB corners in frame, so nothing is clipped at
+    any aspect ratio.
+    """
+    lo, hi = _scene_bounds(scene)
+    x0, x1, z0, z1, floor_y = _ground_rect(scene)
+    lo = np.minimum(lo, [x0, floor_y, z0])
+    hi = np.maximum(hi, [x1, floor_y, z1])
+    return _fit_viewpoint(name, lo, hi, width=width, height=height, fov_deg=fov_deg, margin=margin)
+
+
 _DEFAULT_CONTAINER = Container(id="carry_on", dimensions=(0.56, 0.23, 0.36), position=(0.0, 0.115, 0.0))
 DEFAULT_VIEWPOINTS: dict[str, Viewpoint] = {
     "overhead_45": viewpoint_for_container(_DEFAULT_CONTAINER, "overhead_45"),
@@ -212,23 +231,40 @@ DEFAULT_VIEWPOINTS: dict[str, Viewpoint] = {
 def _camera_basis(vp: Viewpoint) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     cam = np.array(vp.camera_position, dtype=float)
     forward = _normalize(np.array(vp.look_at, dtype=float) - cam)
-    right = _normalize(np.cross(forward, np.array(vp.up, dtype=float)))
-    true_up = np.cross(right, forward)
+    right = _normalize(_cross(forward, np.array(vp.up, dtype=float)))
+    true_up = _cross(right, forward)
     return cam, right, true_up, forward
+
+
+def _focal(vp: Viewpoint) -> float:
+    return (vp.height / 2.0) / math.tan(math.radians(vp.fov_deg / 2.0))
+
+
+def _dot3(points: np.ndarray, v: np.ndarray) -> np.ndarray:
+    # explicit so a point projects to the same bits whether it is batched or alone
+    return points[:, 0] * v[0] + points[:, 1] * v[1] + points[:, 2] * v[2]
+
+
+def _camera_coords(vp: Viewpoint, points: np.ndarray) -> np.ndarray:
+    """(N, 3) world -> (N, 3) camera space: x along right, y along up, z = depth."""
+    cam, right, up, forward = _camera_basis(vp)
+    rel = np.asarray(points, dtype=float).reshape(-1, 3) - cam
+    return np.stack([_dot3(rel, right), _dot3(rel, up), _dot3(rel, forward)], axis=-1)
+
+
+def _project_cam(vp: Viewpoint, xyz: np.ndarray) -> np.ndarray:
+    z = xyz[:, 2]
+    z_safe = np.where(z <= 1e-6, 1e-6, z)
+    focal = _focal(vp)
+    u = vp.width / 2.0 + focal * (xyz[:, 0] / z_safe)
+    v = vp.height / 2.0 - focal * (xyz[:, 1] / z_safe)
+    return np.stack([u, v], axis=-1)
 
 
 def _project_points(vp: Viewpoint, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """points: (N, 3) world coords -> (uv (N, 2) pixel coords, depth (N,))."""
-    cam, right, up, forward = _camera_basis(vp)
-    rel = points - cam
-    x = rel @ right
-    y = rel @ up
-    z = rel @ forward
-    focal = (vp.height / 2.0) / math.tan(math.radians(vp.fov_deg / 2.0))
-    z_safe = np.where(z <= 1e-6, 1e-6, z)
-    u = vp.width / 2.0 + focal * (x / z_safe)
-    v = vp.height / 2.0 - focal * (y / z_safe)
-    return np.stack([u, v], axis=-1), z
+    xyz = _camera_coords(vp, points)
+    return _project_cam(vp, xyz), xyz[:, 2]
 
 
 def project_points(points_xyz, viewpoint: Union[Viewpoint, dict]) -> np.ndarray:
@@ -255,45 +291,119 @@ def _find_object(scene: Scene, object_id: str) -> Optional[Object]:
     return None
 
 
-_TABLE_COLOR = (228, 224, 216, 255)  # table surface: far from every palette color, so it never segments as an object
-_GRID_COLOR = (210, 210, 210, 255)
+def _pack(rgb: np.ndarray) -> np.ndarray:
+    """(..., 3) uint8 -> (...) uint32 pixel values in the RGBA canvas's own
+    memory layout, so a colour write is one scalar masked store on a 2-D view
+    (a broadcast (h, w, 1) mask over 3 channels is ~5x slower in numpy)."""
+    rgb = np.asarray(rgb, dtype=np.uint8)
+    flat = rgb.reshape(-1, 3)
+    rgba = np.concatenate([flat, np.full((len(flat), 1), 255, dtype=np.uint8)], axis=1)
+    return np.frombuffer(rgba.tobytes(), dtype=np.uint32).reshape(rgb.shape[:-1])
 
 
-def _draw_ground(draw: ImageDraw.ImageDraw, vp: Viewpoint, scene: Scene, divisions: int = 6) -> None:
-    """Fill + grid the whole framed ground area (container floor height), not
-    just the container footprint, so items beside the suitcase rest on a table."""
-    x0, x1, z0, z1, y = _ground_rect(scene)
-    quad = project_points([(x0, y, z0), (x1, y, z0), (x1, y, z1), (x0, y, z1)], vp)
-    draw.polygon([tuple(p) for p in quad], fill=_TABLE_COLOR)
-    for x in np.linspace(x0, x1, divisions + 1):
-        uv = project_points([(x, y, z0), (x, y, z1)], vp)
-        draw.line([tuple(uv[0]), tuple(uv[1])], fill=_GRID_COLOR, width=1)
-    for z in np.linspace(z0, z1, divisions + 1):
-        uv = project_points([(x0, y, z), (x1, y, z)], vp)
-        draw.line([tuple(uv[0]), tuple(uv[1])], fill=_GRID_COLOR, width=1)
+_EDGE32 = _pack(_EDGE)[()]
+_BG32 = _pack(np.array(_BG, dtype=np.uint8))[()]
 
 
-def _draw_container_faces(
-    draw: ImageDraw.ImageDraw, vp: Viewpoint, obb: OBB, verts3d: np.ndarray, cam_pos: np.ndarray, *, front: bool
+def _raster_faces(
+    img32: np.ndarray,
+    zbuf: np.ndarray,
+    vp: Viewpoint,
+    quads: np.ndarray,
+    n_cam: np.ndarray,
+    d: np.ndarray,
+    col32: np.ndarray,
+    *,
+    edge_only: bool = False,
 ) -> None:
-    uv, _ = _project_points(vp, verts3d)
-    for idx, normal_local in _FACES.values():
-        world_normal = _normalize(obb.axes @ np.array(normal_local))
-        face_center = verts3d[list(idx)].mean(axis=0)
-        facing_camera = np.dot(cam_pos - face_center, world_normal) > 0
-        poly = [tuple(uv[i]) for i in idx]
-        if front:
-            if facing_camera:
-                draw.polygon(poly, outline=(40, 40, 40, 255))
+    """Z-buffered fill of convex screen quads into `img32`, the (H, W) uint32
+    view of the RGBA canvas, in place.
+
+    Each face is rasterized over its own pixel bbox: PIL's C polygon fill gives
+    the coverage mask (interior 1, 1 px outline 2) in one call, and every
+    covered pixel is depth-tested with the face plane's 1/z -- affine in pixel
+    space under perspective, so it is exact -- so any face order gives the
+    right occlusion, including interpenetrating boxes. Outline pixels get the
+    dark edge color, depth-tested too, so hidden edges stay hidden.
+    `edge_only` draws just the outline without touching the z-buffer (the
+    container's see-through front walls).
+
+    quads: (k, 4, 2) pixel rings; n_cam: (k, 3) plane normals in camera space;
+    d: (k,) plane offsets (n_cam . any vertex, camera space); col32: (k,) packed.
+    """
+    H, W = zbuf.shape
+    focal = _focal(vp)
+    # ray through pixel (u, v) is ((u - W/2)/f, -(v - H/2)/f, 1) * z, so on the
+    # plane n.p = d:  1/z = (n . ray) / d  -- affine in (u, v).
+    safe_d = np.where(np.abs(d) < 1e-12, 1.0, d)
+    za = (n_cam[:, 0] / (focal * safe_d)).astype(np.float32)
+    zb = (-n_cam[:, 1] / (focal * safe_d)).astype(np.float32)
+    zc = ((n_cam[:, 2] - n_cam[:, 0] * (W / 2.0) / focal + n_cam[:, 1] * (H / 2.0) / focal) / safe_d).astype(np.float32)
+    lo = np.maximum(np.floor(quads.min(1)), 0).astype(int)
+    hi = np.minimum(np.ceil(quads.max(1)), [W - 1, H - 1]).astype(int)
+    us = np.arange(W, dtype=np.float32)
+    vs = np.arange(H, dtype=np.float32)[:, None]
+
+    for f in range(len(quads)):
+        (i0, j0), (i1, j1) = lo[f], hi[f]
+        if i1 < i0 or j1 < j0 or abs(d[f]) < 1e-12:
+            continue
+        cover = Image.new("L", (i1 - i0 + 1, j1 - j0 + 1), 0)
+        ImageDraw.Draw(cover).polygon((quads[f] - (i0, j0)).ravel().tolist(), fill=1, outline=2)
+        mask = np.asarray(cover)
+        invz = za[f] * us[i0:i1 + 1] + zb[f] * vs[j0:j1 + 1] + zc[f]
+        zwin = zbuf[j0:j1 + 1, i0:i1 + 1]
+        edge = mask == 2
+        hit = (edge if edge_only else mask > 0) & (invz > zwin)
+        if not hit.any():
+            continue
+        tile = img32[j0:j1 + 1, i0:i1 + 1]
+        if edge_only:
+            tile[...] = np.where(hit, _EDGE32, tile)
         else:
-            if not facing_camera:
-                draw.polygon(poly, fill=(120, 160, 200, 60))
+            np.maximum(zwin, invz * (mask > 0), out=zwin)  # == "zwin[hit] = invz[hit]", without the slow masked store
+            tile[...] = np.where(hit, col32[f], tile)
+            tile[...] = np.where(hit & edge, _EDGE32, tile)
 
 
-def _draw_object_edges(draw: ImageDraw.ImageDraw, vp: Viewpoint, obb: OBB, color: tuple[int, int, int, int], width: int = 2) -> None:
-    uv, _ = _project_points(vp, obb_vertices(obb))
-    for a, b in _EDGES:
-        draw.line([tuple(uv[a]), tuple(uv[b])], fill=color, width=width)
+@lru_cache(maxsize=512)
+def _label_sprite(text: str) -> Image.Image:
+    """`text` with a 1 px white halo, tightly cropped, as a pasteable RGBA sprite.
+
+    Bilevel on purpose: an anti-aliased glyph edge over a coloured face blends
+    into colours that `pan.evaluate.segment_by_color` can mistake for some other
+    object, so every label pixel is exactly halo-white or text-dark.
+    Cached: stroked FreeType text costs ~2 ms a label, a paste ~20 us, and a
+    rollout draws the same object ids frame after frame."""
+    left, top, right, bottom = _FONT.getbbox(text, stroke_width=1)
+    size = (right - left, bottom - top)
+    halo, ink = Image.new("1", size, 0), Image.new("1", size, 0)
+    ImageDraw.Draw(halo).text((-left, -top), text, font=_FONT, fill=1, stroke_width=1, stroke_fill=1)
+    ImageDraw.Draw(ink).text((-left, -top), text, font=_FONT, fill=1)
+    sprite = Image.new("RGBA", size, (0, 0, 0, 0))
+    sprite.paste(_HALO + (255,), mask=halo)
+    sprite.paste(_LABEL + (255,), mask=ink)
+    return sprite
+
+
+def _draw_labels(im: Image.Image, labels: list[tuple[str, list[int]]]) -> None:
+    """Greedy non-overlapping labels: centred above the object's pixel bbox,
+    else below it, else skipped (an unreadable pile-up is worse than no label).
+    Placed left to right so neighbours in a row alternate above/below."""
+    width, height = im.size
+    placed: list[tuple[int, int, int, int]] = []
+    for text, (x0, y0, x1, y1) in sorted(labels, key=lambda t: (t[1][0], t[0])):
+        sprite = _label_sprite(text)
+        tw, th = sprite.size
+        x = min(max((x0 + x1 - tw) // 2, 0), width - tw)
+        for y in (y0 - th - 2, y1 + 2):
+            y = min(max(y, 0), height - th)
+            rect = (x - 2, y - 1, x + tw + 2, y + th + 1)  # padded, so neighbours don't abut
+            if any(r[0] < rect[2] and rect[0] < r[2] and r[1] < rect[3] and rect[1] < r[3] for r in placed):
+                continue
+            im.paste(sprite, (x, y), sprite)
+            placed.append(rect)
+            break
 
 
 def render_scene(
@@ -305,60 +415,107 @@ def render_scene(
 ) -> tuple[np.ndarray, dict]:
     """Software-rasterize `scene` from `viewpoint`. Deterministic: no randomness,
     no wall-clock, pure function of the inputs."""
-    width, height = viewpoint.width, viewpoint.height
-    im = Image.new("RGBA", (width, height), (245, 245, 245, 255))
-    draw = ImageDraw.Draw(im, "RGBA")
-
+    vp = viewpoint
+    width, height = vp.width, vp.height
+    objs = scene.objects
+    n = len(objs)
+    obbs = [obb_from(o) for o in objs]
     container_obb = obb_from(scene.container)
-    container_verts = obb_vertices(container_obb)
-    cam_pos = np.array(viewpoint.camera_position, dtype=float)
 
-    _draw_ground(draw, viewpoint, scene)
-    _draw_container_faces(draw, viewpoint, container_obb, container_verts, cam_pos, front=False)
+    # --- every world point -> camera -> pixel in ONE call: container + object
+    # corners, object centres, then the table quad and its grid line endpoints.
+    boxes = np.stack([obb_vertices(container_obb)] + [obb_vertices(b) for b in obbs])  # (n+1, 8, 3)
+    centres = np.array([b.center for b in obbs], dtype=float).reshape(n, 3)
+    allv = boxes.reshape(-1, 3)
+    x0, x1, z0, z1, fy = _ground_rect(scene, bounds=(allv.min(axis=0), allv.max(axis=0)))
+    gx = np.linspace(x0, x1, _GRID_DIVISIONS + 1)
+    gz = np.linspace(z0, z1, _GRID_DIVISIONS + 1)
+    ground = np.array(
+        [(x0, fy, z0), (x1, fy, z0), (x1, fy, z1), (x0, fy, z1)]
+        + [(x, fy, z) for x in gx for z in (z0, z1)]
+        + [(x, fy, z) for z in gz for x in (x0, x1)]
+    )
+    cam_xyz = _camera_coords(vp, np.concatenate([boxes.reshape(-1, 3), centres, ground]))
+    uv = _project_cam(vp, cam_xyz)
+    k = 8 * (n + 1)
+    box_cam = cam_xyz[:k].reshape(n + 1, 8, 3)
+    box_uv = uv[:k].reshape(n + 1, 8, 2)
+    ctr_uv = uv[k:k + n]
+    g_uv = uv[k + n:]
 
-    object_colors: dict[str, tuple[int, int, int]] = {o.id: color_for_id(o.id) for o in scene.objects}
+    # --- box faces, all at once: (n+1, 6, ...) with the container at index 0
+    _, right, up, forward = _camera_basis(vp)
+    axes = np.stack([container_obb.axes] + [b.axes for b in obbs])
+    n_world = np.einsum("bij,fj->bfi", axes, _FACE_NORMALS)  # outward normals (n+1, 6, 3)
+    n_cam = n_world @ np.stack([right, up, forward]).T
+    face_cam = box_cam[:, _FACE_IDX]  # (n+1, 6, 4, 3)
+    face_uv = box_uv[:, _FACE_IDX]  # (n+1, 6, 4, 2)
+    d = np.einsum("bfi,bfi->bf", n_cam, face_cam[:, :, 0])
+    front = d < -1e-12  # outward normal points at the camera
+    projectable = (face_cam[..., 2] > 1e-6).all(-1)  # every corner in front of the camera
+
+    object_colors: dict[str, tuple[int, int, int]] = {o.id: color_for_id(o.id) for o in objs}
+    base = np.array([_CONTAINER] + list(object_colors.values()), dtype=float)
+    shade = _shade(n_world)
+    shade[0] = _shade(-n_world[0])  # we see the container's INSIDE: shade by the inward normal
+    face_rgb = np.rint(base[:, None, :] * shade[..., None]).astype(np.uint8)
+
+    # --- table, grid, container floor + back walls (PIL, far to near). These
+    # are the big faces, and everything else in shot is inside or beside the
+    # container, i.e. nearer than them, so painting them first is exact and
+    # skips a per-pixel depth test over ~100k pixels.
+    # ponytail: an item on the table BEHIND the container would show through
+    # its back wall; route the container through `_raster_faces` if that shows up.
+    #
+    # One RGBA canvas shared zero-copy between PIL and numpy (PIL can only
+    # share 4-byte pixel modes; frombuffer marks it read-only, which ImageDraw
+    # would silently copy-on-write, so clear the flag): no PIL<->numpy round
+    # trips, which cost ~0.5 ms each at 512^2.
+    canvas = np.empty((height, width, 4), dtype=np.uint8)
+    img32 = canvas.view(np.uint32).reshape(height, width)
+    img32[...] = _BG32
+    im = Image.frombuffer("RGBA", (width, height), canvas, "raw", "RGBA", 0, 1)
+    im.readonly = 0
+    draw = ImageDraw.Draw(im)
+    draw.polygon(g_uv[:4].ravel().tolist(), fill=_TABLE)
+    for a, b in g_uv[4:].reshape(-1, 2, 2).tolist():
+        draw.line([tuple(a), tuple(b)], fill=_GRID, width=1)
+    back = np.nonzero(~front[0] & projectable[0])[0]
+    for f in sorted(back, key=lambda f: -face_cam[0, f, :, 2].mean()):
+        draw.polygon(face_uv[0, f].ravel().tolist(), fill=tuple(face_rgb[0, f].tolist()), outline=tuple(_EDGE.tolist()))
+
+    # --- objects: z-buffered (front faces only; back faces are covered by them)
+    face_col32 = _pack(face_rgb)
+    zbuf = np.zeros((height, width), dtype=np.float32)  # stores 1/z; 0 = infinitely far
+    bi, fi = np.nonzero(front & projectable)
+    keep = bi > 0
+    bi, fi = bi[keep], fi[keep]
+    _raster_faces(img32, zbuf, vp, face_uv[bi, fi], n_cam[bi, fi], d[bi, fi], face_col32[bi, fi])
+    fi = np.nonzero(front[0] & projectable[0])[0]  # see-through front walls + rim: depth-tested edges only
+    _raster_faces(img32, zbuf, vp, face_uv[0, fi], n_cam[0, fi], d[0, fi], face_col32[0, fi], edge_only=True)
+
+    # --- overlays (PIL, same canvas): highlight, ghost, labels
+    obj_uv = box_uv[1:]
+    lo = np.floor(obj_uv.min(1)).astype(int) if n else np.zeros((0, 2), int)
+    hi = np.ceil(obj_uv.max(1)).astype(int) if n else np.zeros((0, 2), int)
     object_bboxes: dict[str, list[int]] = {}
     object_visible: dict[str, bool] = {}
-
-    face_records: list[tuple[float, float, np.ndarray, tuple[int, int, int, int]]] = []
-    for obj in scene.objects:
-        obb = obb_from(obj)
-        verts3d = obb_vertices(obb)
-        uv, depth = _project_points(viewpoint, verts3d)
-        base_color = object_colors[obj.id]
-        bbox = [
-            int(math.floor(uv[:, 0].min())), int(math.floor(uv[:, 1].min())),
-            int(math.ceil(uv[:, 0].max())), int(math.ceil(uv[:, 1].max())),
-        ]
+    projected_centroids: dict[str, tuple[float, float]] = {}
+    for i, obj in enumerate(objs):
+        bbox = [int(lo[i, 0]), int(lo[i, 1]), int(hi[i, 0]), int(hi[i, 1])]
         object_bboxes[obj.id] = bbox
         object_visible[obj.id] = bool(bbox[0] < width and bbox[2] >= 0 and bbox[1] < height and bbox[3] >= 0)
-        # secondary sort key: the object's own centroid depth. Two faces from
-        # different (stacked) objects can land at the exact same face-centroid
-        # depth (a flush stack can make this an exact tie, not just fp noise);
-        # breaking ties by whole-object depth keeps the physically-nearer
-        # object on top instead of leaving it to insertion order. Both keys are
-        # rounded to 9 decimals (nanometer-scale on this meter-scale geometry)
-        # so ~1e-16 float noise from summation order doesn't masquerade as a
-        # real depth difference and defeat the tie-break.
-        obj_depth = round(float(_project_points(viewpoint, obb.center.reshape(1, 3))[1][0]), 9)
-        for idx, normal_local in _FACES.values():
-            world_normal = obb.axes @ np.array(normal_local)
-            shade = _shade(world_normal)
-            face_color = tuple(int(round(c * shade)) for c in base_color) + (255,)
-            quad_uv = uv[list(idx)]
-            quad_depth = round(float(depth[list(idx)].mean()), 9)
-            face_records.append((quad_depth, obj_depth, quad_uv, face_color))
+        projected_centroids[obj.id] = (float(ctr_uv[i, 0]), float(ctr_uv[i, 1]))
 
-    face_records.sort(key=lambda r: (r[0], r[1]), reverse=True)  # far to near (painter's algorithm)
-    for _, _, quad_uv, face_color in face_records:
-        draw.polygon([tuple(p) for p in quad_uv], fill=face_color, outline=(20, 20, 20, 255))
-
-    _draw_container_faces(draw, viewpoint, container_obb, container_verts, cam_pos, front=True)
+    def _edges(obj: Object, color: tuple[int, ...], line_width: int) -> None:
+        puv, _ = _project_points(vp, obb_vertices(obb_from(obj)))
+        for a, b in _EDGES:
+            draw.line([tuple(puv[a]), tuple(puv[b])], fill=color, width=line_width)
 
     if highlight is not None:
         obj = _find_object(scene, highlight)
         if obj is not None:
-            _draw_object_edges(draw, viewpoint, obb_from(obj), color=(255, 255, 255, 255), width=3)
+            _edges(obj, (255, 255, 255, 255), 3)
 
     if ghost is not None:
         ghost_id, ghost_action = ghost
@@ -369,21 +526,14 @@ def render_scene(
                 position=tuple(ghost_action.target_position),
                 rotation=tuple(ghost_action.target_rotation),
             )
-            ghost_rgb = object_colors.get(ghost_id, (255, 255, 255))
-            _draw_object_edges(draw, viewpoint, obb_from(ghost_obj), color=ghost_rgb + (160,), width=2)
+            _edges(ghost_obj, object_colors.get(ghost_id, (255, 255, 255)) + (160,), 2)
 
-    projected_centroids: dict[str, tuple[float, float]] = {}
-    for obj in scene.objects:
-        obb = obb_from(obj)
-        uv, _ = _project_points(viewpoint, obb.center.reshape(1, 3))
-        cu, cv = float(uv[0, 0]), float(uv[0, 1])
-        projected_centroids[obj.id] = (cu, cv)
-        draw.text((cu + 3, cv + 3), obj.id, fill=(15, 15, 15, 255))
+    _draw_labels(im, [(o.id, object_bboxes[o.id]) for o in objs if object_visible[o.id]])
 
-    image = np.array(im.convert("RGB"), dtype=np.uint8)
+    image = np.frombuffer(im.tobytes("raw", "RGB"), dtype=np.uint8).reshape(height, width, 3).copy()
     meta = {
         "object_colors": object_colors,
-        "viewpoint": asdict(viewpoint),
+        "viewpoint": asdict(vp),
         "projected_centroids": projected_centroids,
         # Pixel bbox of each object's 8 projected OBB vertices, and whether that
         # bbox intersects the image at all (an item on the table can be fully
@@ -391,7 +541,7 @@ def render_scene(
         # evaluator from re-deriving projected extents.
         "object_bboxes": object_bboxes,
         "object_visible": object_visible,
-        "container_color": (120, 160, 200),
+        "container_color": _CONTAINER,
     }
     return image, meta
 

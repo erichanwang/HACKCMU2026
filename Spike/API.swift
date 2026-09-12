@@ -1,4 +1,5 @@
 import Foundation
+import PackingPlan
 import UIKit
 
 /// The FastAPI server in server/. Set to this Mac's LAN IP; phone and Mac must share a Wi-Fi network.
@@ -60,6 +61,14 @@ enum API {
         return try await send(req)
     }
 
+    /// Runs the solver server-side and returns what it actually produced. Throws with the
+    /// server's message ("suitcase has no scanned items to pack") when there is nothing to pack.
+    static func plan(suitcaseId: String) async throws -> PackingPlan {
+        var req = URLRequest(url: base.appending(path: "suitcases/\(suitcaseId)/plan"))
+        req.httpMethod = "POST"
+        return try PlanLoader.plan(fromServerDocument: try await body(of: req))
+    }
+
     static func listSuitcases() async throws -> [Suitcase] {
         try await send(URLRequest(url: base.appending(path: "suitcases")))
     }
@@ -75,12 +84,23 @@ enum API {
     }
 
     private static func send<T: Decodable>(_ req: URLRequest) async throws -> T {
+        try JSONDecoder().decode(T.self, from: try await body(of: req))
+    }
+
+    private static func body(of req: URLRequest) async throws -> Data {
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
-            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "server error"])
+            let message = (try? JSONDecoder().decode(ServerError.self, from: data))?.detail
+                ?? String(data: data, encoding: .utf8) ?? "server error"
+            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: message])
         }
-        return try JSONDecoder().decode(T.self, from: data)
+        return data
     }
+}
+
+/// FastAPI reports every error as `{"detail": ...}`.
+private struct ServerError: Decodable {
+    let detail: String
 }
 
 struct AnyEncodable: Encodable {

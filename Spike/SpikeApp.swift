@@ -1,3 +1,5 @@
+import PackingPlan
+import PackingPlanUI
 import SwiftUI
 
 @main
@@ -14,6 +16,9 @@ struct ContentView: View {
     @State private var showItems = false
     @State private var itemCount = 0
     @State private var rescan: ScannedItem?
+    /// The plan the solver actually produced, shown in the sheet. Nil = no sheet.
+    @State private var plan: PackingPlan?
+    @State private var packing = false
 
     var body: some View {
         if let suitcase {
@@ -55,10 +60,14 @@ struct ContentView: View {
                     Text(String(format: "%.0f × %.0f × %.0f cm", suitcase.dimensions[0] * 100, suitcase.dimensions[1] * 100, suitcase.dimensions[2] * 100))
                     Spacer()
                     Button("\(itemCount) items") { showItems = true }
+                    Button(packing ? "Packing…" : "Pack") { pack(suitcase) }.disabled(packing || itemCount == 0)
                     Button("Change") { self.suitcase = nil; phase = .idle("Tap an object to scan it") }
                 }
                 .padding(10).background(.black.opacity(0.6)).foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 12)).padding()
                 Spacer()
+            }
+            .sheet(isPresented: Binding(get: { plan != nil }, set: { if !$0 { plan = nil } })) {
+                if let plan { PlanDiagramView(plan: plan) }
             }
             .sheet(isPresented: $showItems) {
                 ItemsList(suitcase: suitcase, rescan: { it in rescan = it; phase = .idle("Tap \(it.label ?? "the item") again to re-measure it") })
@@ -107,6 +116,15 @@ struct ContentView: View {
             Label("Not saved: \(why)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             Button("Retry") { phase = .review(it, rescanned: false) }
             Button("Discard") { phase = .idle("Tap an object to scan it") }
+        }
+    }
+
+    func pack(_ suitcase: Suitcase) {
+        packing = true
+        Task {
+            defer { packing = false }
+            do { plan = try await API.plan(suitcaseId: suitcase.id) }
+            catch { phase = .idle("Pack failed: \(error.localizedDescription)") }
         }
     }
 

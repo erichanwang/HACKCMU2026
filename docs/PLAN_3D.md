@@ -23,7 +23,7 @@ draws what comes back. If the SVG is wrong, the projection is wrong.
 source swift/PackPhysics/swiftenv.sh          # Swift 6.3.3 via swiftly, + libxml2 compat
 cd tools/plan3d
 swift build
-swift run plan3d <plan.json> <out-dir> [--steps]
+swift run plan3d <plan.json> <out-dir> [--steps] [--cutaway] [--unpacked] [--violations]
 ```
 
 Both plan shapes are accepted: the raw `PackingPlan` document, and the server document
@@ -47,6 +47,42 @@ That is enough to catch a regression without opening anything: a box count that 
 match placements + 1, a container that is no longer element 0 (it must be, or it paints
 over the items), or a projected bounding box that has drifted, collapsed to a point or
 gone NaN.
+
+## Seeing into a full bag, and what the plan leaves out
+
+Three flags. They are modes, not extra files: they change all three camera SVGs (and the
+`--steps` ones), so render to a second out-dir if you want the plain view to compare
+against. Each active mode is named in the SVG's title line.
+
+**`--cutaway` — pull the layers apart.** A full bag is an opaque brick: the near items hide
+the far ones and the second layer hides the first. Every distinct floor height (`position.y`)
+in the plan is one layer, and each layer is lifted until it clears the tallest item of the
+layer below plus a margin — a fixed gap would let a lifted layer straddle a bottle standing
+on the one under it and hide it worse than before. The container is grown by the same total,
+so the scale-to-fit still frames everything and an item still reads as inside the walls.
+
+There is nothing to cut away on the container itself: `projected()` already draws it from
+the inside, near walls culled. And a plan whose placements all sit on the floor has one
+layer and nothing to separate — the run says so, and the SVG is the plain view with a
+different title. That is correct, not a broken flag.
+
+**`--unpacked` — the shelf of leftovers.** A `PackingPlan` carries only what fits. The
+solver's own result says what it left out and why, at `solver.unpacked` in the server
+document, and that is where this reads from: a greyed, labelled shelf down the right-hand
+side, one card per item with the solver's reason. If the document has no `solver.unpacked`
+(a raw plan file), or the solver left nothing out, the shelf is not drawn at all and the run
+says which — an empty shelf would claim the solver fit everything.
+
+**`--violations` — outline the bad items in red.** From `validation.violations` in the
+server document, keyed by the item each entry names (an entry naming a pair, like
+`OBJECT_COLLISION`, marks both). The red outline and the violation type are drawn in one
+pass *after* every box, deliberately out of painter order: an offender buried under three
+other items is exactly the case you need to see, and marking it in depth order would leave
+it half-covered. A violation naming an item that is not in the plan is listed on the
+terminal and not drawn.
+
+Both fixtures the tool was checked against had `validation.violations` empty, so the red
+path was exercised against a copy with violations pasted in. If you touch it, do the same.
 
 ## Checking the projection is right
 

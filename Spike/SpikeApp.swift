@@ -153,12 +153,12 @@ struct ItemEditor: View {
         TextField("label", text: $label)
             .textFieldStyle(.roundedBorder)
             .onAppear { label = item.label ?? "" }
-            .onChange(of: item.id) { label = item.label ?? "" }
+            .onChange(of: item.id) { _, _ in label = item.label ?? "" }
             .onSubmit { Task { item = try await API.update(id: item.id, label: label, rigidity: nil) } }
         Picker("rigidity", selection: Binding(get: { item.rigidity ?? "rigid" }, set: { r in
             Task { item = try await API.update(id: item.id, label: nil, rigidity: r) }
         })) {
-            ForEach(["rigid", "soft", "fragile"], id: \.self) { Text($0) }
+            ForEach(["rigid", "soft", "fragile"], id: \.self) { Text($0).tag($0) }
         }
         .pickerStyle(.segmented)
         if let d = item.description, !d.isEmpty { Text(d).font(.caption) }

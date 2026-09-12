@@ -1,36 +1,42 @@
 # Scan Output — how a scanned object is represented
 
-Each tap in the LiDAR spike produces one `ScannedItem` (defined in `Spike/Geometry.swift`). For now it is shown on screen and printed to the Xcode console as JSON, preceded by an ASCII map. Nothing is persisted yet.
+Each tap in the LiDAR spike produces one `ScannedItem` (defined in `Spike/Geometry.swift`). The phone prints it to the Xcode console (ASCII map + JSON), then POSTs it with a photo crop to the server in `server/`, which labels it and stores it in MongoDB (collection `items`, `_id` = `id`). The server's response — the same object plus `label` and `rigidity` — is what the app displays and what the packer reads via `GET /items`.
 
 ## The representation
 
-An item is its **bounding box** plus a **heightmap** of its real shape inside that box. All values are in **centimetres**.
+An item is its **bounding box** plus a **heightmap** of its real shape inside that box, plus a **label** and **rigidity**. All lengths are in **metres** (team contract: X right, Y up, Z forward).
 
 ```json
 {
   "id": "6F3A…",
-  "width":  21.3,
-  "depth":  12.1,
-  "height": 8.4,
-  "cellSize": 1.0,
+  "dimensions": [0.213, 0.084, 0.121],
+  "cellSize": 0.01,
   "heights": [
-    [8.4, 8.4, 8.3, 0.0, 0.0, …],
-    [8.4, 8.4, 8.2, 0.0, 0.0, …],
+    [0.084, 0.084, 0.083, 0.0, 0.0, …],
+    [0.084, 0.084, 0.082, 0.0, 0.0, …],
     …
-  ]
+  ],
+  "label": "running shoe",
+  "labelSource": "auto",
+  "rigidity": "soft",
+  "rigiditySource": "user",
+  "createdAt": "2026-09-12T03:14:15+00:00"
 }
 ```
 
 | Field | Meaning |
 |---|---|
-| `id` | UUID, unique per scan |
-| `width`, `depth`, `height` | Minimum-area bounding box. `width` and `depth` are the footprint on the table; `height` is the tallest point above the table. Includes a small padding (default 0.5 cm) because LiDAR reads slightly inside true edges. |
-| `cellSize` | Side length of one heightmap cell (default 1.0 cm). |
+| `id` | UUID string, unique per scan; also the Mongo `_id`. |
+| `dimensions` | `[width, height, depth]` of the minimum-area bounding box. Width and depth are the footprint on the table; height is the tallest point above it. Includes a small padding (default 0.5 cm) because LiDAR reads slightly inside true edges. |
+| `cellSize` | Side length of one heightmap cell (default 0.01 m). |
 | `heights` | 2D grid, `ceil(width / cellSize)` rows × `ceil(depth / cellSize)` columns. `heights[i][j]` is the height of the object's surface above the table at that cell. `0` means nothing is there. |
+| `label` | Short name of the object. Guessed from the photo by Grok (`labelSource: "auto"`) or typed by the user (`"user"`). |
+| `rigidity` | `rigid`, `soft` (compressible — clothes, bags) or `fragile` (breaks if crushed/dropped). Guessed by Grok or chosen by the user; `rigiditySource` says which. A user choice is never overwritten by detection. |
+| `createdAt` | ISO-8601 UTC timestamp, set by the server. |
 
 ### Coordinate convention
 
-- `i` (outer index) runs along **width**, `j` (inner index) along **depth**.
+- `i` (outer index) runs along **width** (X), `j` (inner index) along **depth** (Z).
 - The grid is axis-aligned to the object's own bounding box, not to the room. Where the object sits or how it was rotated on the table is deliberately discarded — the packer decides orientation.
 - The object rests on `y = 0` (the table). Height is measured upward from there.
 
@@ -42,7 +48,7 @@ The object is the volume under the heightmap: cell `(i, j)` is filled from `0` u
 filled(i, j, k)  ⇔  k * cellSize < heights[i][j]
 ```
 
-For a plain box, every cell equals `height` and the solid is the full bounding box. For a shoe, cells over the opening are lower than the rim. For an L-shaped object, cells in the missing corner are `0`.
+For a plain box, every cell equals `dimensions[1]` and the solid is the full bounding box. For a shoe, cells over the opening are lower than the rim. For an L-shaped object, cells in the missing corner are `0`.
 
 ### ASCII map
 
@@ -73,3 +79,8 @@ Tuning constants live at the top of `Spike/ScanView.swift`: `paddingMeters`, `mi
 4. Points are flood-filled from the seed through a 2 cm grid so neighbouring objects are excluded.
 5. A minimum-area rectangle is fitted to the footprint → `width`, `depth`; the tallest point → `height`.
 6. Each point is dropped into its cell and the maximum height per cell is kept → `heights`.
+7. The camera view is cropped to the object and sent with the JSON to `POST /items`; the server asks Grok for `label` and `rigidity`, stores the document, and returns it. Edits in the app go to `PATCH /items/{id}`.
+
+## Server
+
+`server/main.py` — FastAPI + pymongo. Run with `cd server && uv run uvicorn main:app --host 0.0.0.0`. Environment: `SUITCASE_MONGODB_URI` (default `mongodb://localhost:27017`), `MONGO_DB` (default `suitcase`), `XAI_API_KEY` (no key → label `unknown`, rigidity `rigid`), `GROK_MODEL` (default `grok-4`). The phone's server address is `API.base` in `Spike/API.swift`.

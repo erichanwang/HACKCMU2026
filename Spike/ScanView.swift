@@ -10,6 +10,8 @@ let minHeightMeters: Float = 0.01
 let searchRadiusMeters: Float = 0.5
 /// Grid cell for separating the tapped object from its neighbours.
 let clusterCellMeters: Float = 0.02
+/// Resolution of the captured shape (heightmap cell). Mesh triangles are sampled at half this spacing.
+let shapeCellMeters: Float = 0.01
 
 struct ScanView: UIViewRepresentable {
     @Binding var item: ScannedItem?
@@ -56,16 +58,23 @@ struct ScanView: UIViewRepresentable {
             }
             let planeY = table.transform.columns.3.y
 
-            // Mesh vertices above the table near the tap.
+            // Mesh surface above the table near the tap, sampled densely across each triangle.
             var pts: [SIMD3<Float>] = []
+            let r2 = searchRadiusMeters * searchRadiusMeters
             for mesh in frame.anchors.compactMap({ $0 as? ARMeshAnchor }) {
-                let v = mesh.geometry.vertices
-                for i in 0..<v.count {
-                    let raw = v.buffer.contents().advanced(by: v.offset + v.stride * i).assumingMemoryBound(to: SIMD3<Float>.self).pointee
+                let v = mesh.geometry.vertices, f = mesh.geometry.faces
+                func vertex(_ i: UInt32) -> SIMD3<Float> {
+                    let raw = v.buffer.contents().advanced(by: v.offset + v.stride * Int(i)).assumingMemoryBound(to: SIMD3<Float>.self).pointee
                     let w = mesh.transform * SIMD4<Float>(raw, 1)
-                    let p = SIMD3<Float>(w.x, w.y, w.z)
-                    let dx = p.x - seed.x, dz = p.z - seed.z
-                    if p.y - planeY > minHeightMeters, dx * dx + dz * dz < searchRadiusMeters * searchRadiusMeters { pts.append(p) }
+                    return SIMD3<Float>(w.x, w.y, w.z)
+                }
+                let idx = f.buffer.contents().assumingMemoryBound(to: UInt32.self)
+                for t in 0..<f.count {
+                    let a = vertex(idx[t * 3]), b = vertex(idx[t * 3 + 1]), c = vertex(idx[t * 3 + 2])
+                    let m = (a + b + c) / 3
+                    let dx = m.x - seed.x, dz = m.z - seed.z
+                    guard dx * dx + dz * dz < r2, max(a.y, b.y, c.y) - planeY > minHeightMeters else { continue }
+                    pts += densify(a, b, c, spacing: shapeCellMeters / 2).filter { $0.y - planeY > minHeightMeters }
                 }
             }
 
@@ -73,11 +82,42 @@ struct ScanView: UIViewRepresentable {
             guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
                 status = "Nothing above the table here (\(pts.count) pts)"; return
             }
-            let scanned = ScannedItem(box)
+            let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
+            let scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
             item = scanned
-            status = "\(cluster.count) pts"
+            status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
+            print(scanned.asciiMap)
             print(String(data: try! JSONEncoder().encode(scanned), encoding: .utf8)!)
+
+            // Photograph the object before the overlay covers it, then ask the server for label + rigidity.
+            let crop = screenRect(of: box, in: view)
+            view.snapshot(saveToHDR: false) { [weak self] shot in
+                guard let self, let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else { return }
+                Task { @MainActor in
+                    do {
+                        self.item = try await API.upload(scanned, image: UIImage(cgImage: cg))
+                        self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
+                    } catch {
+                        self.status = "server: \(error.localizedDescription)"
+                    }
+                }
+            }
             show(box, in: view)
+        }
+
+        /// Screen-space rectangle around the box's projected corners, padded 15%, clamped to the view.
+        func screenRect(of box: BoxFit, in view: ARView) -> CGRect {
+            let perp = SIMD3<Float>(-box.axis.z, 0, box.axis.x)
+            var pts: [CGPoint] = []
+            for sx: Float in [-0.5, 0.5] { for sy: Float in [-0.5, 0.5] { for sz: Float in [-0.5, 0.5] {
+                let corner = box.center + box.axis * (sx * box.width) + SIMD3<Float>(0, sy * box.height, 0) + perp * (sz * box.depth)
+                if let p = view.project(corner) { pts.append(p) }
+            } } }
+            guard let minX = pts.map(\.x).min(), let maxX = pts.map(\.x).max(),
+                  let minY = pts.map(\.y).min(), let maxY = pts.map(\.y).max() else { return view.bounds }
+            return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+                .insetBy(dx: -(maxX - minX) * 0.15, dy: -(maxY - minY) * 0.15)
+                .intersection(view.bounds)
         }
 
         func show(_ box: BoxFit, in view: ARView) {

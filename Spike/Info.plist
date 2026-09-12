@@ -18,15 +18,22 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Measures objects with the LiDAR camera.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Sends scans to the packing server running on your Mac.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arkit</string>
 	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
+	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>

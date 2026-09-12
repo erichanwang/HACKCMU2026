@@ -84,14 +84,64 @@ func connectedCluster(_ points: [SIMD3<Float>], seed: SIMD3<Float>, cell: Float)
     return out
 }
 
-/// Output of one scan — the only thing the packer needs per item. Dimensions in centimetres.
-struct ScannedItem: Codable, Identifiable {
-    var id = UUID()
-    var width: Float
-    var depth: Float
-    var height: Float
+/// Sample a triangle's surface at roughly `spacing` intervals so sparse mesh vertices become a dense cloud.
+func densify(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, spacing: Float) -> [SIMD3<Float>] {
+    let longest = max(simd_length(b - a), simd_length(c - b), simd_length(a - c))
+    let n = max(1, Int((longest / spacing).rounded(.up)))
+    var out: [SIMD3<Float>] = []
+    for i in 0...n { for j in 0...(n - i) {
+        let u = Float(i) / Float(n), v = Float(j) / Float(n)
+        out.append(a + (b - a) * u + (c - a) * v)
+    } }
+    return out
+}
 
-    init(_ box: BoxFit) {
-        width = box.width * 100; depth = box.depth * 100; height = box.height * 100
+/// Surface height above the table for each `cell`-sized square of the box footprint.
+/// Indexed `[i][j]`: i along the box's width axis, j along its depth axis. Unobserved cells are 0.
+/// ponytail: 2.5D — undercuts and overhangs are invisible from above; multi-view fusion if that ever matters.
+func heightMap(points: [SIMD3<Float>], box: BoxFit, planeY: Float, cell: Float) -> [[Float]] {
+    let perp = SIMD3<Float>(-box.axis.z, 0, box.axis.x)
+    let ni = max(1, Int((box.width / cell).rounded(.up))), nj = max(1, Int((box.depth / cell).rounded(.up)))
+    var h = Array(repeating: Array(repeating: Float(0), count: nj), count: ni)
+    for p in points {
+        let d = p - box.center
+        let i = Int(((simd_dot(d, box.axis) + box.width / 2) / cell).rounded(.down))
+        let j = Int(((simd_dot(d, perp) + box.depth / 2) / cell).rounded(.down))
+        guard (0..<ni).contains(i), (0..<nj).contains(j) else { continue }
+        h[i][j] = max(h[i][j], p.y - planeY)
+    }
+    return h
+}
+
+/// Output of one scan, in metres (team contract). `dimensions` = [width, height, depth] of the bounding
+/// box (X right, Y up, Z forward). `heights[i][j]` is the surface height at cell (i along width, j along
+/// depth) — the object's real shape as seen from above. Label/rigidity are filled in by the server.
+struct ScannedItem: Codable, Identifiable {
+    var id = UUID().uuidString
+    var dimensions: [Float]
+    var cellSize: Float
+    var heights: [[Float]]
+    var label: String?
+    var labelSource: String?
+    var rigidity: String?
+    var rigiditySource: String?
+    var createdAt: String?
+
+    init(_ box: BoxFit, heights: [[Float]], cell: Float) {
+        dimensions = [box.width, box.height, box.depth]
+        cellSize = cell
+        self.heights = heights
+    }
+
+    var width: Float { dimensions[0] }
+    var height: Float { dimensions[1] }
+    var depth: Float { dimensions[2] }
+
+    /// Top-down ASCII view, one character per cell, darker = taller.
+    var asciiMap: String {
+        let ramp = Array(" .:-=+*#%@"), top = max(height, 0.0001)
+        return heights.map { row in
+            String(row.map { ramp[min(ramp.count - 1, Int($0 / top * Float(ramp.count - 1)))] })
+        }.joined(separator: "\n")
     }
 }

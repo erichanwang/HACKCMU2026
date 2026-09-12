@@ -18,6 +18,10 @@ struct ContentView: View {
     @State private var showingDiagram = false
     /// A POST /plan is in flight; a second one would race the first and last write would win.
     @State private var packing = false
+    /// Where the server is and how to authenticate; typed on the phone, kept across launches.
+    @AppStorage("serverURL") private var serverURL = API.defaultBase
+    @AppStorage("authToken") private var authToken = ""
+    @State private var showSettings = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -37,6 +41,7 @@ struct ContentView: View {
                 }
                 Text(status).font(.footnote)
                 Button("Pack") { pack() }.disabled(suitcaseId == nil || packing)
+                Button(serverURL) { showSettings = true }.font(.caption2).lineLimit(1)
             }
                 .font(.system(.title2, design: .monospaced))
                 .padding()
@@ -44,6 +49,14 @@ struct ContentView: View {
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.bottom, 40)
+                .sheet(isPresented: $showSettings) {
+                    Form {
+                        TextField("http://mac-lan-ip:8000", text: $serverURL).keyboardType(.URL)
+                        TextField("bearer token (optional)", text: $authToken)
+                    }
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                }
         }
         .sheet(isPresented: $showingDiagram) {
             if let plan { PlanDiagramView(plan: plan) }

@@ -16,15 +16,31 @@ private struct ServerError: Decodable {
     let detail: String
 }
 
-/// The FastAPI server in server/. Set to this Mac's LAN IP; phone and Mac must share a Wi-Fi network.
-/// Override without a rebuild via the PACKAR_SERVER environment variable (an Xcode scheme variable).
+/// The FastAPI server in server/. Set to this Mac's LAN IP in the app's settings sheet; phone and Mac
+/// must share a Wi-Fi network. The PACKAR_SERVER environment variable (an Xcode scheme variable) is the
+/// default when nothing has been typed in. The bearer token is optional: sent only when it is set.
 enum API {
-    static let base = ProcessInfo.processInfo.environment["PACKAR_SERVER"].flatMap(URL.init(string:))
-        ?? URL(string: "http://172.26.48.172:8000")!
+    static let defaultBase = ProcessInfo.processInfo.environment["PACKAR_SERVER"] ?? "http://172.26.48.172:8000"
+
+    static var base: URL {
+        let typed = (UserDefaults.standard.string(forKey: "serverURL") ?? "").trimmingCharacters(in: .whitespaces)
+        guard let url = URL(string: typed.contains("://") ? typed : "http://" + typed), url.host() != nil else {
+            return URL(string: defaultBase) ?? URL(string: "http://172.26.48.172:8000")!
+        }
+        return url
+    }
+
+    /// Every request. The Authorization header is omitted entirely when no token is set.
+    private static func request(_ path: String, _ method: String) -> URLRequest {
+        var req = URLRequest(url: base.appending(path: path))
+        req.httpMethod = method
+        let token = (UserDefaults.standard.string(forKey: "authToken") ?? "").trimmingCharacters(in: .whitespaces)
+        if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        return req
+    }
 
     static func createSuitcase(name: String, dimensions: [Float]) async throws -> String {
-        var req = URLRequest(url: base.appending(path: "suitcases"))
-        req.httpMethod = "POST"
+        var req = request("suitcases", "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(NewSuitcase(name: name, dimensions: dimensions))
         let data = try await body(of: req)
@@ -34,16 +50,14 @@ enum API {
     /// Runs the solver server-side and returns what it actually produced. Throws with the
     /// server's message ("suitcase has no scanned items to pack") when there is nothing to pack.
     static func plan(suitcaseId: String) async throws -> PackingPlan {
-        var req = URLRequest(url: base.appending(path: "suitcases/\(suitcaseId)/plan"))
-        req.httpMethod = "POST"
+        let req = request("suitcases/\(suitcaseId)/plan", "POST")
         let data = try await body(of: req)
         return try PlanLoader.plan(fromServerDocument: data)
     }
 
     static func upload(_ item: ScannedItem, image: UIImage) async throws -> ScannedItem {
         let boundary = "suitcase-\(UUID().uuidString)"
-        var req = URLRequest(url: base.appending(path: "items"))
-        req.httpMethod = "POST"
+        var req = request("items", "POST")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         var body = Data()
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"item\"\r\n\r\n".data(using: .utf8)!)
@@ -57,12 +71,11 @@ enum API {
 
     /// The public item document, re-read while the server retries a failed Grok call.
     static func get(id: String) async throws -> ScannedItem {
-        try await send(URLRequest(url: base.appending(path: "items/\(id)")))
+        try await send(request("items/\(id)", "GET"))
     }
 
     static func update(id: String, label: String?, rigidity: String?) async throws -> ScannedItem {
-        var req = URLRequest(url: base.appending(path: "items/\(id)"))
-        req.httpMethod = "PATCH"
+        var req = request("items/\(id)", "PATCH")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var fields: [String: String] = [:]
         if let label { fields["label"] = label }

@@ -195,6 +195,15 @@ is the one only pulled in by `wall` on the opening side and by the larger `wallD
 other — confirm that thicker cut visually lines up with your bag's handle side. If it's on the
 wrong wall, the fix is a `perp` sign flip, not a recalibration — flag it rather than guessing.
 
+**Until you have confirmed it visually, set `suitcaseHandleWallMeters = suitcaseFloorWallMeters`**
+(i.e. go back to the symmetric model). Getting the side wrong is not a smaller win — it is worse
+than not doing this at all. The thick cut lands on the opening, which has nothing to avoid, while
+the back face is pulled in by only `wall` and so the modelled interior runs straight through the
+handle spine. That is an *overestimate*, and an overestimated interior is the one failure this
+whole section exists to prevent: the plan does not fit the real bag, on stage, with no recovery.
+The symmetric model costs 24% more volume than a correct asymmetric one and is always safe; take
+that trade until someone has actually looked at the overlay against the real bag.
+
 ### How to check you got it right
 
 Run `bash tests/swift/bag/run.sh` — it doesn't know your bag's numbers, but it proves the

@@ -80,6 +80,9 @@ from physics.schema import Scene
 WORLD_UP = np.array([0.0, 1.0, 0.0])
 DEFAULT_ANGLE_TOL_DEG = 15.0
 DEFAULT_CONTACT_EPS_M = 0.02
+# "X rests on Y" is a contact question, not an adjacency one, so it gets its own
+# tolerance -- the same 1e-3 support.py uses, so both read one resting graph.
+RESTING_CONTACT_EPS_M = 1e-3
 
 
 @dataclass
@@ -145,7 +148,11 @@ def check_constraints(
 
     ids = geom.ids
     masses = geom.masses.tolist()  # plain floats: same IEEE arithmetic, no numpy scalars
-    pairs = resting_pairs(geom, contact_eps_m)  # [(top_idx, bottom_idx, area), ...]
+    # RESTING_CONTACT_EPS_M, not contact_eps_m: the latter is an *adjacency* tolerance
+    # (2 cm, for "is this heavy thing beside that fragile one"), and at suitcase scale
+    # 2 cm of clear air is not something resting on something. support.py asks the same
+    # question at 1e-3; this keeps the two agreeing on the resting graph.
+    pairs = resting_pairs(geom, RESTING_CONTACT_EPS_M)  # [(top_idx, bottom_idx, area), ...]
 
     direct_weight = [0.0] * n  # sum of mass of objects DIRECTLY on top of x (old definition)
     resting_on_direct: list[list[int]] = [[] for _ in range(n)]  # top -> [direct supporter idx, ...]

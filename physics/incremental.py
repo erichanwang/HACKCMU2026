@@ -197,11 +197,12 @@ from physics.compressibility import (
     container_wall_allowance_m,
 )
 from physics.constraints import DEFAULT_CONTACT_EPS_M as CONSTRAINT_CONTACT_EPS_M
+from physics.constraints import RESTING_CONTACT_EPS_M
 from physics.constraints import _up_axis_cosines
 from physics.containment import _build_result, _containment_arrays, check_containment
 from physics.geometry import OBB, SIGNS, obb_from, obb_vertices
 from physics.metrics import scene_metrics
-from physics.scene_geometry import MalformedSceneError, _quats_to_matrices, precompute
+from physics.scene_geometry import MIN_CONTACT_AREA_M2, MalformedSceneError, _quats_to_matrices, precompute
 from physics.schema import Container, Object, Scene
 from physics.validator import validate_layout
 
@@ -944,13 +945,13 @@ class PlacementValidator:
         constraints' 2e-2). Returns the already-committed objects whose support
         result changed -- i.e. the ones now resting on `rec`."""
         se = self.contact_eps
-        ce = CONSTRAINT_CONTACT_EPS_M
+        ce = RESTING_CONTACT_EPS_M  # constraints.py asks the resting question at 1e-3, not its 2e-2 adjacency eps
         dirty: set[str] = set()
         rid = rec.obj.id
         for oid in cands:
             o = self._rec[oid]
             area = _xz_area(rec, o)
-            if area <= 0.0:
+            if area <= MIN_CONTACT_AREA_M2:
                 continue
             on_o = abs(rec.lo[1] - o.hi[1])
             o_on = abs(o.lo[1] - rec.hi[1])

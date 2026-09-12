@@ -37,9 +37,23 @@ def _random_unit_quaternion(rng: random.Random) -> tuple[float, float, float, fl
     return tuple(c / n for c in v)
 
 
+def _random_convex_footprint(rng: random.Random, hx: float, hz: float) -> list[tuple[float, float]]:
+    """A random convex polygon inscribed in the +-hx x +-hz rectangle: points on
+    an ellipse at random angles, hulled -- always >= 3 points, always inside
+    the box (the invariant `physics.geometry.footprint_local` enforces)."""
+    n = rng.randint(4, 7)
+    pts = []
+    for _ in range(n):
+        theta = rng.uniform(0.0, 2.0 * math.pi)
+        r = rng.uniform(0.5, 1.0)
+        pts.append((hx * r * math.cos(theta), hz * r * math.sin(theta)))
+    return pts
+
+
 def _random_scene(rng: random.Random) -> Scene:
-    """A container plus 1-4 boxes with random size/position/rotation -- some
-    fit cleanly, some collide with each other or penetrate the walls.
+    """A container plus 1-4 boxes (occasionally convex-hull prisms) with random
+    size/position/rotation -- some fit cleanly, some collide with each other or
+    penetrate the walls.
     """
     container = Container(id="box", dimensions=(1.2, 1.2, 1.2), position=(0.0, 0.6, 0.0))
     objects = []
@@ -50,8 +64,16 @@ def _random_scene(rng: random.Random) -> Scene:
         position = tuple(rng.uniform(-0.9, 0.9) for _ in range(2))
         position = (position[0], rng.uniform(0.0, 1.2), position[1])
         rotation = _random_unit_quaternion(rng) if rng.random() < 0.5 else (0.0, 0.0, 0.0, 1.0)
+        footprint = (
+            _random_convex_footprint(rng, dims[0] / 2.0, dims[2] / 2.0)
+            if rng.random() < 0.3
+            else None
+        )
         objects.append(
-            Object(id=f"obj{i}", dimensions=dims, position=position, rotation=rotation)
+            Object(
+                id=f"obj{i}", dimensions=dims, position=position, rotation=rotation,
+                footprint=footprint,
+            )
         )
     return Scene(container=container, objects=objects)
 
@@ -75,11 +97,10 @@ def _violation_types(result: dict) -> set:
 @unittest.skipUnless(CLI_BIN.exists(), f"packphysics CLI not built at {CLI_BIN}; see module docstring")
 class TestValidatorDifferential(unittest.TestCase):
     def test_python_and_swift_agree_on_random_scenes(self):
-        # NOTE: `_random_scene` only ever builds plain box `Object`s (no
-        # `footprint`), so every scene here is box-only by construction. Do
-        # NOT add footprint/hull objects to this generator -- the Swift CLI
-        # has no hull support (see `test_swift_ignores_hull_and_uses_bbox`
-        # below) and would silently disagree, defeating this test's purpose.
+        # `_random_scene` occasionally gives an object a convex-hull footprint
+        # (see `_random_convex_footprint`) -- the Swift CLI now has prism
+        # support (see `test_swift_agrees_on_hull_scene` below), so this
+        # exercises that narrow phase too, not just the box-only path.
         import tempfile
 
         rng = random.Random(SEED)
@@ -100,22 +121,19 @@ class TestValidatorDifferential(unittest.TestCase):
                     f"swift={_violation_types(sw_result)}\nscene={json.dumps(scene_to_dict(scene))}",
                 )
 
-    def test_swift_ignores_hull_and_uses_bbox(self):
-        """Documents the EXPECTED divergence on hull/footprint objects.
+    def test_swift_agrees_on_hull_scene(self):
+        """Swift now has prism/footprint support (ported from the Python
+        reference: `swift/PackPhysics/Sources/PackPhysics/Schema.swift`'s
+        `SceneObject` decodes `footprint`, and `Geometry.swift`/`Collision.swift`/
+        `Support.swift`/`Containment.swift`/`Metrics.swift` carry it through
+        collision, support, containment and scene metrics), so it agrees with
+        Python on a hull scene instead of silently boxing it.
 
-        `physics.schema.Object.footprint` (added on top of `loop`) lets an
-        object be a convex prism instead of a box; `physics.validator` is
-        hull-aware. The Swift `SceneObject` decoder
-        (`swift/PackPhysics/Sources/PackPhysics/Schema.swift`) has no
-        `footprint` case in its `CodingKeys`/`init(from:)`, so it silently
-        ignores that JSON field and treats the object as a plain box using
-        `dimensions` (the footprint's bounding box, per `schema.py`'s
-        docstring). This scene is built so a second object sits inside
-        `hull_obj`'s bounding box but outside its actual (chamfered) hull:
-        Python sees no collision, Swift -- having silently boxed the hull
-        object -- does. If Swift ever gains real hull support, or Python's
-        hull handling changes, this assertion should break loudly rather
-        than have someone mistake it for the box-only test above.
+        This scene is built so a second object sits inside `hull_obj`'s
+        bounding box but outside its actual (chamfered) hull: a box-only
+        implementation would report a collision; a hull-aware one sees none.
+        This used to document the EXPECTED divergence (see git history); now
+        it pins the agreement the port exists to deliver.
         """
         import tempfile
 
@@ -138,8 +156,8 @@ class TestValidatorDifferential(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             sw_result = _run_swift_validate(scene, Path(tmp))
-        self.assertFalse(sw_result["valid"], "swift (box-only) should see hull_obj's bbox collide")
-        self.assertEqual(_violation_types(sw_result), {"OBJECT_COLLISION"})
+        self.assertTrue(sw_result["valid"], "swift (now hull-aware) should also see no collision")
+        self.assertEqual(_violation_types(sw_result), set())
 
 
 if __name__ == "__main__":

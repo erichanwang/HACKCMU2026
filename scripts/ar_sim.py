@@ -373,7 +373,7 @@ func runScan(_ items: [ScanIn]) -> [ScanOut] {
 
 func runTransform(_ t: TransformIn) -> TransformOut {
     let pts = t.suitcasePoints.map { SIMD3<Float>($0[0], $0[1], $0[2]) }
-    guard let outer = fitBox(points: pts, planeY: t.planeY, padding: 0) else {
+    guard let outer = fitBox(points: pts, planeY: t.planeY, padding: 0, trimAboveRim: true) else {
         FileHandle.standardError.write("fitBox failed on suitcase points\n".data(using: .utf8)!)
         exit(1)
     }
@@ -764,18 +764,32 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
     print("")
 
 
+# Spike/Geometry.swift's fitBox now drops points above a suitcase's own rim (rimHeight), so an
+# open lid in frame no longer inflates the scanned box the way it used to (was up to 7+ cm on
+# this scene). What's left is ordinary LiDAR-noise fit error -- the SAME order of
+# magnitude a plain closed scan already carries with every other degradation in this sim turned
+# on (~0.5 cm, measured with --no-lid-open) -- so the tolerance below is set just above that
+# noise floor, not at zero: it fails on a lid inflating the box again, not on routine jitter.
+LID_OPEN_ESCAPE_TOLERANCE_M = 0.010
+
+
 def lid_open_true_interior_check(true_out: dict, degraded_out: dict, placements: list[dict]) -> None:
     """The plan was built from the (possibly lid-inflated) degraded suitcase; does it still fit
-    the true, undegraded interior once drawn with the degraded anchor?"""
+    the true, undegraded interior once drawn with the degraded anchor? Asserts it does, within
+    LID_OPEN_ESCAPE_TOLERANCE_M -- the whole point of segmenting the lid off in fitBox."""
     max_esc, escaped = worst_case_containment(
         placements, degraded_out["axis"], degraded_out["perp"], degraded_out["origin"],
         true_out["axis"], true_out["perp"], true_out["origin"], true_out["interior"])
-    verdict = "NO -- plan does not fit the true (closed-lid) interior" if max_esc > 1e-4 else "yes"
+    fits = max_esc <= LID_OPEN_ESCAPE_TOLERANCE_M
+    verdict = "yes" if fits else "NO -- plan does not fit the true (closed-lid) interior"
     print(f"== lid-open reality check: solved plan vs. the true (undegraded) suitcase interior ==")
     print(f"true interior {true_out['interior'][0]:.3f}x{true_out['interior'][1]:.3f}x{true_out['interior'][2]:.3f} m "
           f"vs. degraded interior {degraded_out['interior'][0]:.3f}x{degraded_out['interior'][1]:.3f}x"
           f"{degraded_out['interior'][2]:.3f} m: max escape {max_esc * 100:.2f} cm ({escaped} corners) -- fits? {verdict}")
     print("")
+    if not fits:
+        fail(f"lid-open reality check: max escape {max_esc * 100:.2f} cm exceeds "
+             f"{LID_OPEN_ESCAPE_TOLERANCE_M * 100:.2f} cm -- an open-lid scan no longer fits the true bag")
 
 
 def main() -> int:

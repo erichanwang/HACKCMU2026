@@ -400,8 +400,24 @@ public func checkSupport(
         }
     }
 
+    // Scanned prisms: redo those rows off their own ring vertices. Boxes never
+    // enter this loop, so their code path above is untouched.
+    for i in 0..<n where g.isPrism[i] {
+        let loY = g.aabbMin[i].y + epsilon
+        let hiY = g.aabbMax[i].y - epsilon
+        let ring = g.prismVerts[i]
+        let pts = ring.filter { $0.y <= loY }.map { Pt(x: $0.x, z: $0.z) }
+        bottomPts[i] = pts
+        bottomHulls[i] = hull(pts)
+        if supporting.contains(i) {
+            topHulls[i] = hull(ring.filter { $0.y >= hiY }.map { Pt(x: $0.x, z: $0.z) })
+        }
+    }
+
     let floored = onFloor(g, contactEps: epsilon)
-    let centersXZ = g.obbs.map { Pt(x: $0.center.x, z: $0.center.z) }
+    // COM projection: the OBB center for a box, the footprint centroid for a
+    // scanned prism -- `SceneGeometry.com`, not the OBB center directly.
+    let centersXZ = g.com.map { Pt(x: $0.x, z: $0.z) }
     // Objects whose whole XZ footprint is inside a rectangular floor: their bottom
     // footprint survives the floor clip untouched (see `axisRect`).
     var insideFloor = [Bool](repeating: false, count: n)

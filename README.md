@@ -4,6 +4,53 @@
 
 PackAR scans items with an iPhone's LiDAR, figures out the optimal way to pack them into a suitcase (or any container), and overlays the plan onto your real luggage so you just place things where the app shows.
 
+## Run it
+
+Needs Docker and [uv](https://docs.astral.sh/uv/). Two terminals from the repo root:
+
+```bash
+docker compose --env-file /dev/null up -d          # Mongo 7 on localhost:27017
+cd server && uv run --env-file ../.env uvicorn main:app --host 0.0.0.0
+```
+
+`docker compose --env-file /dev/null down` stops Mongo again; the named volume keeps the data.
+The `--env-file /dev/null` is only there because compose parses the repo's `.env` for variable
+interpolation even though `docker-compose.yml` uses none, and one stray line in `.env` is then
+enough to make `docker compose` refuse to run.
+
+Both flags on the second command are load-bearing:
+
+- **`--env-file ../.env`** — nothing else loads `.env`. A plain `uvicorn main:app` starts fine
+  with no `XAI_API_KEY`, and then every scanned item comes back labelled `"unknown"`
+  (`labelStatus: "pending"`) instead of being classified by Grok.
+- **`--host 0.0.0.0`** — the phone reaches the server over Wi-Fi, not localhost. Point the app
+  at the Mac running it: `ipconfig getifaddr en0`, put that IP in `API.base` in
+  `Spike/API.swift`, and keep phone and Mac on the same network.
+
+Mongo must be reachable or the server does not boot. Override with `SUITCASE_MONGODB_URI`
+(default `mongodb://localhost:27017`) to point at Atlas instead; `MONGO_DB` (default
+`suitcase`) and `GROK_MODEL` (default `grok-4`) are the other knobs. Smoke test:
+`cd server && uv run python check.py` → prints `server ok`.
+
+Endpoints (port 8000):
+
+| | |
+|---|---|
+| `POST /suitcases` | JSON `{"name": …, "dimensions": [w, h, d]}` in metres. The container everything packs into. |
+| `GET /suitcases` | All suitcases, newest first. |
+| `GET /suitcases/{id}` | One suitcase plus its items. |
+| `DELETE /suitcases/{id}` | Drops the suitcase, its items and its plan. |
+| `POST /suitcases/{id}/plan` | Runs the solver + physics validation over that suitcase's items, stores the plan. |
+| `GET /suitcases/{id}/plan` | The stored plan (404 until you POST it). |
+| `POST /items` | multipart: `item` (ScannedItem JSON, **must include `suitcaseId`**) + `image` (JPEG, ≤10MB). Labels via Grok, stores, returns the item. |
+| `GET /items` | All items, or one suitcase's with `?suitcaseId=…`. |
+| `GET /items/{id}` | One item; the app polls this while `labelStatus` is `"pending"`. |
+| `PATCH /items/{id}` | JSON with any of `label`, `rigidity` (`rigid`/`soft`/`fragile`), `compressibility`, `mass`, `keepUpright` — user override. |
+| `DELETE /items/{id}` | Drops the item and invalidates the suitcase's stored plan. |
+
+Mutating routes take an Auth0 bearer token; with `AUTH0_DOMAIN`/`AUTH0_AUDIENCE` unset (the
+local default) they run open, as a single shared `local` user.
+
 ## The problem
 
 Packing a suitcase well is a 3D bin-packing problem most people solve badly by eye. Existing packing-cube advice is generic; nothing looks at *your* actual items and *your* actual suitcase and tells you where each thing goes. PackAR does.

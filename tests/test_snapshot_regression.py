@@ -111,6 +111,11 @@ def _dump(result: dict) -> str:
 # machine -- CI proved it by passing and failing the identical commit on two runners. Every
 # regression this test exists to catch moves millimetres; none moves 1e-18. Both sides are
 # normalised so the stored snapshot stays exactly as generated.
+# Calibrated, not guessed: perturbing every float in a scene's result by 1e-16 and by
+# 1e-12 leaves this comparison equal, while 1e-6 and 1e-3 both fail it. Six orders of
+# magnitude of headroom above the CI jitter and far below anything a real regression
+# moves, so do not tighten _PLACES without re-running that check -- the last two digits
+# are the runner's CPU, not our geometry.
 _PLACES = 9
 
 

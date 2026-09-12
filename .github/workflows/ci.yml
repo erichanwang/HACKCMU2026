@@ -37,11 +37,11 @@ jobs:
 
       - name: Run packer3d tests
         working-directory: packer3d
-        # keep the "not slow" filter: the 1000-item case already misses its budget on a
-        # dedicated laptop (FIXES.md #2), a shared CI runner won't do better.
+        # The whole suite, timing tests included: the 1000-item case runs in ~13 s since the
+        # decoder fix, so nothing is marked slow any more.
         run: |
           pip install pytest
-          PYTHONPATH=. python -m pytest -q -m "not slow" tests/
+          PYTHONPATH=. python -m pytest -q tests/
 
       - name: Server check
         working-directory: server

@@ -1,0 +1,6 @@
+.git
+.build
+out
+.pan_cache
+__pycache__
+*.pyc

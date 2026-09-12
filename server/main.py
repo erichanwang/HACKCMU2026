@@ -32,6 +32,7 @@ def compressibility(value, rigidity: str) -> float:
     except (TypeError, ValueError):
         return 1.0
 
+
 db = MongoClient(os.environ.get("SUITCASE_MONGODB_URI", "mongodb://localhost:27017"), serverSelectionTimeoutMS=8000)[os.environ.get("MONGO_DB", "suitcase")]
 db.client.admin.command("ping")  # fail at startup, not on the first request
 app = FastAPI()

@@ -45,20 +45,22 @@ def _v(x, y, z) -> dict:
     return {"x": float(x), "y": float(y), "z": float(z)}
 
 
-def _nested_in(placements: list) -> dict:
-    """item_id -> the id of the placement whose scanned cavity it sits in, for placements whose
-    bounding boxes interpenetrate. The solver nests an item only inside another's real cavity
-    (packer3d/verify.py re-checks that with the same solid decomposition), so in a validated
-    plan an overlap of two boxes means nesting, and the host is the larger box. An unvalidated
-    plan can carry a genuine collision here too; `validation.valid` says which it is."""
-    boxes = [(p["item_id"], [float(v) for v in p["position"]], [float(v) for v in p["dims"]]) for p in placements]
-    volume = {i: d[0] * d[1] * d[2] for i, _, d in boxes}
-    out = {}
-    for i, lo, d in boxes:
-        hosts = [j for j, jlo, jd in boxes
-                 if j != i and volume[j] > volume[i]
-                 and all(min(lo[k] + d[k], jlo[k] + jd[k]) - max(lo[k], jlo[k]) > 1e-9 for k in range(3))]
-        out[i] = max(hosts, key=volume.__getitem__) if hosts else None
+def _nesting(p: dict) -> dict:
+    """`nestedIn` / `cavity` for one placement, copied from the solver's own `nested_in` (the
+    decoder knows when it placed an item into another item's scanned cavity; nothing is inferred
+    here, since inferring it from overlapping boxes would relabel a missed collision as nesting).
+    Advisory for consumers: absent or null means not nested; the optional `cavity` is the host's
+    cavity sub-box in bag frame, so a strict checker can allow overlap only inside that cell."""
+    n = p.get("nested_in")
+    if not n:
+        return {"nestedIn": None}
+    if isinstance(n, str):
+        return {"nestedIn": n}
+    out = {"nestedIn": n.get("item_id") or n.get("host")}
+    if n.get("position") is not None and n.get("dims") is not None:
+        x, y, z = n["position"]
+        dx, dy, dz = n["dims"]
+        out["cavity"] = {"position": _v(x, z, y), "size": _v(dx, dz, dy)}
     return out
 
 
@@ -69,7 +71,6 @@ def to_app_plan(result: dict, suitcase: dict, items_by_id: dict) -> dict:
     and `note`). `result["unpacked"]` is not part of a plan and is dropped here.
     """
     width, height, depth = (float(v) for v in suitcase["dimensions"])
-    nested = _nested_in(result.get("placements", []))
     placements = []
     for step, p in enumerate(result.get("placements", []), start=1):
         item = items_by_id.get(p["item_id"], {})
@@ -84,7 +85,7 @@ def to_app_plan(result: dict, suitcase: dict, items_by_id: dict) -> dict:
             "size": _v(dx, dz, dy),
             "rotation": _ROTATION.get(p.get("orientation"), "XYZ"),
             "note": item.get("description") or "",
-            "nestedIn": nested[p["item_id"]],  # the host whose cavity holds this item, else null
+            **_nesting(p),
         })
     return {
         "version": 1,

@@ -122,24 +122,28 @@ if __name__ == "__main__":
 
 
 class TestNesting(unittest.TestCase):
-    """`nestedIn` names the larger placement whose box a placement sits inside; null otherwise."""
+    """`nestedIn` is copied from the solver's `nested_in`, never inferred from overlapping boxes."""
 
-    def test_nested_item_names_its_host_and_the_host_none(self):
+    def test_solver_nesting_is_copied_and_cavity_converted_to_bag_frame(self):
         result = {"placements": [
             {"item_id": "bowl", "position": [0, 0, 0], "dims": [0.3, 0.3, 0.1], "orientation": "xyz"},
-            {"item_id": "cup", "position": [0.1, 0.1, 0.02], "dims": [0.08, 0.08, 0.07], "orientation": "xyz"},
-            {"item_id": "book", "position": [0.4, 0, 0], "dims": [0.2, 0.15, 0.03], "orientation": "xyz"},
+            {"item_id": "cup", "position": [0.1, 0.1, 0.02], "dims": [0.08, 0.08, 0.07], "orientation": "xyz",
+             "nested_in": {"item_id": "bowl", "position": [0.05, 0.05, 0.02], "dims": [0.2, 0.2, 0.08]}},
+            {"item_id": "spoon", "position": [0.1, 0.1, 0.02], "dims": [0.02, 0.1, 0.01], "orientation": "xyz",
+             "nested_in": "bowl"},
         ]}
         by_id = {q["itemId"]: q for q in to_app_plan(result, {"_id": "s", "dimensions": [1, 1, 1]}, {})["placements"]}
         self.assertEqual(by_id["cup"]["nestedIn"], "bowl")
+        self.assertEqual(by_id["cup"]["cavity"], {"position": {"x": 0.05, "y": 0.02, "z": 0.05},
+                                                  "size": {"x": 0.2, "y": 0.08, "z": 0.2}})
+        self.assertEqual(by_id["spoon"]["nestedIn"], "bowl")
+        self.assertNotIn("cavity", by_id["spoon"])
         self.assertIsNone(by_id["bowl"]["nestedIn"])
-        self.assertIsNone(by_id["book"]["nestedIn"])
 
-    def test_touching_faces_are_not_nesting(self):
+    def test_overlapping_boxes_without_solver_nesting_stay_unnested(self):
         result = {"placements": [
-            {"item_id": "a", "position": [0, 0, 0], "dims": [0.2, 0.2, 0.1], "orientation": "xyz"},
-            {"item_id": "b", "position": [0, 0, 0.1], "dims": [0.1, 0.1, 0.1], "orientation": "xyz"},
+            {"item_id": "a", "position": [0, 0, 0], "dims": [0.3, 0.3, 0.1], "orientation": "xyz"},
+            {"item_id": "b", "position": [0.1, 0.1, 0.02], "dims": [0.08, 0.08, 0.07], "orientation": "xyz"},
         ]}
         plan = to_app_plan(result, {"_id": "s", "dimensions": [1, 1, 1]}, {})
-        self.assertTrue(all(q["nestedIn"] is None for q in plan["placements"]))
-
+        self.assertTrue(all(q["nestedIn"] is None for q in plan["placements"]), "never inferred from overlap")

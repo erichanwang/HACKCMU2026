@@ -209,6 +209,60 @@ class SuitcaseAgreementTests(unittest.TestCase):
         self.assertEqual(len(single.objects), len(SUITCASE_RESULT["naive"]["placements"]))
 
 
+class NestingAgreementTests(unittest.TestCase):
+    """Pins the bowl-and-cup nesting scenario from `packer3d/tests/test_nesting.py`
+    (a decomposition feature landing on another branch, so this builds the
+    solver's result JSON by hand instead of depending on it): a 20x20x10cm bowl
+    scan (10cm rim, 10x10x1cm interior) with a cup resting in its cavity, at
+    positions `packer3d.pack_naive`/`verify()` accept as collision-free.
+
+    Before `_objects_from_placement` decomposed the bowl's placement, this same
+    scene reported OBJECT_COLLISION (bowl's full 10cm-tall bbox vs. the cup) and
+    UNSUPPORTED_OBJECT (cup) -- the exact inconsistency this test pins the fix
+    for. `test_without_the_cavity_grid_it_still_collides` reproduces that old
+    behaviour on demand (via `_object_from_placement`, bypassing decomposition)
+    so a future change can't silently re-break this without a red test."""
+
+    BOWL_GRID = [
+        [10, 10, 10, 10],
+        [10, 1, 1, 10],
+        [10, 1, 1, 10],
+        [10, 10, 10, 10],
+    ]
+    RESULT = {
+        "container": {"id": "box", "dims": [0.20, 0.20, 0.101], "obstacles": []},
+        "placements": [
+            {"item_id": "bowl", "shape": "box", "position": [0.0, 0.0, 0.0], "dims": [0.2, 0.2, 0.1],
+             "center": [0.1, 0.1, 0.05], "orientation": "xyz", "axis": None, "mass": 0.4, "fragile": False},
+            {"item_id": "cup", "shape": "box", "position": [0.05, 0.05, 0.01], "dims": [0.08, 0.08, 0.06],
+             "center": [0.09, 0.09, 0.04], "orientation": "xyz", "axis": None, "mass": 0.2, "fragile": False},
+        ],
+        "unpacked": [],
+        "metrics": {},
+    }
+    ITEMS = {"items": [
+        {"id": "bowl", "heights": BOWL_GRID, "cellSize": 5.0, "width": 20.0, "depth": 20.0, "height": 10.0,
+         "keep_upright": False, "priority": 1.0},
+        {"id": "cup", "keep_upright": False, "priority": 1.0},
+    ]}
+
+    def test_cup_nested_in_bowl_cavity_validates_clean(self):
+        result = validate_packer3d(self.RESULT, items=self.ITEMS)
+        self.assertEqual(result["violations"], [], result["violations"])
+        self.assertTrue(result["valid"])
+        self.assertAlmostEqual(result["metrics"]["total_mass_kg"], 0.6, delta=1e-12)
+
+    def test_without_the_cavity_grid_it_still_collides(self):
+        """Same placements, but with the bowl's `heights` stripped -- i.e. exactly the
+        pre-fix behaviour (one full bbox per item). This is the "before" measurement:
+        a real, physically valid nesting misreported as a collision."""
+        items_no_grid = {"items": [{"id": "bowl", "keep_upright": False, "priority": 1.0}, self.ITEMS["items"][1]]}
+        result = validate_packer3d(self.RESULT, items=items_no_grid)
+        self.assertFalse(result["valid"])
+        types = {v["type"] for v in result["violations"]}
+        self.assertIn("OBJECT_COLLISION", types)
+
+
 class ObstacleTests(unittest.TestCase):
     def test_obstacles_become_massless_objects(self):
         scene, _ = scene_from_packer3d(DRAGON_RESULT, items=DRAGON_SCENARIO, strategy="naive")

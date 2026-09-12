@@ -40,6 +40,14 @@ Deliberate approximations (call these out, don't hide them)
   the physics layer always pulls along -Y. A microgravity layout therefore reports
   UNSUPPORTED_OBJECT for every floating item; that is expected, not a solver bug.
   See `docs/SOLVER_INTEGRATION.md`.
+* A NESTED PLACEMENT (an item scanned with a `heights` grid, e.g. a bowl, with a
+  smaller item resting in its real cavity) would otherwise misreport as
+  OBJECT_COLLISION here: a `placement` only ever carries one bbox, so mapping it
+  straight to one `Object` treats the bowl as solid all the way up to its rim, even
+  though `packer3d`'s own decoder/verify() already pack/accept the nesting.
+  `_objects_from_placement` decomposes such a placement into several `Object`s (one
+  per carved cavity cell, mirroring `packer3d.models.Item.solid_boxes()`) so this
+  layer agrees. See its docstring and `tests/test_packer3d_adapter.py`'s nesting test.
 
 Constraint mapping
 ------------------
@@ -179,9 +187,20 @@ def _pick(result: dict, strategy: Optional[str]) -> tuple[dict, str]:
 
 
 def item_metadata(items) -> dict[str, dict]:
-    """`{expanded_id: {"source_id", "keep_upright", "priority"}}` from a scenario dict
-    (or just its `items` list). `count: n` expands to `id_1 .. id_n`, exactly like
-    `packer3d.scenario.load_scenario`."""
+    """`{expanded_id: {"source_id", "keep_upright", "priority", ...}}` from a scenario
+    dict (or just its `items` list). `count: n` expands to `id_1 .. id_n`, exactly like
+    `packer3d.scenario.load_scenario`.
+
+    An entry with a lidar `heights` grid (SCAN_OUTPUT.md) also carries it through,
+    normalized to `heights`, `cellSize`, `width`, `depth`, `height` + `units` ("cm" or
+    "m") -- `packer3d.models.Item.from_scanned_heightmap` accepts either the raw
+    cm `width`/`depth`/`height` keys or the server document form
+    (`dimensions: [width, height, depth]`, metres); this reads whichever is present
+    the same way. `_objects_from_placement` uses it to decompose that item's
+    placement into its real cavity shape. An entry with `heights` but neither form of
+    dims present is malformed for `from_scanned_heightmap` too, so it's just left
+    without cavity data here (falls back to the plain single-box `Object`).
+    """
     if items is None:
         return {}
     entries = items.get("items", []) if isinstance(items, dict) else items
@@ -190,11 +209,22 @@ def item_metadata(items) -> dict[str, dict]:
         n = int(d.get("count", 1))
         ids = [d["id"]] if n == 1 else [f"{d['id']}_{k + 1}" for k in range(n)]
         for iid in ids:
-            meta[iid] = {
+            entry = {
                 "source_id": d["id"],
                 "keep_upright": bool(d.get("keep_upright", False)),
                 "priority": float(d.get("priority", 1.0)),
             }
+            if "heights" in d:
+                width, depth, height, units = d.get("width"), d.get("depth"), d.get("height"), "cm"
+                if width is None and "dimensions" in d:
+                    width, height, depth = d["dimensions"]  # server document form, metres
+                    units = "m"
+                if width is not None and depth is not None and height is not None:
+                    entry.update(
+                        heights=d["heights"], cellSize=d.get("cellSize", 0.0),
+                        width=width, depth=depth, height=height, units=units,
+                    )
+            meta[iid] = entry
     return meta
 
 
@@ -223,6 +253,96 @@ def _object_from_placement(p: dict, meta: dict[str, dict], oriented: bool = True
         mass_kg=float(p.get("mass", 0.0)),
         constraints=_constraints(p.get("fragile", False), m.get("keep_upright", False)),
     )
+
+
+# packer3d orientation name -> axis permutation, restricted to the two that keep a
+# scanned height grid's "up" pointing along world z (`packer3d.models.oriented_solid_boxes`).
+_CAVITY_PERM = {"xyz": (0, 1, 2), "yxz": (1, 0, 2)}
+
+
+def _cavity_local_boxes(entry: dict, max_blocks: int = 4) -> list[tuple[tuple, tuple]]:
+    """Local `(lo, hi)` boxes (packer3d item frame: x=width, y=depth, z=height, metres)
+    approximating a scanned item's real cavity, via the same "max-pool `heights` down to
+    <= max_blocks x max_blocks cells, floor to tallest point per cell" decomposition as
+    `packer3d.models.Item.solid_boxes()`. A cell at height ~0 gets no box -- SCAN_OUTPUT.md's
+    heightmap contract already treats that as "nothing observed here" for every other
+    consumer of `heights`, so this doesn't add any new ambiguity, it just also skips solid
+    there. Deliberately duplicated (not imported from `packer3d`): the decoder that owns
+    this algorithm is still being changed by another session, and only the pure geometry is
+    needed here, not the solver's internals. Returns `[]` if `entry` has no usable grid.
+    """
+    heights = entry.get("heights")
+    if not heights or float(entry.get("cellSize", 0.0)) <= 0.0:
+        return []
+    scale = 0.01 if entry.get("units", "cm") == "cm" else 1.0  # cm or metres, see `item_metadata`
+    arr = np.asarray(heights, dtype=float) * scale
+    rows, cols = arr.shape
+    dx, dy, dz = (float(entry[k]) * scale for k in ("width", "depth", "height"))
+    row_blocks = np.array_split(np.arange(rows), min(max_blocks, rows))
+    col_blocks = np.array_split(np.arange(cols), min(max_blocks, cols))
+    boxes = []
+    x0 = 0.0
+    for ri in row_blocks:
+        x1 = x0 + len(ri) / rows * dx
+        y0 = 0.0
+        for cj in col_blocks:
+            y1 = y0 + len(cj) / cols * dy
+            h = float(arr[np.ix_(ri, cj)].max())
+            if h > 1e-9:
+                boxes.append(((x0, y0, 0.0), (x1, y1, min(h, dz))))
+            y0 = y1
+        x0 = x1
+    return boxes
+
+
+def _objects_from_placement(p: dict, meta: dict[str, dict], oriented: bool = True) -> list[Object]:
+    """Usually one `Object` per placement (`_object_from_placement`). But when the item
+    has a scanned `heights` grid (`item_metadata`) and the solver kept it z-up
+    (`orientation` "xyz"/"yxz"), several -- one per carved cavity cell -- so a nested
+    placement (a cup resting in a bowl's interior, `packer3d/tests/test_nesting.py`)
+    doesn't collide against the bowl's full outer bounding box here the way
+    `packer3d`'s own decoder/verify() no longer do once they decompose it (see module
+    docstring; this is that same decomposition, applied on this side of the JSON
+    boundary since a placement only ever carries one bbox).
+
+    All of the item's mass goes on its single biggest solid (id = the plain item id);
+    the rest are massless (id `f"{item_id}#{k}"`) so total mass is exactly what it was
+    before decomposition -- `center_of_mass` shifts slightly (mass now sits at that one
+    solid's centroid instead of the full bbox's), an accepted approximation, since a
+    uniform-density assumption was already only a guess for an irregular scanned item.
+    Every solid gets the item's own constraints, so nothing may rest on any part of a
+    fragile item, same as before.
+    """
+    # The cavity solids below are built in world space with identity rotation, i.e. the
+    # `oriented=True` form only. In the unoriented form the caller wants the item's own
+    # dimensions plus a rotation, and applying the permutation to already-permuted cavity
+    # boxes would double-rotate exactly as this module's docstring warns. Fall back.
+    if not oriented:
+        return [_object_from_placement(p, meta, oriented)]
+    m = meta.get(p["item_id"], {})
+    local_boxes = _cavity_local_boxes(m) if m.get("heights") else []
+    perm = _CAVITY_PERM.get(p.get("orientation"))
+    if not local_boxes or perm is None:
+        return [_object_from_placement(p, meta, oriented)]
+
+    position = [float(v) for v in p["position"]]
+    constraints = _constraints(p.get("fragile", False), m.get("keep_upright", False))
+    volumes = [(hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]) for lo, hi in local_boxes]
+    heaviest = volumes.index(max(volumes))
+    objects = []
+    for k, (lo, hi) in enumerate(local_boxes):
+        wlo = tuple(position[a] + lo[perm[a]] for a in range(3))
+        whi = tuple(position[a] + hi[perm[a]] for a in range(3))
+        center = tuple((wlo[a] + whi[a]) / 2.0 for a in range(3))
+        objects.append(Object(
+            id=p["item_id"] if k == heaviest else f"{p['item_id']}#{k}",
+            dimensions=swap_yz(tuple(whi[a] - wlo[a] for a in range(3))),
+            position=physics_point(*center),
+            rotation=IDENTITY_ROTATION,
+            mass_kg=float(p.get("mass", 0.0)) if k == heaviest else 0.0,
+            constraints=constraints,
+        ))
+    return objects
 
 
 def _object_from_obstacle(ob: dict) -> Object:
@@ -277,7 +397,7 @@ def scene_from_packer3d(
     placements = single.get("placements", [])
     container_d = single["container"]
 
-    objects = [_object_from_placement(p, meta, oriented) for p in placements]
+    objects = [obj for p in placements for obj in _objects_from_placement(p, meta, oriented)]
     if include_obstacles:
         objects += [_object_from_obstacle(ob) for ob in container_d.get("obstacles", [])]
 

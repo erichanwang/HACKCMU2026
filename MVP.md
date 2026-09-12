@@ -1,4 +1,4 @@
-# HackCMU 2026 — Travel Track MVP: AR Packing Assistant
+# HackCMU 2026 — Travel Track MVP: PackAR
 
 ## Goal
 

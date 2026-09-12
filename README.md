@@ -15,11 +15,11 @@ packer3d/  3D packing solver with centre-of-mass optimisation
 
 Needs [uv](https://docs.astral.sh/uv/) (`brew install uv`). Everything else installs itself.
 
+Copy `.env.example` to `.env` at the repo root and fill in `SUITCASE_MONGODB_URI` (Atlas connection string) and `XAI_API_KEY` (Grok) — ask Helen for both. `.env` is git-ignored.
+
 ```bash
 cd server
-export SUITCASE_MONGODB_URI='mongodb+srv://…'   # Atlas connection string — ask Helen
-export XAI_API_KEY='…'                           # Grok key — ask Helen; omit and items are labelled "unknown"
-uv run uvicorn main:app --host 0.0.0.0
+uv run --env-file ../.env uvicorn main:app --host 0.0.0.0
 ```
 
 Runs on port 8000. Endpoints:

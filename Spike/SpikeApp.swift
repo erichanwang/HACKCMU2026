@@ -33,6 +33,7 @@ struct ContentView: View {
                 .tag(AppTab.pack)
         }
         .tint(.indigo)
+        .preferredColorScheme(.dark)
     }
 }
 

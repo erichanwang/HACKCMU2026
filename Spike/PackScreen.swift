@@ -31,12 +31,12 @@ struct PackScreen: View {
                     empty
                 }
             }
-            .navigationTitle("Pack")
+            .navigationTitle("Packing plan")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { pack() } label: {
-                        if packing { ProgressView() } else { Label("Pack", systemImage: "shippingbox.fill") }
+                        if packing { ProgressView() } else { Text("Pack").fontWeight(.semibold) }
                     }
                     .disabled(selected == nil || packing)
                 }
@@ -52,6 +52,7 @@ struct PackScreen: View {
             ForEach(suitcases) { bag in Text(bag.displayName).tag(Optional(bag.id)) }
         }
         .pickerStyle(.menu)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
     }
 
@@ -72,12 +73,13 @@ struct PackScreen: View {
             Text(suitcases.isEmpty
                  ? "Scan a suitcase on the Scan tab, then scan what goes in it."
                  : "Tap Pack to solve \(selectedBagName) and see where everything goes.")
+                .multilineTextAlignment(.center)
         }
         .frame(maxHeight: .infinity)
     }
 
     private var selectedBagName: String {
-        suitcases.first { $0.id == selected }?.displayName ?? "this bag"
+        suitcases.first { $0.id == selected }?.name ?? "this bag"
     }
 
     // MARK: - Server calls

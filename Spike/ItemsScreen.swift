@@ -46,7 +46,7 @@ struct ItemsScreen: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(scanned.labelStatus == "pending" ? "Labelling…" : (scanned.label ?? "Unlabelled"))
                 .font(.body.weight(.medium))
-            Text("\(scanned.sizeText) · \(bagName(for: scanned.suitcaseId))")
+            Text("\(scanned.sizeText) · \(shortBagName(for: scanned.suitcaseId))")
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
@@ -89,6 +89,13 @@ struct ItemsScreen: View {
     private func bagName(for id: String?) -> String {
         guard let id else { return "Not in a suitcase" }
         return suitcases.first { $0.id == id }?.displayName ?? "Another suitcase"
+    }
+
+    /// The bag's name alone. A row already states the item's own size; repeating the
+    /// bag's next to it wrapped every row onto a second line for no information.
+    private func shortBagName(for id: String?) -> String {
+        guard let id else { return "Not in a suitcase" }
+        return suitcases.first { $0.id == id }?.name ?? "Another suitcase"
     }
 
     // MARK: - Server calls

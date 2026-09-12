@@ -133,26 +133,30 @@ def pack_optimized(container: Container, items, config: Optional[OptimizerConfig
         return evaluate_state(st, items_by_id, total_pv, weights)
 
     # ---- layer 2a: multi-start greedy, time-capped, keeps the best few as restart points --
-    starts = [("volume", base.w_com)]
+    # ``pack_naive``'s exact genome goes first: it is the one arrangement the caller can always
+    # get for free, so evaluating it here is what makes pack_optimized unable to lose to it -- on
+    # a corpus of mostly-soft garments the input order plus first-fit placement beats every
+    # sorted order, and without this start the search never even sees that arrangement.
+    starts = [(list(range(n)), [0] * n, NAIVE_PARAMS)]
     if config.multi_start:
-        # one shuffled sweep of every sort key per CoM weight, not a flat shuffle: a truncated
-        # budget then still sees all six orderings.  The shuffle is seeded, so which starts fit
-        # in the budget and how ties between equally good starts break differ per seed.
-        starts, grid = [], list(config.com_weight_grid)
+        # then one shuffled sweep of every sort key per CoM weight, not a flat shuffle: a
+        # truncated budget still sees all six orderings.  The shuffle is seeded, so which starts
+        # fit in the budget and how ties between equally good starts break differ per seed.
+        grid = list(config.com_weight_grid)
         rng.shuffle(grid)
         for sweep, w in enumerate(grid):
             keys = list(_sort_keys())
             rng.shuffle(keys)
-            if sweep == 0:  # largest-first is the strongest single ordering by a wide margin;
-                keys.remove("volume")  # never let a short budget shuffle it out of reach
+            if sweep == 0:  # largest-first is the strongest single sorted ordering by a wide
+                keys.remove("volume")  # margin; never let a short budget shuffle it out of reach
                 keys.insert(0, "volume")
-            starts += [(k, w) for k in keys]
+            starts += [(sorted_sequence(items, k), None, replace(base, w_com=w)) for k in keys]
+    else:
+        starts.append((sorted_sequence(items, "volume"), None, base))
     greedy_deadline = t0 + GREEDY_BUDGET_FRACTION * config.time_budget_s
     pool: list[_Cand] = []
-    for name, w in starts:
-        params = replace(base, w_com=w)
-        seq = sorted_sequence(items, name)
-        st = decode(container, items, seq, None, params)
+    for seq, seed_orient, params in starts:
+        st = decode(container, items, seq, seed_orient, params)
         orient = [st.chosen_orient.get(items[i].id, 0) for i in range(n)]
         pool.append(_Cand(evaluate(st), seq, orient, st, params))
         if config.time_budget_s > 0 and time.perf_counter() >= greedy_deadline:

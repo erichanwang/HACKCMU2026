@@ -252,6 +252,41 @@ for n in [1, 2, 3, 5] {
     print("  \(n) tap(s): median max corner err \(fmt(pctile(errs, 0.5)))m   p95 \(fmt(pctile(errs, 0.95)))m")
 }
 
+// --- Section 4d: before/after — Spike/ScanView.swift's ARAnchor plan-overlay fix -------------------
+// The fix (see Spike/ScanView.swift `showPlan`) stops parenting the plan overlay to a frozen
+// `AnchorEntity(world:)` snapshot and instead adds a real `ARAnchor` at the bag's origin via
+// `session.add(anchor:)`, then hangs the overlay off `AnchorEntity(anchor:)`. ARKit updates any
+// ARAnchor's `transform` as it refines its world-tracking pose graph -- the same class of
+// correction ARPlaneAnchor already gets and that Section 4 above already exploits for planeY, just
+// without a physical surface being re-observed to ground it. Modelled the same way as Section 4:
+// horizontal (x/z) `drift` and `dAxisDeg`, used here as *post-tap world rotation drift* (not the
+// single-tap fit noise Section 4b's averageAxis already covers -- that noise is baked into the
+// anchor's transform before ARKit ever sees it, so tracking correction has nothing to re-derive it
+// from), are zeroed for "after". dPlaneY and dWidth are one-instant fit/reading noise, untouched by
+// either mechanism, and kept identical in both rows. Whether ARKit's anchor-transform correction is
+// in practice as complete as this model assumes -- there is no live re-observation of "the bag" the
+// way the table plane gets one every frame -- is NOT verified here; that needs a real device (see
+// the report).
+print("")
+print("== before/after: anchoring the plan overlay to a tracked ARAnchor (Spike/ScanView.swift showPlan) ==")
+func anchorCorrected(_ pert: Perturbation) -> Perturbation {
+    var p = pert; p.drift.x = 0; p.drift.z = 0; p.dAxisDeg = 0; return p
+}
+let anchorScenarios: [(String, Perturbation)] = [
+    ("2cm horizontal world drift + 2deg world-rotation drift",
+     Perturbation(dAxisDeg: 2, drift: SIMD3(1, 0, 1) / Float(2).squareRoot() * 0.02)),
+    ("5cm horizontal world drift + 5deg world-rotation drift",
+     Perturbation(dAxisDeg: 5, drift: SIMD3(1, 0, 1) / Float(2).squareRoot() * 0.05)),
+    ("worst realistic: 3cm plane + 5deg rotation drift + 1cm dims + 5cm horizontal drift",
+     Perturbation(dPlaneY: 0.03, dAxisDeg: 5, dWidth: 0.01, drift: SIMD3(1, 0, 1) / Float(2).squareRoot() * 0.05)),
+]
+for (label, p) in anchorScenarios {
+    let before = evaluate(p), after = evaluate(anchorCorrected(p))
+    print("\(label):")
+    print("  before (frozen world anchor):  max \(fmt(before.maxErr))m  believable \(pct(before.believableFrac))")
+    print("  after  (tracked ARAnchor):      max \(fmt(after.maxErr))m  believable \(pct(after.believableFrac))")
+}
+
 // --- Section 5: the gate assertion -----------------------------------------------------------------
 // Threshold picked from Section 1: at the low end of every stated range (0.5cm plane, 1deg axis,
 // 1cm dims, 1cm drift) the overlay must stay within 2.5 cm of truth on every corner. That is looser
@@ -280,3 +315,18 @@ assert(verticalGateResult.maxErr < verticalThreshold,
        + "now costs \(verticalGateResult.maxErr)m, over \(verticalThreshold)m")
 print("re-resolved, with 0.5cm plane, 1deg axis, 1cm dims, 1cm vertical drift: "
       + "max corner error \(fmt(verticalGateResult.maxErr))m < \(verticalThreshold)m — ok")
+
+// Third gate, for the ARAnchor fix: same shape as the first gate, but with `dAxisDeg` standing in
+// for post-tap world-rotation drift and `drift` for horizontal world drift rather than fit noise —
+// evaluated with `anchorCorrected` since that's what a tracked-ARAnchor plan overlay now delivers.
+// Only dPlaneY/dWidth (one-instant fit/reading noise, neither mechanism touches them) survive, so
+// the threshold tightens to just above what Section 1's planeY/dimensions sweeps alone cost.
+print("")
+let anchorGate = Perturbation(dPlaneY: 0.005, dAxisDeg: 1, dWidth: 0.01, drift: SIMD3(1, 0, 0) * 0.01)
+let anchorGateResult = evaluate(anchorCorrected(anchorGate))
+let anchorThreshold: Float = 0.013
+assert(anchorGateResult.maxErr < anchorThreshold,
+       "regression: with the plan overlay anchored via a tracked ARAnchor, 0.5cm plane + 1deg axis "
+       + "drift + 1cm dims + 1cm horizontal drift now costs \(anchorGateResult.maxErr)m, over \(anchorThreshold)m")
+print("anchored, with 0.5cm plane, 1deg rotation drift, 1cm dims, 1cm horizontal drift: "
+      + "max corner error \(fmt(anchorGateResult.maxErr))m < \(anchorThreshold)m — ok")

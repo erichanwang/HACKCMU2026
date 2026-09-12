@@ -49,6 +49,8 @@ public class ARSession {
     public func run(_ configuration: ARConfiguration) {}
     public var currentFrame: ARFrame? { fatalError() }
     public weak var delegate: ARSessionDelegate?
+    public func add(anchor: ARAnchor) {}
+    public func remove(anchor: ARAnchor) {}
 }
 
 /// Real ARSessionDelegate (https://developer.apple.com/documentation/arkit/arsessiondelegate) is
@@ -72,6 +74,7 @@ public class ARFrame {
 
 public class ARAnchor {
     public var transform: simd_float4x4 { fatalError() }
+    public init(transform: simd_float4x4) {}
 }
 
 public final class ARPlaneAnchor: ARAnchor {

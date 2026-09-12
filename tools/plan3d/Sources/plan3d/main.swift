@@ -7,7 +7,7 @@ import PackingPlanUI
 // docs/PLAN_3D.md.
 //
 //   swift run plan3d <plan.json> <out-dir> [--steps] [--cutaway] [--unpacked]
-//                                          [--violations] [--layers]
+//                                          [--violations] [--layers [--device]]
 
 let width: Float = 900
 let height: Float = 700
@@ -504,27 +504,258 @@ func explodedCavities(_ nests: [Nest], original: PackingPlan, opened: PackingPla
 /// and `centimetres(_:decimals:)`, which is `internal` as well; `PlanStats`'
 /// public formatters stand in.
 
+/// The layer diagram's page geometry: how much room the footprint is given, and
+/// where the furniture around it goes.
+///
+/// Two instances exist. `desktop` is the comfortable picture this mode has always
+/// written; `phone(...)` below is the area the device actually gives the diagram.
+/// Everything that draws reads `layout`, so `--device` swaps a page size, not a
+/// second renderer — the rectangles still come from `FootprintProjection`, which
+/// is handed `layout.diagram` instead of a constant.
+struct DiagramLayout {
+    /// SVG canvas width.
+    var canvas: Float
+    /// What `FootprintProjection` is handed — on the device, what `GeometryReader`
+    /// reports inside `aspectRatio(.fit)`.
+    var diagram: CGSize
+    /// Where that box sits on the canvas.
+    var origin: SIMD2<Float>
+    /// Legend column x, or nil to run the legend under the diagram instead of
+    /// beside it: at a phone's width there is no beside.
+    var legendX: Float?
+    /// Height of the band above the picture. nil derives it from the header, as
+    /// the desktop page always has; the phone measures its real chrome instead.
+    var band: Float?
+    /// Views the device stacks above the diagram that this tool does not draw —
+    /// the two issue banners and the layer picker. Blocked out at their real
+    /// heights, because the room they take is the finding: left blank, the band
+    /// reads as a rendering bug rather than as screen the diagram does not get.
+    var chrome: [(label: String, y: Float, height: Float)] = []
+    /// Font sizes: the item label inside its rect, the dimensions line under it,
+    /// the bare step number, and body text. The desktop numbers are this tool's;
+    /// the phone's are the view's own (`.caption2` = 11, `.system(size: 9)`).
+    var label: Float
+    var size: Float
+    var step: Float
+    var body: Float
+    var title: Float
+    /// Inset of the in-rect text from the rect's top-left corner.
+    var pad: Float
+}
+
 /// The footprint gets the left column; the legend gets the rest of the 900.
-let diagramSize = CGSize(width: 560, height: 680)
-let diagramOrigin = SIMD2<Float>(20, 10)
-let legendX: Float = 600
+let desktopLayout = DiagramLayout(
+    canvas: width,
+    diagram: CGSize(width: 560, height: 680),
+    origin: SIMD2<Float>(20, 10),
+    legendX: 600,
+    band: nil,
+    label: 12, size: 10, step: 11, body: 13, title: 14, pad: 6
+)
+
+/// Mutated once per layer by `--device`, because the phone's scale is per layer:
+/// the legend is laid out above the diagram in the same stack and takes its room
+/// first. Read by every drawing function below.
+var layout = desktopLayout
 
 /// `PlanDiagramView`'s own thresholds, below which the text does not fit the
 /// rectangle and the legend carries the label instead — plus a width check the
 /// view does not need. SwiftUI wraps the label to two lines and shrinks it to fit
 /// its box; SVG `<text>` does neither, so a long label in a small rect spills
 /// across its neighbours (`8. Charger pouch` in a 67 px box, in the fixture).
-/// ~0.55 em per character at this font, which is close enough for a threshold.
+/// ~0.55 em per character at this font, which is close enough for a threshold —
+/// and it has to be read off `layout.label`, not a constant: `--device` draws the
+/// label at the view's 11 pt rather than this page's 12, so a hardcoded width
+/// would call a label too wide for a box it actually fits.
 func labelFits(_ r: CGRect, _ label: String) -> Bool {
-    r.width >= 54 && r.height >= 28 && Float(label.count) * 6.6 <= Float(r.width) - 12
+    r.width >= 54 && r.height >= 28
+        && Float(label.count) * layout.label * 0.55 <= Float(r.width) - 2 * layout.pad
 }
 func sizeFits(_ r: CGRect) -> Bool { r.width >= 74 && r.height >= 44 }
+
+/// What the device puts inside an item's rectangle, and what this SVG puts there.
+///
+/// They differ on purpose and the difference only ever runs one way: the view
+/// wraps the label to two lines and shrinks it to 75% to make it fit, SVG `<text>`
+/// does neither, so a label the phone squeezes in can come out here as a bare step
+/// number. Reported as two columns rather than papered over — `svg` is what you
+/// are looking at, `view` is what the judge sees.
+func legibility(_ r: CGRect, _ label: String) -> (view: String, svg: String) {
+    let view = (r.width >= 54 && r.height >= 28) ? (sizeFits(r) ? "label+size" : "label") : "step only"
+    let svg = labelFits(r, label) ? (sizeFits(r) ? "label+size" : "label") : "step only"
+    return (view, svg)
+}
+
+// MARK: - Device scale (--device)
+
+/// The phone the fallback gets demoed on, in points.
+///
+/// Every number is an assumption, so every number is named and separate: change
+/// one and the derived scale moves with it. 390 × 844 pt is the iPhone 12/13/14/15
+/// logical screen — the narrowest of the current non-mini sizes (15 Pro and 16 are
+/// 393 × 852, the SE 375 × 667), which makes it the honest one to judge legibility
+/// at. `PlanDiagramView` is presented as a `.sheet` (`Spike/SpikeApp.swift`), and a
+/// `.large` detent leaves the presenter's status bar showing, so the card starts
+/// below the top safe inset plus a small peek.
+enum Phone {
+    static let screen = SIMD2<Float>(390, 844)
+    static let safeTop: Float = 47       // status bar / notch, non-Dynamic-Island
+    static let safeBottom: Float = 34    // home indicator
+    static let sheetPeek: Float = 10     // .large detent's gap above the card
+    static let padding: Float = 16       // SwiftUI `.padding()` default on iOS
+    static let spacing: Float = 14       // PlanDiagramView's VStack spacing
+    static let legendSpacing: Float = 6  // its legend VStack spacing
+
+    // Line heights at the default Dynamic Type size (Large).
+    static let headline: Float = 22      // .headline, 17 pt
+    static let caption: Float = 16       // .caption, 12 pt
+    static let caption2: Float = 14      // .caption2, 11 pt
+    static let picker: Float = 32        // segmented Picker
+    static let details: Float = 28       // collapsed DisclosureGroup row
+    static let swatch: Float = 18        // legend step circle
+    static let bannerPad: Float = 8      // PlanIssueBanner's padding, top and bottom
+
+    /// The column inside the view's own `.padding()`.
+    static var content: Float { screen.x - 2 * padding }
+
+    /// The height the view's outer `VStack` is given.
+    static var frame: Float { screen.y - safeTop - sheetPeek - safeBottom }
+}
+
+/// Characters that fit `points` of width at `size`, at ~0.55 em each — the same
+/// estimate `labelFits` already uses, and the only one in this file.
+func fits(_ points: Float, _ size: Float) -> Int { max(1, Int(points / (size * 0.55))) }
+
+/// How tall the view's legend is for one layer.
+///
+/// The view's metrics, not this tool's: a row is the step circle beside a
+/// `.caption` label over a `.caption2` note wrapped to the column left of the
+/// circle, then the "Dashed: …" sentence and the axis note. This is the number
+/// that decides the diagram's scale, so it has to be the view's — plan3d draws its
+/// own legend at its own sizes and that one only has to fit on the canvas.
+func viewLegendHeight(_ placements: [Placement], _ protrusions: [Placement]) -> Float {
+    let noteColumn = Phone.content - Phone.swatch - 8
+    var rows: [Float] = placements.map { placement in
+        let lines = wrapped(placement.note, fits(noteColumn, 11)).count
+        return max(Phone.swatch, Phone.caption + 1 + Float(lines) * Phone.caption2)
+    }
+    if !protrusions.isEmpty {
+        let verb = protrusions.count == 1 ? "stands" : "stand"
+        let sentence = "Dashed: \(protrusions.map(\.label).joined(separator: ", ")) "
+            + "\(verb) up through this layer."
+        rows.append(Float(wrapped(sentence, fits(Phone.content, 11)).count) * Phone.caption2)
+    }
+    rows.append(Phone.caption2)  // "Seen from above · X across, Z down · origin at top-left"
+    return rows.reduce(0, +) + Float(rows.count - 1) * Phone.legendSpacing
+}
+
+/// The page the device actually gives one layer, and the arithmetic that got there.
+///
+/// `PlanDiagramView`'s body is a `VStack` with **no `ScrollView`**, so the diagram
+/// is not sized by the picture it wants to be — it is handed whatever height is
+/// left after the header, the two issue banners, the layer picker, the caption, the
+/// legend and the collapsed details row have taken theirs. Two consequences the
+/// desktop page cannot show: the scale is **per layer**, because a layer with four
+/// chatty items has a taller legend than one with a single item; and a plan with
+/// enough items in one layer squeezes the diagram towards nothing with nowhere to
+/// scroll.
+///
+/// `aspectRatio(.fit)` then fits the footprint's 0.4064 : 0.6096 inside that box,
+/// which is what `GeometryReader` reports and what `FootprintProjection` divides
+/// by — so the fitted box is returned, not the raw one, and the footprint fills it.
+func phoneLayout(
+    _ plan: PackingPlan,
+    layer: PlanLayer,
+    layers: Int,
+    protrusions: [Placement],
+    header: String,
+    caption: String,
+    issues: [String],
+    stability: [String]
+) -> (layout: DiagramLayout, rows: [(String, Float)], scale: Float) {
+    func banner(_ list: [String]) -> Float {
+        guard !list.isEmpty else { return 0 }
+        let body = list.prefix(3).reduce(Float(0)) {
+            $0 + Float(wrapped($1, fits(Phone.content - 2 * Phone.bannerPad - 24, 11)).count)
+                * Phone.caption2
+        }
+        return 2 * Phone.bannerPad + Phone.caption + 2 + body
+    }
+
+    // Named in the order the VStack stacks them. A zero row is a view that is not
+    // there at all — it costs no spacing either, which is why the count matters.
+    var above: [(String, Float)] = [
+        ("top padding", Phone.padding),
+        ("header", Phone.headline + 2
+            + Float(wrapped(header, fits(Phone.content, 12)).count) * Phone.caption),
+        ("geometry banner", banner(issues)),
+        ("stability banner", banner(stability)),
+        ("layer picker", layers > 1 ? Phone.picker : 0),
+        ("layer caption", Float(wrapped(caption, fits(Phone.content, 12)).count) * Phone.caption),
+    ]
+    var below: [(String, Float)] = [
+        ("legend", viewLegendHeight(layer.placements, protrusions)),
+        ("details row", Phone.details),
+        ("bottom padding", Phone.padding),
+    ]
+
+    // One gap per boundary between views that exist. The two paddings are not
+    // stack children, and `Spacer(minLength: 0)` is one that contributes no height
+    // but does take a gap.
+    let children = above.dropFirst().filter { $0.1 > 0 }.count
+        + 1  // the diagram
+        + below.dropLast().count
+        + 1  // Spacer(minLength: 0)
+    let gaps = Float(children - 1) * Phone.spacing
+    let spent = (above + below).reduce(0) { $0 + $1.1 } + gaps
+    let free = Phone.frame - spent
+
+    // aspectRatio(.fit): the footprint's own ratio inside the free box.
+    let ratio = Float(plan.container.dimensions.x / plan.container.dimensions.z)
+    let box = SIMD2(Phone.content, max(1, free))
+    let fitted = box.x / box.y <= ratio
+        ? SIMD2(box.x, box.x / ratio)
+        : SIMD2(box.y * ratio, box.y)
+
+    // Everything above the picture, including the gap that separates the caption
+    // from it — the SVG's header band is exactly this tall, so the proportions on
+    // the page are the proportions on the screen.
+    let rowsAbove = above.dropFirst().filter { $0.1 > 0 }.count
+    let band = above.reduce(0) { $0 + $1.1 } + Float(rowsAbove) * Phone.spacing
+
+    // Walk the same rows again to find where the three the tool does not draw
+    // land, so they can be blocked out at full height in the band.
+    let undrawn = ["geometry banner", "stability banner", "layer picker"]
+    var chrome: [(String, Float, Float)] = []
+    var cursor = Phone.padding
+    for (name, size) in above.dropFirst() where size > 0 {
+        if undrawn.contains(name) { chrome.append((name, cursor, size)) }
+        cursor += size + Phone.spacing
+    }
+
+    above.append(("spacing", gaps))
+    below.append(("diagram (what is left)", free))
+
+    let page = DiagramLayout(
+        canvas: Phone.screen.x,
+        diagram: CGSize(width: CGFloat(fitted.x), height: CGFloat(fitted.y)),
+        // y is relative to the band, which the SVG has already translated past.
+        origin: SIMD2(Phone.padding + (Phone.content - fitted.x) / 2, 0),
+        legendX: nil,
+        band: band,
+        chrome: chrome,
+        // The view's own type sizes: `.caption2` in the rect, `.system(size: 9)`
+        // for the dimensions line and for the bare step number.
+        label: 11, size: 9, step: 9, body: 11, title: 11, pad: 4
+    )
+    return (page, above + below, fitted.x / Float(plan.container.dimensions.x))
+}
 
 /// A projected rect as SVG attributes, shifted into the diagram column.
 func rectAttributes(_ r: CGRect) -> String {
     String(
         format: "x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"4\"",
-        Float(r.minX) + diagramOrigin.x, Float(r.minY) + diagramOrigin.y,
+        Float(r.minX) + layout.origin.x, Float(r.minY) + layout.origin.y,
         Float(r.width), Float(r.height)
     )
 }
@@ -550,30 +781,13 @@ func layerSVG(
     header: [String],
     caption: String
 ) -> String {
-    let band: Float = 30 + Float(header.count) * 17 + 24
-    // 680 of footprint from y = 10, then a strip for the axis note. The note used
-    // to sit at 690 and was half off the canvas and half on the container's bottom
-    // wall — a to-scale footprint fills its column by construction, so nothing can
-    // share those rows.
-    let footer = diagramOrigin.y + Float(diagramSize.height) + 18
-    let canvasHeight = band + footer + 26
-    let projection = FootprintProjection(footprint: plan.container.dimensions, in: diagramSize)
+    let band = layout.band ?? (30 + Float(header.count) * 17 + 24)
+    let projection = FootprintProjection(footprint: plan.container.dimensions, in: layout.diagram)
 
-    var out = """
-    <svg xmlns="http://www.w3.org/2000/svg" width="\(Int(width))" height="\(Int(canvasHeight))" \
-    viewBox="0 0 \(Int(width)) \(Int(canvasHeight))">
-    <rect width="\(Int(width))" height="\(Int(canvasHeight))" fill="#16181c"/>
-
-    """
-    out += text(12, 20, title, size: 14, fill: "#8a8f98", family: "monospace")
-    for (i, line) in header.enumerated() {
-        out += text(12, 40 + Float(i) * 17, line, size: 13)
-    }
-    // The layer's own caption sits directly above its picture, last line of the
-    // band: the header above it describes the whole bag, this line describes only
-    // what is drawn below.
-    out += text(12, band - 6, caption, size: 13, fill: "#e8d654")
-    out += "<g transform=\"translate(0,\(Int(band)))\">\n"
+    // The group's contents are built first: with the legend under the picture
+    // rather than beside it, how tall the canvas has to be is not known until the
+    // legend has been laid out.
+    var out = ""
 
     // Container footprint, to scale.
     out += "  <rect \(rectAttributes(projection.footprintRect)) "
@@ -593,8 +807,9 @@ func layerSVG(
         // bottom edge, so the captions landed on each other and the right-hand one
         // ran off the container. The number is enough to match to the legend.
         out += text(
-            Float(r.minX) + diagramOrigin.x + 6, Float(r.minY) + diagramOrigin.y + 15,
-            "\(placement.step)", size: 11, fill: "#8a8f98", family: "monospace"
+            Float(r.minX) + layout.origin.x + layout.pad,
+            Float(r.minY) + layout.origin.y + layout.step + 4,
+            "\(placement.step)", size: layout.step, fill: "#8a8f98", family: "monospace"
         )
     }
 
@@ -606,17 +821,18 @@ func layerSVG(
         let colour = hex(rgb, 1)
         out += "  <rect \(rectAttributes(r)) fill=\"\(colour)\" fill-opacity=\"0.25\" "
         out += "stroke=\"\(colour)\" stroke-width=\"2\"/>\n"
-        let x = Float(r.minX) + diagramOrigin.x + 6
-        let y = Float(r.minY) + diagramOrigin.y + 16
+        let x = Float(r.minX) + layout.origin.x + layout.pad
+        let y = Float(r.minY) + layout.origin.y + layout.label + layout.pad
         let label = "\(placement.step). \(placement.label)"
         if labelFits(r, label) {
-            out += text(x, y, label, size: 12, fill: colour)
+            out += text(x, y, label, size: layout.label, fill: colour)
             if sizeFits(r) {
                 let size = "\(wholeCentimetres(placement.size.x)) × \(wholeCentimetres(placement.size.z))"
-                out += text(x, y + 14, size, size: 10, fill: "#c9ced6", family: "monospace")
+                out += text(x, y + layout.size + 4, size, size: layout.size, fill: "#c9ced6",
+                            family: "monospace")
             }
         } else {
-            out += text(x, y, "\(placement.step)", size: 11, fill: colour, family: "monospace")
+            out += text(x, y, "\(placement.step)", size: layout.step, fill: colour, family: "monospace")
         }
     }
 
@@ -630,41 +846,93 @@ func layerSVG(
         let r = projection.rect(for: placement)
         out += "  <rect \(rectAttributes(r)) fill=\"none\" stroke=\"#ff4d4d\" stroke-width=\"3\"/>\n"
         out += text(
-            Float(r.midX) + diagramOrigin.x, Float(r.maxY) + diagramOrigin.y + 14, reason,
-            size: 11, fill: "#ff4d4d", anchor: "middle", family: "monospace"
+            Float(r.midX) + layout.origin.x, Float(r.maxY) + layout.origin.y + 14, reason,
+            size: layout.step, fill: "#ff4d4d", anchor: "middle", family: "monospace"
         )
     }
 
     // Legend, one row per item, then the protrusion sentence and the axis note —
-    // the same three blocks, in the same order, as the view's legend.
-    var y: Float = 26
+    // the same three blocks, in the same order, as the view's legend. Beside the
+    // picture on the desktop page; under it at a phone's width, where there is no
+    // beside, which is also where the view puts it.
+    let legendX = layout.legendX ?? 12
+    let columns = layout.legendX == nil ? Int(Phone.content / (layout.size * 0.55)) : 34
+    var y: Float = layout.legendX == nil
+        ? layout.origin.y + Float(layout.diagram.height) + 30
+        : 26
     for placement in layer.placements {
         let colour = hex(palette[(placement.step - 1) % palette.count], 1)
         out += String(format: "  <circle cx=\"%.1f\" cy=\"%.1f\" r=\"9\" ", legendX + 9, y - 4)
         out += "fill=\"\(colour)\"/>\n"
-        out += text(legendX + 9, y, "\(placement.step)", size: 11, fill: "#16181c",
+        out += text(legendX + 9, y, "\(placement.step)", size: layout.step, fill: "#16181c",
                     anchor: "middle", family: "monospace")
-        out += text(legendX + 26, y - 4, placement.label, size: 12)
-        for (i, line) in wrapped(placement.note, 34).enumerated() {
-            out += text(legendX + 26, y + 10 + Float(i) * 12, line, size: 10, fill: "#8a8f98")
+        out += text(legendX + 26, y - 4, placement.label, size: layout.label)
+        for (i, line) in wrapped(placement.note, columns).enumerated() {
+            out += text(legendX + 26, y + 10 + Float(i) * 12, line, size: layout.size, fill: "#8a8f98")
         }
-        y += 26 + Float(wrapped(placement.note, 34).count) * 12
+        y += 26 + Float(wrapped(placement.note, columns).count) * 12
     }
     if !protrusions.isEmpty {
         let names = protrusions.map(\.label).joined(separator: ", ")
         let verb = protrusions.count == 1 ? "stands" : "stand"
         y += 8
-        for line in wrapped("Dashed: \(names) \(verb) up through this layer.", 38) {
-            out += text(legendX, y, line, size: 11, fill: "#8a8f98")
+        for line in wrapped("Dashed: \(names) \(verb) up through this layer.", columns + 4) {
+            out += text(legendX, y, line, size: layout.step, fill: "#8a8f98")
             y += 13
         }
     }
+
+    // 680 of footprint from y = 10, then a strip for the axis note. The note used
+    // to sit at 690 and was half off the canvas and half on the container's bottom
+    // wall — a to-scale footprint fills its column by construction, so nothing can
+    // share those rows. `max` so a legend running under the picture pushes it down
+    // instead of landing on it.
+    let footer = max(layout.origin.y + Float(layout.diagram.height) + 18, y + 6)
     out += text(legendX, footer, "Seen from above · X across, Z down", size: 10, fill: "#6d727a")
     out += text(legendX, footer + 12, "origin at the footprint's top-left", size: 10, fill: "#6d727a")
-    out += text(12, footer, "layer \(layer.index + 1) of \(count)", size: 10, fill: "#6d727a",
+    out += text(12, footer + (layout.legendX == nil ? 24 : 0),
+                "layer \(layer.index + 1) of \(count)", size: 10, fill: "#6d727a",
                 family: "monospace")
 
-    return out + "</g>\n</svg>\n"
+    let canvasHeight = band + footer + (layout.legendX == nil ? 38 : 26)
+    var page = """
+    <svg xmlns="http://www.w3.org/2000/svg" width="\(Int(layout.canvas))" \
+    height="\(Int(canvasHeight))" \
+    viewBox="0 0 \(Int(layout.canvas)) \(Int(canvasHeight))">
+    <rect width="\(Int(layout.canvas))" height="\(Int(canvasHeight))" fill="#16181c"/>
+
+    """
+    page += text(12, 20, title, size: layout.title, fill: "#8a8f98", family: "monospace")
+    for (i, line) in header.enumerated() {
+        page += text(12, 40 + Float(i) * 17, line, size: layout.body)
+    }
+    // The layer's own caption sits directly above its picture, last line of the
+    // band: the header above it describes the whole bag, this line describes only
+    // what is drawn below.
+    for block in layout.chrome {
+        let tint = block.label == "layer picker" ? "#5d636d" : "#c08a3e"
+        page += String(
+            format: "<rect x=\"%.0f\" y=\"%.1f\" width=\"%.0f\" height=\"%.1f\" rx=\"6\" ",
+            Phone.padding, block.y, Phone.content, block.height
+        )
+        page += "fill=\"\(tint)\" fill-opacity=\"0.12\" stroke=\"\(tint)\" stroke-width=\"1\" "
+        page += "stroke-dasharray=\"4 3\"/>\n"
+        page += text(Phone.padding + 8, block.y + 14,
+                     "\(block.label) — \(Int(block.height)) pt", size: 10, fill: tint)
+    }
+    page += text(12, band - 6, caption, size: layout.body, fill: "#e8d654")
+    if layout.legendX == nil {
+        // The top of the picture, so the chrome the device spends above it is
+        // something you can see rather than a number in the log.
+        page += String(
+            format: "<line x1=\"12\" y1=\"%.1f\" x2=\"%.1f\" y2=\"%.1f\" ",
+            band - 1, layout.canvas - 12, band - 1
+        )
+        page += "stroke=\"#2c3038\" stroke-width=\"1\"/>\n"
+    }
+    page += "<g transform=\"translate(0,\(Int(band)))\">\n"
+
+    return page + out + "</g>\n</svg>\n"
 }
 
 // MARK: - The rest of the server document
@@ -709,11 +977,12 @@ let cutaway = args.contains("--cutaway")
 let wantUnpacked = args.contains("--unpacked")
 let wantViolations = args.contains("--violations")
 let wantLayers = args.contains("--layers")
+let wantDevice = args.contains("--device")
 let positional = args.filter { !$0.hasPrefix("--") }
 guard positional.count == 2 else {
     FileHandle.standardError.write(Data(
         ("usage: plan3d <plan.json> <out-dir> [--steps] [--cutaway] [--unpacked] "
-            + "[--violations] [--layers]\n").utf8
+            + "[--violations] [--layers [--device]]\n").utf8
     ))
     exit(2)
 }
@@ -896,36 +1165,110 @@ if wantLayers {
         exit(0)
     }
 
+    // The one line the view puts above the diagram, built with the same formatter
+    // its own `centimetres(_:)` is (`%.1f cm`, which is `PlanStats.lengthText`).
+    // In `--device` this replaces plan3d's stats band, because the view has no
+    // stats band: those numbers are inside its collapsed "Pack details" row, so
+    // drawing four of them at a phone's width would be measuring furniture that is
+    // not on the screen.
+    let d = loaded.container.dimensions
+    let deviceHeader = [
+        "\(PlanStats.lengthText(d.x)) × \(PlanStats.lengthText(d.y)) × \(PlanStats.lengthText(d.z))"
+            + " interior · \(loaded.placements.count) items · \(stats.fullnessText)"
+    ]
+    // Both banners, because on the device both take height from the diagram before
+    // it is drawn, and a wrong plan is exactly when the fallback is being read.
+    let stability = loaded.stabilityIssues().map(\.description)
+    if wantDevice {
+        print("device: \(Int(Phone.screen.x))×\(Int(Phone.screen.y)) pt screen, "
+            + "\(Int(Phone.content)) pt column inside the view's \(Int(Phone.padding)) pt padding, "
+            + "\(Int(Phone.frame)) pt of frame height (sheet at .large: "
+            + "\(Int(Phone.screen.y)) − \(Int(Phone.safeTop)) top safe − \(Int(Phone.sheetPeek)) peek "
+            + "− \(Int(Phone.safeBottom)) home indicator)")
+        print("device: banners cost the diagram height — "
+            + "\(issues.count) geometry, \(stability.count) stability")
+    }
+
     for layer in layers {
         let protrusions = loaded.protrusions(into: layer)
         let items = layer.placements.count == 1 ? "1 item" : "\(layer.placements.count) items"
         let caption = "Layer \(layer.index + 1) of \(layers.count) · floor at "
             + "\(PlanStats.lengthText(layer.floorY)) · "
             + "\(PlanStats.lengthText(layer.thickness)) thick · \(items)"
-        let name = String(format: "layer-%02d.svg", layer.index + 1)
+        // `summaryText` is PlanStats' line, the same one the 3D `--cutaway` header
+        // prints, so the two modes cannot describe the same layer differently — and
+        // it is the string the view's own caption shows, which is why `--device`
+        // draws and measures this one rather than plan3d's longer line above.
+        let summary = stats.layers.indices.contains(layer.index)
+            ? stats.layers[layer.index].summaryText
+            : caption
+        let shown = wantDevice ? summary : caption
+
+        var scale = Float(
+            FootprintProjection(footprint: d, in: desktopLayout.diagram).scale
+        )
+        layout = desktopLayout
+        if wantDevice {
+            let phone = phoneLayout(
+                loaded, layer: layer, layers: layers.count, protrusions: protrusions,
+                header: deviceHeader[0], caption: shown, issues: issues, stability: stability
+            )
+            layout = phone.layout
+            scale = phone.scale
+            print("layer \(layer.index + 1) budget: "
+                + phone.rows.filter { $0.1 > 0 }.map { "\($0.0) \(Int($0.1))" }
+                    .joined(separator: ", "))
+            if Float(layout.diagram.height) < 1 {
+                print("layer \(layer.index + 1): WARNING the chrome and legend use the whole "
+                    + "screen — the diagram is squeezed to nothing and the view has no ScrollView")
+            }
+        }
+        // Per item: the rectangle the projection gives it, and what text survives in
+        // it. This is the whole question `--device` exists to answer, so it is a
+        // table on the terminal and not only something to squint at in the picture.
+        let projection = FootprintProjection(footprint: d, in: layout.diagram)
+        print(String(
+            format: "layer %d scale: %.0f pt/m — footprint %.0f × %.0f pt in a %.0f × %.0f box",
+            layer.index + 1, scale,
+            Float(projection.footprintRect.width), Float(projection.footprintRect.height),
+            Float(layout.diagram.width), Float(layout.diagram.height)
+        ))
+        for placement in layer.placements {
+            let r = projection.rect(for: placement)
+            let verdict = legibility(r, "\(placement.step). \(placement.label)")
+            let name = placement.label.padding(toLength: 16, withPad: " ", startingAt: 0)
+            let box = String(format: "%5.1f × %5.1f pt", Float(r.width), Float(r.height))
+            let seen = verdict.view.padding(toLength: 10, withPad: " ", startingAt: 0)
+            print("  \(placement.step). \(name) \(box)  view: \(seen) svg: \(verdict.svg)")
+        }
+
+        let name = String(format: "\(wantDevice ? "device-" : "")layer-%02d.svg", layer.index + 1)
         try layerSVG(
             loaded,
             layer: layer,
             of: layers.count,
             protrusions: protrusions,
             flags: violations,
-            title: "top-down layer \(layer.index + 1)/\(layers.count)  "
-                + "\(loaded.container.label)\(violations.isEmpty ? "" : "  violations(\(violations.count))")",
-            header: header,
-            caption: caption
+            title: wantDevice
+                ? String(format: "device %d×%d pt · %.0f pt/m · %d pt of chrome above",
+                         Int(Phone.screen.x), Int(Phone.screen.y), scale, Int(layout.band ?? 0))
+                : "top-down layer \(layer.index + 1)/\(layers.count)  "
+                    + "\(loaded.container.label)\(violations.isEmpty ? "" : "  violations(\(violations.count))")",
+            header: wantDevice ? deviceHeader : header,
+            caption: shown
         ).write(to: outDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
 
-        // `summaryText` is PlanStats' line, the same one the 3D `--cutaway` header
-        // prints, so the two modes cannot describe the same layer differently.
-        let summary = stats.layers.indices.contains(layer.index)
-            ? stats.layers[layer.index].summaryText
-            : caption
         let through = protrusions.isEmpty
             ? "nothing from below"
             : "\(protrusions.count) up through the floor: \(protrusions.map(\.label).joined(separator: ", "))"
         print("\(name)  \(summary) · \(through)")
     }
     exit(0)
+}
+
+if wantDevice {
+    print("device: --device is a scale for the 2D layer diagram — add --layers; the 3D "
+        + "cameras are not what the demo falls back to and are not drawn at device size")
 }
 
 for (name, camera) in cameras {

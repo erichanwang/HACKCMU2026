@@ -35,6 +35,11 @@ from app_plan import to_app_plan  # noqa: E402
 logger = logging.getLogger("suitcase")
 
 TIME_BUDGET_S = float(os.environ.get("PLAN_TIME_BUDGET_S", 3.0))  # shared by the optimised candidates
+# Fixed work instead of a wall-clock budget. The annealing temperature is driven by iterations
+# (search.py's `since / stall`), so with time_budget_s=0 the same scan gives the same plan no
+# matter how loaded the laptop is -- what a rehearsed demo needs. Unset (0) keeps the wall-clock
+# budget, which is the safer default for an unknown bag: it bounds the wait rather than the work.
+PLAN_ITERATIONS = int(os.environ.get("PLAN_ITERATIONS", 0))
 CANDIDATES = (("naive", None), ("optimized", 0), ("optimized", 1), ("optimized", 2))
 _lock = threading.Lock()  # ponytail: one global lock; per-suitcase locks if a booth ever runs two bags
 
@@ -63,6 +68,8 @@ def plan(suitcase: dict, items: list[dict]) -> dict:
                 "items": prepare_items(items)}
     container, packer_items, _config, _weights = load_scenario(scenario)
     per_run = TIME_BUDGET_S / sum(1 for s, _ in CANDIDATES if s == "optimized")
+    logger.info("planning mode=%s %s", "fixed-iterations" if PLAN_ITERATIONS else "time-budget",
+                f"iterations={PLAN_ITERATIONS}" if PLAN_ITERATIONS else f"seconds_per_candidate={per_run:.2f}")
     candidates = []
     total_start = time.perf_counter()
     with _lock:
@@ -71,7 +78,9 @@ def plan(suitcase: dict, items: list[dict]) -> dict:
             if strategy == "naive":
                 result = pack_naive(container, packer_items)
             else:
-                result = pack_optimized(container, packer_items, config=OptimizerConfig(time_budget_s=per_run, seed=seed))
+                config = (OptimizerConfig(time_budget_s=0.0, max_iterations=PLAN_ITERATIONS, seed=seed)
+                          if PLAN_ITERATIONS else OptimizerConfig(time_budget_s=per_run, seed=seed))
+                result = pack_optimized(container, packer_items, config=config)
             # to_json rather than to_dict: the metrics carry numpy scalars, which pymongo cannot store
             result_dict = json.loads(result.to_json())
             validation = validate_packer3d(result_dict, items=scenario["items"])

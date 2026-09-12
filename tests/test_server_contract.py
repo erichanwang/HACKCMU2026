@@ -16,8 +16,16 @@ import unittest, test_server_contract; unittest.main(module=test_server_contract
 import json
 import math
 import os
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+# `main`/`auth` live in server/, which is not on the path when `unittest discover` runs from
+# the repo root -- the same insert tests/test_planner.py does. Without it this whole file
+# raised SkipTest under the default suite no matter what was installed, and a silent skip is
+# how five unauthenticated GET routes reached main with a green CI.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
 
 try:  # server deps live in server/.venv, not the root python3 that runs `unittest discover`
     import mongomock

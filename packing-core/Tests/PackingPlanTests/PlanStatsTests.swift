@@ -100,15 +100,15 @@ final class PlanStatsTests: XCTestCase {
         XCTAssertEqual(stats.largestGapFractionOfFree, 0.5, accuracy: accuracy)
     }
 
-    func testGapSearchDoesNotTunnelThroughAnItem() {
+    func testGapSearchDoesNotTunnelThroughAnItem() throws {
         // A slab across the middle of the bag: no empty box may span it.
         let stats = PlanStats(plan: plan([
             item(1, "a", position: Vector3(0, 0.4, 0), size: Vector3(1, 0.2, 1)),
         ]))
 
         XCTAssertEqual(stats.largestGapVolume, 0.4, accuracy: accuracy)
-        let gap = try? XCTUnwrap(stats.largestGap)
-        XCTAssertEqual(gap?.size.y, 0.4, accuracy: accuracy)
+        let gap = try XCTUnwrap(stats.largestGap)
+        XCTAssertEqual(gap.size.y, 0.4, accuracy: accuracy)
     }
 
     // MARK: - Coverage

@@ -36,6 +36,7 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 | `suitcaseId` | Id of the suitcase this item was scanned into. Required by `POST /items` (the server rejects an item with none); the suitcase must already exist and belong to the requesting user. |
 | `dimensions` | `[width, height, depth]` of the minimum-area bounding box. Width and depth are the footprint on the table; height is its surface above the table (a 98th-percentile extent on every axis, so LiDAR jitter and stray mesh spikes do not inflate it). Includes a small padding (default 0.5 cm) because LiDAR reads slightly inside true edges. |
 | `cellSize` | Side length of one heightmap cell (default 0.01 m). |
+| `footprint` | Optional: up to 16 `[x, z]` vertices in metres of the object's convex footprint outline, in the box's local frame relative to its centre (X along `width`, Z along `depth`). Lets the physics gate use a prism instead of the full box for L-shapes and ovals; absent means the footprint is the whole box. |
 | `heights` | 2D grid, `ceil(width / cellSize)` rows × `ceil(depth / cellSize)` columns. `heights[i][j]` is the height of the object's surface above the table at that cell. `0` means nothing is there. |
 | `label` | Short name of the object. Guessed from the photo by Grok (`labelSource: "auto"`) or typed by the user (`"user"`). |
 | `description` | One sentence from Grok: what the object is, its material, anything that matters for packing. Display only. |

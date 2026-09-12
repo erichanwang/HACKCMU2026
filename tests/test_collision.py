@@ -5,6 +5,7 @@ Run: python3 -m unittest tests.test_collision -v
 from __future__ import annotations
 
 import math
+import os
 import time
 import unittest
 
@@ -332,6 +333,7 @@ class TestPerf(unittest.TestCase):
     0.19 m grid + jitter -> ~100 of the 190 pairs overlap) must stay well under
     a millisecond-scale budget per `collide_scene` call."""
 
+    @unittest.skipUnless(os.environ.get("PHYSICS_PERF_TESTS"), "wall-clock budget; set PHYSICS_PERF_TESTS=1 on an idle machine")
     def test_dense_scene_under_5ms(self):
         rng = np.random.default_rng(20260911)
         objects = [

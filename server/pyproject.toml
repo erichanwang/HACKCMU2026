@@ -2,7 +2,15 @@
 name = "suitcase-server"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["fastapi", "uvicorn", "pymongo", "httpx", "python-multipart", "numpy"]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pymongo",
+    "httpx",
+    "python-multipart",
+    "numpy",
+    "python-jose[cryptography]>=3.5.0",
+]
 
 [dependency-groups]
 dev = ["mongomock"]

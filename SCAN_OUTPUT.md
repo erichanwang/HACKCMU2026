@@ -41,6 +41,8 @@ An item is its **bounding box** plus a **heightmap** of its real shape inside th
 | `keepUpright` | `true` if the object must stay this side up (liquids, open containers). The solver then never lays it on its side. |
 | `rigidity` | `rigid`, `soft` (compressible — clothes, bags) or `fragile` (breaks if crushed/dropped; the solver stacks nothing on it). Guessed by Grok or chosen by the user; `rigiditySource` says which. A user choice is never overwritten by detection. |
 | `compressibility` | `k` ≥ 1: the item's loose volume divided by its volume when squeezed hard (1 = doesn't compress; a t-shirt ≈ 2, a down jacket ≈ 3). Guessed per item by Grok, clamped to `[1, 10]`, always `1` unless `rigidity` is `soft`; `compressibilitySource` says whether it was `auto` or `user`. The solver packs a soft item at `height / k` (`packer3d.Item.compressed`). |
+| `labelStatus` | `"done"` once Grok has answered, `"pending"` while the server is still retrying it in the background (Grok was down or rate-limited at upload), `"failed"` after `LABEL_MAX_ATTEMPTS` retries. Poll `GET /items/{id}` while it is `"pending"` and redisplay the item when it turns `"done"`. |
+| `photo` | The uploaded JPEG, kept in the document so the background labeller can retry it. Stored server-side only — no route ever returns it. |
 | `createdAt` | ISO-8601 UTC timestamp, set by the server. |
 
 ### Coordinate convention

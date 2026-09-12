@@ -193,13 +193,16 @@ def rollout_real(doc: dict, items: list[dict], suitcase_id: str) -> None:
     from physics.pan import PanAction, RealPanBackend, simulate_candidate_actions
     from physics.packer3d_adapter import placements_from_packer3d, scene_from_packer3d
 
-    scene, _extras = scene_from_packer3d(doc["solver"], items=items)
-    # ponytail: target_position only. `scene_from_packer3d` already bakes the solver's
-    # axis permutation into each object's dimensions (identity rotation), so re-applying
-    # `placements_from_packer3d`'s rotation would rotate a permuted item a second time and
-    # the physics gate rejects it. That pairing belongs to the unpacked-scenario flow.
+    # oriented=False: the objects keep their own dims and take the solver's axis
+    # permutation from the placement's rotation, applied once (see the adapter docstring).
+    scene, _extras = scene_from_packer3d(doc["solver"], items=items, oriented=False)
     actions = [
-        PanAction(object_id=p["id"], target_position=tuple(p["position"]), order=i + 1)
+        PanAction(
+            object_id=p["id"],
+            target_position=tuple(p["position"]),
+            target_rotation=tuple(p["rotation"]),
+            order=i + 1,
+        )
         for i, p in enumerate(placements_from_packer3d(doc["solver"])[:2])
     ]
     backend = RealPanBackend()
@@ -224,7 +227,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--photos", type=Path, default=None,
                    help="directory with <book|tshirts|camera|bottle|shoes>.jpg: post real photos and keep "
                         "Grok's label/rigidity/compressibility (server needs XAI_API_KEY)")
-    p.add_argument("--keep", action="store_true", help="(no-op today: the server has no delete route, data always stays)")
+    p.add_argument("--keep", action="store_true",
+                   help="leave the demo suitcase on the server (default: DELETE /suitcases/{id} at the "
+                        "end, which drops its items and stored plan too)")
     args = p.parse_args(argv)
     if args.photos is not None:
         missing = [f["name"] for f in FIXTURE_ITEMS if not (args.photos / f"{f['name']}.jpg").is_file()]
@@ -254,6 +259,11 @@ def main(argv: list[str] | None = None) -> int:
         f"      {len(plan['placements'])} placements in '{plan['container']['label']}' "
         f"(suitcase {suitcase['id']}); solver.json / validation.json / scenario.json alongside it."
     )
+    if args.keep:
+        print(f"      kept on the server: suitcase {suitcase['id']}, its items and its plan (--keep)")
+    else:
+        call(f"{server}/suitcases/{suitcase['id']}", method="DELETE")
+        print(f"      deleted suitcase {suitcase['id']} and its items from the server (--keep to keep it)")
     return 0
 
 

@@ -1,4 +1,5 @@
 import ARKit
+import PackingPlan
 import RealityKit
 import SwiftUI
 
@@ -12,6 +13,9 @@ let searchRadiusMeters: Float = 0.5
 let clusterCellMeters: Float = 0.02
 /// Resolution of the captured shape (heightmap cell). Mesh triangles are sampled at half this spacing.
 let shapeCellMeters: Float = 0.01
+/// Suitcase wall + floor thickness subtracted from the scanned outer shell to get the interior.
+/// Calibration knob: measure a real bag (outer minus inner, halved) and set it before the demo.
+let suitcaseWallMeters: Float = 0.01
 
 /// What the next tap captures: the bag itself, or something to put in it.
 enum ScanMode: Hashable {
@@ -22,6 +26,7 @@ struct ScanView: UIViewRepresentable {
     @Binding var item: ScannedItem?
     @Binding var status: String
     @Binding var suitcaseId: String?
+    @Binding var plan: PackingPlan?
     var mode: ScanMode
 
     func makeUIView(context: Context) -> ARView {
@@ -36,7 +41,10 @@ struct ScanView: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: ARView, context: Context) { context.coordinator.mode = mode }
+    func updateUIView(_ uiView: ARView, context: Context) {
+        context.coordinator.mode = mode
+        context.coordinator.showPlan(plan, in: uiView)
+    }
     func makeCoordinator() -> Coordinator { Coordinator(item: $item, status: $status, suitcaseId: $suitcaseId, mode: mode) }
 
     final class Coordinator: NSObject {
@@ -46,6 +54,11 @@ struct ScanView: UIViewRepresentable {
         var mode: ScanMode
         weak var view: ARView?
         var overlay: AnchorEntity?
+        /// The bag interior from the last Suitcase-mode tap, and the y of its floor. The plan overlay
+        /// has nowhere to go until this is set.
+        var suitcase: (interior: BoxFit, planeY: Float)?
+        var planOverlay: AnchorEntity?
+        var shownPlan: PackingPlan?
 
         init(item: Binding<ScannedItem?>, status: Binding<String>, suitcaseId: Binding<String?>, mode: ScanMode) {
             _item = item; _status = status; _suitcaseId = suitcaseId; self.mode = mode
@@ -93,14 +106,17 @@ struct ScanView: UIViewRepresentable {
             guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
                 status = "Nothing above the table here (\(pts.count) pts)"; return
             }
-            // Suitcase mode: the fitted box *is* the bag interior. No heightmap, no photo, no label.
+            // Suitcase mode: the fitted box is the bag's outer shell; the interior is a wall thinner.
+            // No heightmap, no photo, no label.
             if mode == .suitcase {
-                show(box, in: view)
+                let interior = interiorBox(box, wall: suitcaseWallMeters)
+                suitcase = (interior, planeY + suitcaseWallMeters)
+                show(interior, in: view)
                 status = "Creating suitcase…"
                 Task { @MainActor in
                     do {
                         self.suitcaseId = try await API.createSuitcase(
-                            name: "scanned suitcase", dimensions: [box.width, box.height, box.depth])
+                            name: "scanned suitcase", dimensions: [interior.width, interior.height, interior.depth])
                         self.status = "Suitcase captured — switch to Item and tap what goes in"
                     } catch {
                         self.status = "server: \(error.localizedDescription)"
@@ -124,14 +140,31 @@ struct ScanView: UIViewRepresentable {
                 guard let self, let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else { return }
                 Task { @MainActor in
                     do {
-                        self.item = try await API.upload(scanned, image: UIImage(cgImage: cg))
+                        let uploaded = try await API.upload(scanned, image: UIImage(cgImage: cg))
+                        self.item = uploaded
                         self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
+                        if uploaded.labelStatus == "pending" { await self.pollLabel(id: uploaded.id) }
                     } catch {
                         self.status = "server: \(error.localizedDescription)"
                     }
                 }
             }
             show(box, in: view)
+        }
+
+        /// Grok failed at upload and the server is retrying in the background; wait for the label.
+        /// ponytail: fixed 3 s poll for 60 s, no backoff — the server retries every 10 s and gives up
+        /// after 5 attempts, so a longer wait would only watch it fail.
+        @MainActor func pollLabel(id: String) async {
+            status = "labelling…"
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .seconds(3))
+                guard let fresh = try? await API.get(id: id), fresh.labelStatus != "pending" else { continue }
+                item = fresh
+                status = "labelled \(fresh.label ?? "?")"
+                return
+            }
+            status = "still unlabelled — type it in"
         }
 
         /// Screen-space rectangle around the box's projected corners, padded 15%, clamped to the view.
@@ -159,6 +192,35 @@ struct ScanView: UIViewRepresentable {
             anchor.addChild(entity)
             view.scene.addAnchor(anchor)
             overlay = anchor
+        }
+
+        /// One translucent box per placement, inside the scanned bag. Colour cycles by step so
+        /// neighbouring items read apart; the 2D sheet carries the legend, so no text in the scene.
+        static let stepColors: [UIColor] = [.systemBlue, .systemOrange, .systemPurple, .systemTeal, .systemPink]
+
+        func showPlan(_ plan: PackingPlan?, in view: ARView) {
+            guard plan != shownPlan else { return }
+            shownPlan = plan
+            planOverlay?.removeFromParent()
+            planOverlay = nil
+            guard let plan, let suitcase else { return }
+            let frame = PlanAnchor(interior: suitcase.interior, planeY: suitcase.planeY)
+            let orientation = simd_quatf(from: SIMD3<Float>(1, 0, 0), to: suitcase.interior.axis)
+            let anchor = AnchorEntity(world: SIMD3<Float>(0, 0, 0))
+            for p in plan.placements {
+                let size = SIMD3<Float>(p.size.x, p.size.y, p.size.z)
+                let color = Self.stepColors[(p.step - 1) % Self.stepColors.count]
+                let mesh = MeshResource.generateBox(width: size.x, height: size.y, depth: size.z)
+                let entity = ModelEntity(
+                    mesh: mesh,
+                    materials: [SimpleMaterial(color: color.withAlphaComponent(0.4), isMetallic: false)])
+                entity.orientation = orientation
+                entity.position = frame.worldCenter(
+                    position: SIMD3<Float>(p.position.x, p.position.y, p.position.z), size: size)
+                anchor.addChild(entity)
+            }
+            view.scene.addAnchor(anchor)
+            planOverlay = anchor
         }
     }
 }

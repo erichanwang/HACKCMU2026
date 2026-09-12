@@ -17,8 +17,10 @@ private struct ServerError: Decodable {
 }
 
 /// The FastAPI server in server/. Set to this Mac's LAN IP; phone and Mac must share a Wi-Fi network.
+/// Override without a rebuild via the PACKAR_SERVER environment variable (an Xcode scheme variable).
 enum API {
-    static let base = URL(string: "http://172.26.48.172:8000")!
+    static let base = ProcessInfo.processInfo.environment["PACKAR_SERVER"].flatMap(URL.init(string:))
+        ?? URL(string: "http://172.26.48.172:8000")!
 
     static func createSuitcase(name: String, dimensions: [Float]) async throws -> String {
         var req = URLRequest(url: base.appending(path: "suitcases"))
@@ -51,6 +53,11 @@ enum API {
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
         return try await send(req)
+    }
+
+    /// The public item document, re-read while the server retries a failed Grok call.
+    static func get(id: String) async throws -> ScannedItem {
+        try await send(URLRequest(url: base.appending(path: "items/\(id)")))
     }
 
     static func update(id: String, label: String?, rigidity: String?) async throws -> ScannedItem {

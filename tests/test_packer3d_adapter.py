@@ -15,6 +15,7 @@ import numpy as np
 
 from physics.containment import check_scene_containment
 from physics.geometry import obb_from, obb_vertices
+from physics.incremental import PlacementValidator
 from physics.io import apply_placements
 from physics.metrics import scene_metrics
 from physics.packer3d_adapter import (
@@ -31,6 +32,7 @@ from physics.packer3d_adapter import (
 )
 from physics.scene_geometry import precompute
 from physics.schema import Constraints, Object, Scene
+from physics.validator import validate_layout
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "packer3d" / "examples"
@@ -125,6 +127,29 @@ class MappingTests(unittest.TestCase):
                 b = obb_vertices(obb_from(by_id[o.id]))
                 np.testing.assert_allclose(a.min(axis=0), b.min(axis=0), atol=1e-12)
                 np.testing.assert_allclose(a.max(axis=0), b.max(axis=0), atol=1e-12)
+
+    def test_result_scene_paired_with_its_own_placements_passes_the_physics_gate(self):
+        """`scripts/demo_e2e.py::rollout_real`'s pairing: the result's OWN scene moved by
+        the result's own placements. `oriented=False` gives the objects their own dims, so
+        the orientation is applied exactly once and the layout is the solver's own valid
+        one; with the default oriented dims every permuted item rotates a second time and
+        the gate rejects the plan (FIXES.md section 2)."""
+        for strategy in ("naive", "optimized"):
+            direct, _ = scene_from_packer3d(SUITCASE_RESULT, items=SUITCASE_SCENARIO, strategy=strategy)
+            own, _ = scene_from_packer3d(
+                SUITCASE_RESULT, items=SUITCASE_SCENARIO, strategy=strategy, oriented=False
+            )
+            moved = apply_placements(own, placements_from_packer3d(SUITCASE_RESULT, strategy=strategy))
+            by_id = {o.id: o for o in moved.objects}
+            for o in direct.objects:  # same world boxes: the permutation was applied once
+                a = obb_vertices(obb_from(o))
+                b = obb_vertices(obb_from(by_id[o.id]))
+                np.testing.assert_allclose(a.min(axis=0), b.min(axis=0), atol=1e-12)
+                np.testing.assert_allclose(a.max(axis=0), b.max(axis=0), atol=1e-12)
+            self.assertTrue(validate_layout(moved)["valid"], strategy)
+            pv = PlacementValidator(moved.container)  # and the incremental gate, in solver order
+            for o in moved.objects:
+                self.assertTrue(pv.place(o)["valid"], (strategy, o.id))
 
 
 class SuitcaseAgreementTests(unittest.TestCase):

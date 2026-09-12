@@ -23,7 +23,8 @@ so (identical formulas are used by the Swift port -- do not deviate):
 * placement -> `Object(id=item_id, dimensions=(dx, dz, dy), position=(cx, cz, -cy),
   rotation=identity, mass_kg=mass)` with `(cx, cy, cz) = center`, `(dx, dy, dz) = dims`.
   Exact for boxes: packer3d only permutes axes, so an axis-aligned bbox stays axis-aligned
-  and the rotation is always identity.
+  and the rotation is always identity. `scene_from_packer3d(..., oriented=False)` gives the
+  other (equivalent) form -- own dims + the orientation as the pose; see its docstring.
 
 Deliberate approximations (call these out, don't hide them)
 ----------------------------------------------------------
@@ -138,6 +139,16 @@ def rotation_from_orientation(orientation: str) -> tuple[float, float, float, fl
     return _quat_from_matrix(_P @ m @ _P.T)
 
 
+def _unoriented_dims(dims, orientation: str) -> tuple[float, float, float]:
+    """Undo the solver's axis permutation: the oriented bbox `placement["dims"]` -> the
+    item's OWN extents. `M` above puts item axis `perm[k]` on world axis `k`, so extents
+    map back with `own[perm[k]] = dims[k]`. Pairs with `rotation_from_orientation`."""
+    own = [0.0, 0.0, 0.0]
+    for k, src in enumerate(_PERM[str(orientation)]):
+        own[src] = float(dims[k])
+    return (own[0], own[1], own[2])
+
+
 # --- result / scenario plumbing ----------------------------------------------
 
 
@@ -201,13 +212,14 @@ def _container(id: str, dims) -> Container:
     return Container(id=id, dimensions=(L, H, W), position=(L / 2.0, H / 2.0, -W / 2.0))
 
 
-def _object_from_placement(p: dict, meta: dict[str, dict]) -> Object:
+def _object_from_placement(p: dict, meta: dict[str, dict], oriented: bool = True) -> Object:
     m = meta.get(p["item_id"], {})
+    o = str(p.get("orientation", "xyz"))
     return Object(
         id=p["item_id"],
-        dimensions=swap_yz(p["dims"]),
+        dimensions=swap_yz(p["dims"] if oriented else _unoriented_dims(p["dims"], o)),
         position=physics_point(*p["center"]),
-        rotation=IDENTITY_ROTATION,
+        rotation=IDENTITY_ROTATION if oriented else rotation_from_orientation(o),
         mass_kg=float(p.get("mass", 0.0)),
         constraints=_constraints(p.get("fragile", False), m.get("keep_upright", False)),
     )
@@ -235,12 +247,27 @@ def scene_from_packer3d(
     items: Optional[list[dict]] = None,
     include_obstacles: bool = True,
     strategy: Optional[str] = None,
+    oriented: bool = True,
 ) -> tuple[Scene, dict]:
     """packer3d result -> (`Scene`, `extras`).
 
     `result` is a single-strategy result or the `--compare` wrapper (then pass
     `strategy="naive"`/`"optimized"`). `items` is the scenario (dict or its `items`
     list) and only supplies `keep_upright` / `priority` / pre-expansion ids.
+
+    `oriented` picks which of the two equivalent forms the placed objects take. Both
+    occupy exactly the same world box, so the validator's verdict is the same:
+
+    * `True` (default) -- the solver's already-oriented `dims` with identity rotation.
+      Axis-aligned and exact, so this stays the canonical form for everything that only
+      GRADES a finished layout (`validate_packer3d`, `physics/__main__.py`,
+      `server/planner.py`): those never apply placements on top.
+    * `False` -- the item's own dims with the orientation carried in the pose, i.e. the
+      same form `scene_from_packer3d_scenario` builds. Use this, and only this, when the
+      scene is then moved by `placements_from_packer3d` (`physics.io.apply_placements`,
+      `physics.pan`, `pan.solver_bridge`); pairing those rotations with the default
+      oriented dims applies the permutation twice and the physics gate rejects the
+      solver's own valid plan (FIXES.md section 2).
 
     `extras = {"unpacked": [...], "shapes": {id: cylinder fields}, "strategy": str,
     "metrics": result["metrics"], "items": item_metadata(items)}`.
@@ -250,7 +277,7 @@ def scene_from_packer3d(
     placements = single.get("placements", [])
     container_d = single["container"]
 
-    objects = [_object_from_placement(p, meta) for p in placements]
+    objects = [_object_from_placement(p, meta, oriented) for p in placements]
     if include_obstacles:
         objects += [_object_from_obstacle(ob) for ob in container_d.get("obstacles", [])]
 
@@ -277,6 +304,10 @@ def placements_from_packer3d(result: dict, *, strategy: Optional[str] = None) ->
     `rotation` is `rotation_from_orientation(placement["orientation"])`, NOT identity:
     those objects carry their own unoriented dimensions, so the solver's axis
     permutation has to travel in the pose or the item lands rotated 90 degrees wrong.
+
+    So the scene these are applied to must be in the own-dims form --
+    `scene_from_packer3d_scenario(scenario)` or `scene_from_packer3d(..., oriented=False)`,
+    never the default oriented scene (that double-rotates; see `scene_from_packer3d`).
     """
     single, _ = _pick(result, strategy)
     return [

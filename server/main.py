@@ -1,17 +1,24 @@
+import asyncio
 import base64
 import json
 import logging
 import os
+import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from pymongo import MongoClient
 
+import auth
 from planner import plan as solve
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("suitcase")
 
 RIGIDITIES = ("rigid", "soft", "fragile")
 PROMPT = (
@@ -26,6 +33,10 @@ PROMPT = (
 )
 UNKNOWN = {"label": "unknown", "description": "", "rigidity": "rigid", "compressibility": 1.0, "mass": 0.0, "keepUpright": False}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # a LiDAR scan's photo has no business being bigger than this
+LABEL_RETRY_S = float(os.environ.get("LABEL_RETRY_S", 10))
+LABEL_MAX_ATTEMPTS = int(os.environ.get("LABEL_MAX_ATTEMPTS", 5))
+SOURCES = {"label": "labelSource", "rigidity": "rigiditySource", "compressibility": "compressibilitySource",
+           "mass": "massSource", "keepUpright": "keepUprightSource"}
 
 
 def compressibility(value, rigidity: str) -> float:
@@ -40,7 +51,35 @@ def compressibility(value, rigidity: str) -> float:
 
 db = MongoClient(os.environ.get("SUITCASE_MONGODB_URI", "mongodb://localhost:27017"), serverSelectionTimeoutMS=8000)[os.environ.get("MONGO_DB", "suitcase")]
 db.client.admin.command("ping")  # fail at startup, not on the first request
-app = FastAPI()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Background labeller: keep sweeping the pending items, never dying on one bad sweep."""
+    async def loop():
+        while True:
+            try:
+                n = await asyncio.to_thread(relabel_pending)
+                if n:
+                    logging.info("background labeller: labelled %d item(s)", n)
+            except Exception:
+                logging.exception("background labeller: sweep failed")
+            await asyncio.sleep(LABEL_RETRY_S)
+
+    task = asyncio.create_task(loop())
+    yield
+    task.cancel()
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.monotonic()
+    response = await call_next(request)
+    logger.info("%s %s %d %.1fms", request.method, request.url.path, response.status_code, (time.monotonic() - start) * 1000)
+    return response
 
 
 def detect(jpeg: bytes) -> dict:
@@ -72,12 +111,58 @@ def detect(jpeg: bytes) -> dict:
             "mass": mass, "keepUpright": out.get("keepUpright") is True}
 
 
+def relabel_pending() -> int:
+    """Retry Grok for every item whose labelling failed at upload; returns how many got labelled.
+
+    A guessed field is overwritten only while its `*Source` is still "auto" (a missing source
+    counts as auto, for items stored before sources existed); `description` has no `*Source`
+    and no PATCH route, so it is always auto. No stored photo, or LABEL_MAX_ATTEMPTS failed
+    attempts, marks the item "failed" and stops the retries.
+    """
+    labelled = 0
+    for doc in list(db.items.find({"labelStatus": "pending"})):
+        item_id = doc["_id"]
+        if not doc.get("photo"):
+            db.items.update_one({"_id": item_id}, {"$set": {"labelStatus": "failed"}})
+            continue
+        try:
+            guess = detect(doc["photo"])
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            attempts = doc.get("labelAttempts", 0) + 1
+            logging.warning("relabelling item %s failed (attempt %d): %s", item_id, attempts, exc)
+            status = "failed" if attempts >= LABEL_MAX_ATTEMPTS else "pending"
+            db.items.update_one({"_id": item_id}, {"$inc": {"labelAttempts": 1}, "$set": {"labelStatus": status}})
+            continue
+        fields = {k: v for k, v in guess.items() if k not in SOURCES or doc.get(SOURCES[k], "auto") == "auto"}
+        db.items.update_one({"_id": item_id}, {"$set": fields | {"labelStatus": "done"}})
+        labelled += 1
+    return labelled
+
+
 def public(doc: dict) -> dict:
-    return {k: v for k, v in doc.items() if k != "_id"}
+    """What the routes return: never the Mongo id, never the stored photo bytes."""
+    return {k: v for k, v in doc.items() if k not in ("_id", "photo")}
 
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def current_user(claims: dict = Depends(auth.require_auth)) -> str:
+    """Verified Auth0 claims -> the user's sub, upserting a users record on every authenticated request."""
+    sub = claims["sub"]
+    db.users.update_one({"_id": sub}, {"$set": {"email": claims.get("email"), "last_seen": now()}}, upsert=True)
+    return sub
+
+
+def owned(doc: dict | None, user: str) -> dict:
+    """A found document the requesting user is allowed to modify, or the matching HTTPException."""
+    if doc is None:
+        raise HTTPException(404, "no such resource")
+    if doc.get("owner_id") != user:
+        logger.warning("auth rejected: user %s is not the owner of %s", user, doc.get("_id"))
+        raise HTTPException(403, "not the owner of this resource")
+    return doc
 
 
 class NewSuitcase(BaseModel):
@@ -86,10 +171,11 @@ class NewSuitcase(BaseModel):
 
 
 @app.post("/suitcases")
-def create_suitcase(s: NewSuitcase):
+def create_suitcase(s: NewSuitcase, user: str = Depends(current_user)):
     if len(s.dimensions) != 3 or min(s.dimensions) <= 0:
         raise HTTPException(422, "dimensions must be three positive numbers in metres")
-    doc = {"_id": str(uuid.uuid4()), "id": None, "name": s.name.strip()[:60], "dimensions": s.dimensions, "createdAt": now()}
+    doc = {"_id": str(uuid.uuid4()), "id": None, "name": s.name.strip()[:60], "dimensions": s.dimensions,
+           "owner_id": user, "createdAt": now()}
     doc["id"] = doc["_id"]
     db.suitcases.insert_one(doc)
     return public(doc)
@@ -109,20 +195,18 @@ def get_suitcase(suitcase_id: str):
 
 
 @app.delete("/suitcases/{suitcase_id}")
-def delete_suitcase(suitcase_id: str):
+def delete_suitcase(suitcase_id: str, user: str = Depends(current_user)):
     """Remove a suitcase with its items and plan, so demo runs do not pile up."""
-    if db.suitcases.delete_one({"_id": suitcase_id}).deleted_count == 0:
-        raise HTTPException(404, "no such suitcase")
+    owned(db.suitcases.find_one({"_id": suitcase_id}), user)
+    db.suitcases.delete_one({"_id": suitcase_id})
     db.items.delete_many({"suitcaseId": suitcase_id})
     db.plans.delete_one({"_id": suitcase_id})
     return {"deleted": suitcase_id}
 
 
 @app.post("/suitcases/{suitcase_id}/plan")
-def create_plan(suitcase_id: str):
-    suitcase = db.suitcases.find_one({"_id": suitcase_id})
-    if suitcase is None:
-        raise HTTPException(404, "no such suitcase")
+def create_plan(suitcase_id: str, user: str = Depends(current_user)):
+    suitcase = owned(db.suitcases.find_one({"_id": suitcase_id}), user)
     items = list(db.items.find({"suitcaseId": suitcase_id}))
     if not items:
         raise HTTPException(409, "suitcase has no scanned items to pack")
@@ -159,26 +243,29 @@ class Scan(BaseModel, extra="allow"):
 
 
 @app.post("/items")
-def create_item(item: str = Form(...), image: UploadFile = File(...)):
+def create_item(item: str = Form(...), image: UploadFile = File(...), user: str = Depends(current_user)):
     try:
         doc = Scan.model_validate_json(item).model_dump(mode="json")
     except ValidationError as exc:
         raise HTTPException(422, str(exc))
     item_id, suitcase_id = doc["id"], doc["suitcaseId"]
-    if db.suitcases.find_one({"_id": suitcase_id}) is None:
-        raise HTTPException(404, "no such suitcase")
+    owned(db.suitcases.find_one({"_id": suitcase_id}), user)
+    existing = db.items.find_one({"_id": item_id})
+    if existing is not None:
+        owned(existing, user)
     jpeg = image.file.read(MAX_IMAGE_BYTES + 1)
     if len(jpeg) > MAX_IMAGE_BYTES:
         raise HTTPException(413, f"image must be at most {MAX_IMAGE_BYTES} bytes")
     try:
-        guess = detect(jpeg)
+        guess, status = detect(jpeg), "done"
     except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
-        # x.ai down, rate-limited or returning garbage must not lose the scan; the app's editor fixes the label.
+        # x.ai down, rate-limited or returning garbage must not lose the scan; relabel_pending retries it.
         logging.warning("grok labelling failed, item %s saved as unknown: %s", item_id, exc)
-        guess = dict(UNKNOWN)
+        guess, status = dict(UNKNOWN), "pending"
     doc |= guess | {
-        "_id": item_id,
+        "_id": item_id, "owner_id": user, "photo": jpeg, "labelStatus": status,
         "labelSource": "auto", "rigiditySource": "auto", "compressibilitySource": "auto",
+        "massSource": "auto", "keepUprightSource": "auto",
         "createdAt": now(),
     }
     db.items.replace_one({"_id": item_id}, doc, upsert=True)
@@ -194,7 +281,8 @@ class Patch(BaseModel):
 
 
 @app.patch("/items/{item_id}")
-def update_item(item_id: str, patch: Patch):
+def update_item(item_id: str, patch: Patch, user: str = Depends(current_user)):
+    owned(db.items.find_one({"_id": item_id}), user)
     if patch.rigidity is not None and patch.rigidity not in RIGIDITIES:
         raise HTTPException(422, f"rigidity must be one of {RIGIDITIES}")
     if patch.compressibility is not None and not patch.compressibility >= 1:
@@ -203,9 +291,9 @@ def update_item(item_id: str, patch: Patch):
         raise HTTPException(422, "mass must be >= 0")
     fields = {}
     if patch.mass is not None:
-        fields |= {"mass": float(patch.mass)}
+        fields |= {"mass": float(patch.mass), "massSource": "user"}
     if patch.keepUpright is not None:
-        fields |= {"keepUpright": patch.keepUpright}
+        fields |= {"keepUpright": patch.keepUpright, "keepUprightSource": "user"}
     if patch.label is not None:
         fields |= {"label": patch.label.strip()[:60], "labelSource": "user"}
     if patch.rigidity is not None:
@@ -223,10 +311,18 @@ def list_items(suitcaseId: str | None = None):
     return [public(d) for d in db.items.find({"suitcaseId": suitcaseId} if suitcaseId else {})]
 
 
-@app.delete("/items/{item_id}")
-def delete_item(item_id: str):
-    doc = db.items.find_one_and_delete({"_id": item_id})
+@app.get("/items/{item_id}")
+def get_item(item_id: str):
+    """One item; the app polls this while `labelStatus` is "pending"."""
+    doc = db.items.find_one({"_id": item_id})
     if doc is None:
         raise HTTPException(404, "no such item")
+    return public(doc)
+
+
+@app.delete("/items/{item_id}")
+def delete_item(item_id: str, user: str = Depends(current_user)):
+    doc = owned(db.items.find_one({"_id": item_id}), user)
+    db.items.delete_one({"_id": item_id})
     db.plans.delete_one({"_id": doc["suitcaseId"]})  # the stored plan no longer matches the items
     return {"deleted": item_id}

@@ -12,12 +12,16 @@ struct ContentView: View {
     @State private var status = "Point at your open suitcase on the floor, then tap it"
     @State private var suitcaseId: String?
     @State private var mode = ScanMode.suitcase
-    /// The plan the solver actually produced, shown in the sheet. Nil = no sheet.
+    /// The plan the solver actually produced. Outlives the sheet: closing the diagram is how the
+    /// user gets back to the AR overlay, so dismissing it must not throw the plan away.
     @State private var plan: PackingPlan?
+    @State private var showingDiagram = false
+    /// A POST /plan is in flight; a second one would race the first and last write would win.
+    @State private var packing = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, mode: mode).ignoresSafeArea()
+            ScanView(item: $item, status: $status, suitcaseId: $suitcaseId, plan: $plan, mode: mode).ignoresSafeArea()
             VStack(spacing: 8) {
                 Picker("mode", selection: $mode) {
                     Text("Suitcase").tag(ScanMode.suitcase)
@@ -32,7 +36,7 @@ struct ContentView: View {
                     if item.label != nil { ItemEditor(item: Binding($item)!) }
                 }
                 Text(status).font(.footnote)
-                Button("Pack") { pack() }.disabled(suitcaseId == nil)
+                Button("Pack") { pack() }.disabled(suitcaseId == nil || packing)
             }
                 .font(.system(.title2, design: .monospaced))
                 .padding()
@@ -41,7 +45,7 @@ struct ContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.bottom, 40)
         }
-        .sheet(isPresented: Binding(get: { plan != nil }, set: { if !$0 { plan = nil } })) {
+        .sheet(isPresented: $showingDiagram) {
             if let plan { PlanDiagramView(plan: plan) }
         }
     }
@@ -49,10 +53,13 @@ struct ContentView: View {
     private func pack() {
         guard let suitcaseId else { return }
         status = "Packing…"
+        packing = true
         Task {
+            defer { packing = false }
             do {
                 plan = try await API.plan(suitcaseId: suitcaseId)
-                status = "Packed \(plan?.placements.count ?? 0) items"
+                showingDiagram = true
+                status = "Packed \(plan?.placements.count ?? 0) items — close the sheet to see it in the bag"
             } catch {
                 status = "plan: \(error.localizedDescription)"
             }

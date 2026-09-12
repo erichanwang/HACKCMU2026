@@ -157,12 +157,21 @@ def git_state() -> dict:
     return {"commit": commit, "dirty": dirty}
 
 
+def rel_to_root(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def stamp_run(run: dict, args, started, elapsed) -> dict:
     """Record what this run actually measured, so a saved run is self-describing."""
     run["run"] = dict(git_state(),
                       started_at=started.replace(microsecond=0).isoformat(),
                       wall_clock_s=round(elapsed, 2),
-                      flags={"fixtures": str(args.fixtures), "quick": bool(args.quick),
+                      # repo-relative where possible: a committed baseline must not carry
+                      # somebody's absolute worktree path
+                      flags={"fixtures": rel_to_root(args.fixtures), "quick": bool(args.quick),
                              "strategy": args.strategy, "seed": args.seed,
                              "iters": None if args.time else args.iters,
                              "time": args.time or None})

@@ -3,11 +3,19 @@ options:
   bundleIdPrefix: com.suitcase
   deploymentTarget:
     iOS: "17.0"
+packages:
+  PackingPlan:
+    path: packing-core
 targets:
   Spike:
     type: application
     platform: iOS
     sources: [Spike]
+    dependencies:
+      - package: PackingPlan
+        product: PackingPlan
+      - package: PackingPlan
+        product: PackingPlanUI
     info:
       path: Spike/Info.plist
       properties:

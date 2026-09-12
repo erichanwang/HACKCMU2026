@@ -23,9 +23,13 @@ Both flags on the second command are load-bearing:
 - **`--env-file ../.env`** — nothing else loads `.env`. A plain `uvicorn main:app` starts fine
   with no `XAI_API_KEY`, and then every scanned item comes back labelled `"unknown"`
   (`labelStatus: "pending"`) instead of being classified by Grok.
-- **`--host 0.0.0.0`** — the phone reaches the server over Wi-Fi, not localhost. Point the app
-  at the Mac running it: `ipconfig getifaddr en0`, put that IP in `API.base` in
-  `Spike/API.swift`, and keep phone and Mac on the same network.
+- **`--host 0.0.0.0`** — the phone reaches the server over Wi-Fi, not localhost. Get the Mac's
+  address with `ipconfig getifaddr en0`, then tap the small URL button at the bottom of the
+  app's control panel and type it as `http://<ip>:8000`. It is kept in `UserDefaults`, so this
+  survives a relaunch and needs no rebuild. Keep phone and Mac on the same network. (A
+  `PACKAR_SERVER` scheme variable and a hard-coded fallback back it up, in that order — but
+  neither can be changed while standing in a demo line, which is what the settings sheet is
+  for.)
 
 Mongo must be reachable or the server does not boot. Override with `SUITCASE_MONGODB_URI`
 (default `mongodb://localhost:27017`) to point at Atlas instead; `MONGO_DB` (default

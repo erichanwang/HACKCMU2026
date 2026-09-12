@@ -33,10 +33,11 @@ let suitcaseHandleWallMeters: Float = suitcaseWallMeters
 /// the scan prompts — roughly a 30cm square.
 private let floorPlaneAreaMeters: Float = 0.09
 
-/// ponytail: below this interior depth a "suitcase" is a closed lid or a tap on the
-/// floor, not a bag worth packing. A fixed threshold, not a lid detector; if someone
-/// really packs a 6cm case, this is the number to revisit.
-private let openSuitcaseInteriorMeters: Float = 0.07
+/// ponytail: below this interior depth the tap found the floor or a flat surface beside
+/// the bag, not a bag. A closed suitcase measures its full outer height here, so this only
+/// ever catches a degenerate scan; if someone really packs a 6cm case, this is the number
+/// to revisit.
+private let minSuitcaseInteriorMeters: Float = 0.07
 
 /// What the next tap captures: the bag itself, or something to put in it.
 enum ScanMode: Hashable {
@@ -159,7 +160,7 @@ struct ScanView: UIViewRepresentable {
         static let prompts: Set<String> = [
             "Move the phone slowly so it can see the room",
             "Point the camera at the floor near your suitcase",
-            "Open your suitcase on the floor, then tap inside it",
+            "Point at your closed suitcase on the floor, then tap it",
             "Tap the bag again to steady it, or switch to Item",
             "Switch to Suitcase and scan the bag first",
             "Point at an item next to the bag, then tap it",
@@ -177,7 +178,7 @@ struct ScanView: UIViewRepresentable {
                     next = "Point the camera at the floor near your suitcase"
                 } else if mode == .suitcase {
                     next = suitcaseId == nil
-                        ? "Open your suitcase on the floor, then tap inside it"
+                        ? "Point at your closed suitcase on the floor, then tap it"
                         : "Tap the bag again to steady it, or switch to Item"
                 } else {
                     next = suitcaseId == nil
@@ -304,8 +305,8 @@ struct ScanView: UIViewRepresentable {
                     let interior = interiorBox(steadied, wall: suitcaseWallMeters,
                                                wallHeight: suitcaseFloorWallMeters,
                                                wallDepth: suitcaseHandleWallMeters)
-                    guard interior.height >= openSuitcaseInteriorMeters else {
-                        self.status = "That looks closed or flat — open the lid and tap inside the bag"
+                    guard interior.height >= minSuitcaseInteriorMeters else {
+                        self.status = "That came out too flat to be a bag — tap the suitcase itself, not the floor beside it"
                         return
                     }
                     self.suitcase = (interior, planeY + suitcaseWallMeters)

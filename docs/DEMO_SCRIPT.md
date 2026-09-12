@@ -42,8 +42,10 @@ Checklist:
 - Phone and Mac on the **same Wi-Fi**, not phone hotspot / Mac Ethernet.
 - Phone is a **LiDAR** iPhone or iPad Pro (`ARWorldTrackingConfiguration.sceneReconstruction =
   .mesh` throws without it).
-- A real suitcase, **open**, on a table (not the floor — easier to scan, easier for judges to
-  see).
+- A real suitcase, **closed**, on a table (not the floor — easier to scan, easier for judges
+  to see). Closed is what the app asks for: the scan measures the bag's outer shell and takes
+  the wall thickness off it, so there is no lid in frame to work around. It only needs opening
+  later, for the AR overlay, when you are actually putting things in.
 - 4–6 items laid out next to it: mix rigid (book, camera), soft (t-shirt), fragile (something
   Grok will call fragile) — verified today, Grok answers in ~6s per item and labels this mix
   reliably.
@@ -56,8 +58,9 @@ Checklist:
 eye. PackAR scans your actual bag and your actual stuff and tells you exactly where each thing
 goes — then shows you in AR."
 
-**Beat 2 — scan suitcase (20s).** Suitcase mode is selected by default. Tap the open, empty
-suitcase. Status goes "Creating suitcase…" → "Suitcase captured — switch to Item and tap what
+**Beat 2 — scan suitcase (20s).** Suitcase mode is selected by default. The prompt advances on
+its own as the session finds the room and then the floor; when it reads "Point at your closed
+suitcase on the floor, then tap it", tap the bag. Status goes "Creating suitcase…" → "Suitcase captured — switch to Item and tap what
 goes in." Say: "that's the bounding box of the bag — the app doesn't know about wheel wells or
 lid pockets yet, so it's a few centimetres optimistic."
 

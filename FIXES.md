@@ -155,14 +155,10 @@ Concrete doc-vs-code mismatches (each verified by grep; fix the doc unless noted
 
 ## 7. Branch and worktree hygiene
 
-- `integration` (this branch) holds Gaps 1–5, the physics pre-pass and ranked search;
-  `render-polish` holds the faster 3D solver render and the z-buffered PAN observation
-  renderer. Neither is pushed. Land `integration` first, then `render-polish`
-  (`pan/fixtures/*.png` will be stale after the renderer lands: `python3 pan/render_fixtures.py`).
-- Local branches `compressibility`, `merge/ar-view`, `gap1-plan-endpoint`, `gap2-app-live-plan`,
-  `gap4-pan-labels`, `gap5-e2e-script` are merged or superseded; delete after landing.
-- Worktrees `HACKCMU2026-hull` (`hull-footprints`: convex-prism footprints in physics) and
-  `HACKCMU2026-swift` (`swift-prisms`) belong to other sessions and are not on `main` yet;
-  `docs/PHYSICS.md` v3 there describes code this branch does not have.
-- Several sessions edit the main checkout at once; commit small and often, never `git stash`
-  there (see `agent-memory/hackcmu-2026-test-quirks.md`).
+- Landed on `loop` as of 2026-09-12 09:00: `integration`, `render-polish`, `hull-footprints`
+  (prism footprints in the physics gate) and `swift-prisms`; every other local branch is
+  absorbed or superseded per the branch audit and can be deleted with `git branch -d`.
+- `loop` is the integration branch; land on `main` only via a PR from it. Never rewrite or
+  reset `loop`'s head: five sessions share this checkout (one filter-branch and one soft
+  reset this morning each cost an hour). Commit only on top, `git status` before every commit,
+  never `git stash` here, keep agent work in worktrees and cherry-pick it onto the head.

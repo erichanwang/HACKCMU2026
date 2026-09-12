@@ -413,8 +413,11 @@ PINNED = [
     ("packing-core/CLAUDE.md", r"([A-Za-z]+|\d+) items in ([A-Za-z]+|\d+) zones",
      lambda: (_demo_plan("placements"), _demo_plan("zones")),
      "placements and container.zones in the demo plan.json"),
-    ("packing-core/README.md", r"(\d+) tests", lambda: _swift_tests("packing-core"),
-     "XCTest methods under packing-core/Tests"),
+    # No pin for packing-core/README.md's test count: the doc deliberately stopped quoting one.
+    # That suite grew 74 -> 86 -> 90 -> 102 -> 105 in a single morning, so a pinned number there
+    # meant this checker's only job was telling someone to retype it. A doc that says "green"
+    # and shows `Executed <n> tests` cannot rot. Keep the pin below for swift/PackPhysics, which
+    # is a stable ported suite and where a moving count is genuinely news.
     ("docs/SWIFT_PORT.md", r"(\d+) tests total",
      lambda: _swift_tests("swift/PackPhysics"),
      "XCTest methods under swift/PackPhysics/Tests"),

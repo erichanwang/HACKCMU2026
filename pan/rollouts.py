@@ -51,6 +51,7 @@ from pan.types import (
     WorldModel,
     apply_action,
     apply_sequence,
+    honesty_note,
 )
 from physics.geometry import obb_from, obb_vertices
 from physics.validator import validate_layout
@@ -213,6 +214,8 @@ class RolloutBatch:
                     action_text=rec.action.text,
                     pan_preview_video=result.video_path if result is not None else None,
                     pan_final_frame=result.final_frame_path if result is not None else None,
+                    backend=result.backend if result is not None else None,
+                    backend_note=honesty_note(result.backend, result.metadata) if result is not None else None,
                     risk_metadata=risk_metadata,
                     score_components={
                         "geometry_score": geometry_score,
@@ -242,6 +245,9 @@ class RolloutBatch:
           pan_preview_video / pan_final_frame: from the LAST step (in order)
             that has one -- so a later gated/failed step doesn't blank out an
             earlier completed rollout's assets.
+          backend / backend_note: from the LAST step that actually ran a
+            rollout (every step shares one world model), so the assets above
+            are never shown unlabelled.
           risk_metadata: {"steps": [per-step risk_metadata, in order]}.
           score_components: mean of each per-step component across steps
             (None entries skipped; a key that's None everywhere stays None),
@@ -267,12 +273,14 @@ class RolloutBatch:
             else:
                 physics_status = "invalid"
 
-            video = frame = None
+            video = frame = backend = backend_note = None
             for s in step_reports:
                 if s.pan_preview_video is not None:
                     video = s.pan_preview_video
                 if s.pan_final_frame is not None:
                     frame = s.pan_final_frame
+                if s.backend is not None:
+                    backend, backend_note = s.backend, s.backend_note
 
             keys = {k for s in step_reports for k in s.score_components}
             components: dict[str, float] = {}
@@ -291,6 +299,8 @@ class RolloutBatch:
                     action_text=" Then: ".join(s.action_text for s in step_reports),
                     pan_preview_video=video,
                     pan_final_frame=frame,
+                    backend=backend,
+                    backend_note=backend_note,
                     risk_metadata={"steps": [s.risk_metadata for s in step_reports]},
                     score_components=components,
                 )

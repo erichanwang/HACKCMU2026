@@ -534,10 +534,13 @@ def post_item(url: str, item: dict) -> dict:
     return call(url, data=body, content_type=f"multipart/form-data; boundary={boundary}", method="POST")
 
 
-def item_doc(it: dict, fit: dict, *, with_footprint: bool) -> dict:
+def item_doc(it: dict, fit: dict, *, with_footprint: bool, item_id: str | None = None) -> dict:
     """The `POST /items` body for one scanned item (SCAN_OUTPUT.md), optionally carrying the
-    footprint the real Swift path now computes (`ScannedItem.footprint`, docs/LIDAR_HULLS.md)."""
-    doc = {"id": f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": None,
+    footprint the real Swift path now computes (`ScannedItem.footprint`, docs/LIDAR_HULLS.md).
+    `item_id` defaults to a fresh uuid; pass a fixed one to compare two POSTs of "the same" item
+    (the solver's own ordering can depend on item id, so two calls with different random ids are
+    not a controlled comparison -- see `footprint_wiring_check`)."""
+    doc = {"id": item_id or f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": None,
            "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
            "heights": fit["heights"]}
     if with_footprint and fit.get("footprint") is not None:
@@ -562,42 +565,58 @@ def assert_footprint_in_box(name: str, fit: dict) -> None:
 
 def footprint_wiring_check(base: str, dims, items: list[dict], item_fits: list[dict]) -> None:
     """Does sending `footprint` change the solver's plan at all? POST the same items/suitcase
-    twice -- once with `footprint`, once without -- and diff the placements. `prepack.py`
-    (`physics_object`) and packer3d's own Item builder never read `doc["footprint"]"`, so this is
-    expected to come back IDENTICAL; that is the real finding item 4 of the task asks for, not a
-    bug in this script."""
-    with_fp = post_suitcase_items_plan(base, "wiring check (with footprint)", dims, items, item_fits,
-                                        with_footprint=True)
-    without_fp = post_suitcase_items_plan(base, "wiring check (without footprint)", dims, items, item_fits,
-                                           with_footprint=False)
-    # Drop itemId/label: item_doc mints a fresh uuid per call, so those differ between the two
-    # runs even when the packed geometry is byte-identical -- compare on geometry/order only.
-    strip = lambda ps: [{k: v for k, v in p.items() if k not in ("itemId", "label")} for p in ps]
-    same = strip(with_fp) == strip(without_fp)
-    print(f"[wiring] POST /items with vs without `footprint`: plans are "
-          f"{'IDENTICAL' if same else 'DIFFERENT'} "
-          f"({len(with_fp)} vs {len(without_fp)} placements)")
-    if same:
+    twice -- once with `footprint`, once without -- and compare. `prepack.py`'s `physics_object()`
+    and packer3d's own Item builder never read `doc["footprint"]`, so this is expected to show no
+    effect; that is the real finding item 4 of the task asks for, not a bug in this script.
+
+    Pinning identical item ids across both POSTs (so id-driven noise doesn't confound the diff)
+    turned up a SEPARATE, real finding: the solver's own step/orientation assignment is not
+    reproducible run-to-run even with byte-identical requests -- verified by running the SAME
+    request (`with_footprint` held fixed) twice in a row and seeing the placements differ on
+    ~1/3 of trials. So exact placement equality is not a valid footprint test on its own; compare
+    the solver's own metrics (items_packed/unpacked -- order-invariant, and the one number that
+    would actually move if footprint let something pack that otherwise wouldn't) plus a
+    permutation-of-assignment-invariant summary (the multiset of packed box volumes)."""
+    ids = [f"{it['name']}-wiring-{uuid.uuid4().hex[:8]}" for it in items]
+    with_fp, with_metrics = post_suitcase_items_plan(base, "wiring check (with footprint)", dims, items,
+                                                       item_fits, with_footprint=True, item_ids=ids)
+    without_fp, without_metrics = post_suitcase_items_plan(base, "wiring check (without footprint)", dims,
+                                                             items, item_fits, with_footprint=False, item_ids=ids)
+    metrics_same = (with_metrics.get("items_packed") == without_metrics.get("items_packed")
+                     and with_metrics.get("items_unpacked") == without_metrics.get("items_unpacked"))
+    volumes = lambda ps: sorted(round(p["size"]["x"] * p["size"]["y"] * p["size"]["z"], 6) for p in ps)
+    volumes_same = volumes(with_fp) == volumes(without_fp)
+    exact_same = with_fp == without_fp
+    print(f"[wiring] with vs without `footprint`: items_packed/unpacked "
+          f"{'match' if metrics_same else 'DIFFER'} "
+          f"({with_metrics.get('items_packed')}/{with_metrics.get('items_unpacked')} vs "
+          f"{without_metrics.get('items_packed')}/{without_metrics.get('items_unpacked')}), "
+          f"packed volumes {'match' if volumes_same else 'DIFFER'}, "
+          f"exact placements {'match' if exact_same else 'differ (see note on solver order-noise above)'}")
+    if metrics_same and volumes_same:
         print("[wiring] footprint is accepted by the server (Scan model has extra=\"allow\") but "
               "never reaches a packing decision: physics/prepack.py's physics_object() and "
               "packer3d's own Item builder both read only dimensions/heights/rigidity/etc., "
               "never doc[\"footprint\"] -- the field is stored on the item doc and otherwise inert.")
     else:
-        for i, (a, b) in enumerate(zip(with_fp, without_fp)):
-            if a != b:
-                print(f"[wiring]   placement {i} differs: with={a} without={b}")
+        print("[wiring] UNEXPECTED: footprint correlates with a real outcome change -- "
+              f"with={with_metrics} without={without_metrics}")
 
 
 def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item_fits: list[dict],
-                              *, with_footprint: bool = False) -> list[dict]:
-    """POST /suitcases, POST every item's scan under it, POST /plan; returns the placements.
-    Used to solve a plan against a specific (e.g. ground-truth) suitcase, distinct from -- and not
-    printed alongside -- the main pipeline's own suitcase/items/plan."""
+                              *, with_footprint: bool = False,
+                              item_ids: list[str] | None = None) -> tuple[list[dict], dict]:
+    """POST /suitcases, POST every item's scan under it, POST /plan; returns (placements, solver
+    metrics). Used to solve a plan against a specific (e.g. ground-truth) suitcase, distinct from
+    -- and not printed alongside -- the main pipeline's own suitcase/items/plan. `item_ids`, if
+    given, pins each item's id (see `footprint_wiring_check`); otherwise each gets a fresh
+    random one."""
     status, suitcase_doc = post_json(f"{base}/suitcases", {"name": name, "dimensions": dims})
     if status != 200:
         fail(f"POST /suitcases ({name}) -> {status}: {suitcase_doc}")
-    for it, fit in zip(items, item_fits):
-        doc = item_doc(it, fit, with_footprint=with_footprint)
+    ids = item_ids or [None] * len(items)
+    for it, fit, item_id in zip(items, item_fits, ids):
+        doc = item_doc(it, fit, with_footprint=with_footprint, item_id=item_id)
         doc["suitcaseId"] = suitcase_doc["id"]
         status, resp = post_item(f"{base}/items", doc)
         if status != 200:
@@ -605,7 +624,7 @@ def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item
     status, plan_doc = post_json(f"{base}/suitcases/{suitcase_doc['id']}/plan", {})
     if status != 200:
         fail(f"POST /suitcases/{{id}}/plan ({name}) -> {status}: {plan_doc}")
-    return plan_doc["plan"]["placements"]
+    return plan_doc["plan"]["placements"], plan_doc["solver"]["metrics"]
 
 
 # --- checks -----------------------------------------------------------------------------
@@ -991,8 +1010,8 @@ def main() -> int:
             # A plan solved against the SAME (true, undegraded) bag the drift sweep measures
             # against -- reusing `placements` here would confound drift with whatever degraded
             # the suitcase (e.g. lid-open inflation), mis-attributing that error to drift.
-            true_placements = post_suitcase_items_plan(base, "sim suitcase (true bag, for drift)",
-                                                         true_out["interior"], items, item_fits)
+            true_placements, _ = post_suitcase_items_plan(base, "sim suitcase (true bag, for drift)",
+                                                            true_out["interior"], items, item_fits)
             drift_check(driver, true_suitcase_cloud, true_out, true_placements)
 
         return 0

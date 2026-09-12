@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-12T00:00:00Z",
+  "title": "Design System: PackAR",
+  "extensions": {
+    "colorMeta": {
+      "paper": { "role": "neutral", "displayName": "Paper", "canonical": "#FFFFFF", "tonalRamp": ["#26262a", "#3d3d42", "#5a5a60", "#7a7a80", "#9c9ca1", "#c0c0c4", "#e2e2e5", "#ffffff"] },
+      "card": { "role": "neutral", "displayName": "Barely-Off White", "canonical": "#F9F9FA", "tonalRamp": ["#232326", "#3a3a3e", "#57575c", "#77777c", "#99999e", "#bdbdc1", "#dedee1", "#f9f9fa"] },
+      "ink": { "role": "neutral", "displayName": "Blue-Black Ink", "canonical": "#1A1F2B", "tonalRamp": ["#0d1016", "#1a1f2b", "#2c3446", "#414c64", "#5c6a86", "#8794a9", "#b6bfcd", "#e3e7ee"] },
+      "hairline": { "role": "neutral", "displayName": "Hairline (ink at 10%)", "canonical": "rgba(26,31,43,0.10)", "tonalRamp": ["rgba(26,31,43,0.60)", "rgba(26,31,43,0.45)", "rgba(26,31,43,0.30)", "rgba(26,31,43,0.22)", "rgba(26,31,43,0.16)", "rgba(26,31,43,0.10)", "rgba(26,31,43,0.07)", "rgba(26,31,43,0.04)"] },
+      "accent": { "role": "primary", "displayName": "Signal Orange", "canonical": "#D6541F", "tonalRamp": ["#3b1708", "#5d240d", "#822f11", "#a84018", "#d6541f", "#e8794c", "#f2a583", "#fbd6c6"] },
+      "warn": { "role": "secondary", "displayName": "Warn Amber", "canonical": "#B37108", "tonalRamp": ["#2e1d02", "#4b2f03", "#6b4305", "#8d5806", "#b37108", "#d99333", "#eab871", "#f6ddb5"] }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "Bag names, empty-state headlines, the landing page's one sentence. The ceiling of the ramp — there is no display face." },
+      "body": { "displayName": "Body", "purpose": "Item names and list rows." },
+      "subheadline": { "displayName": "Subheadline", "purpose": "Status lines, secondary button labels, the load percentage." },
+      "footnote": { "displayName": "Footnote", "purpose": "Supporting sentences and quiet hints." },
+      "caption": { "displayName": "Caption", "purpose": "Row metadata and provenance." },
+      "measurement": { "displayName": "Measurement", "purpose": "Monospaced dimensions, layer captions and server addresses. Never used decoratively." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "lens-breath", "value": "easeInOut 2.6s repeatForever(autoreverses: true)", "purpose": "Idle breathing of the landing page's two haloes, offset in phase so the page is never quite still." },
+      { "name": "ambient-wash", "value": "TimelineView(.animation) — radial fields at t/9, t/11, t/12, t/14 s, blur 50pt", "purpose": "Two soft accent light fields drifting on mismatched cycles behind the landing page. No marks, no geometry." },
+      { "name": "gesture-release", "value": "spring(response: 0.34, dampingFraction: 0.7)", "purpose": "Snapping the lens back when a drag falls short of the 96pt threshold." },
+      { "name": "hand-off", "value": "easeIn 0.3s, tab swap at 280ms, reset at 400ms", "purpose": "The lens expands 10x past the screen edges and hands over to the tab underneath, so entering reads as one motion." },
+      { "name": "strip-reveal", "value": "easeOut 0.2s, move(edge: .bottom) + opacity", "purpose": "The inventory strip entering over the camera." },
+      { "name": "reduce-motion", "value": "@Environment(\\.accessibilityReduceMotion) gates all of the above", "purpose": "The wash pauses at t=0, the breathing never starts, and the hand-off degrades to an immediate tab switch." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Play Button (primary)",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Runs the solver on one bag; becomes an inline spinner while that bag is solving.",
+      "html": "<button class=\"ds-btn-play\" aria-label=\"Pack this suitcase\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M8 5v14l11-7z\"/></svg></button>",
+      "css": ".ds-btn-play { display: inline-flex; align-items: center; justify-content: center; width: 58px; height: 44px; background: #D6541F; color: #fff; border: none; border-radius: 9999px; transition: background 0.2s, opacity 0.2s; } .ds-btn-play:hover { background: #c14a19; } .ds-btn-play:focus-visible { outline: 2px solid #1A1F2B; outline-offset: 2px; } .ds-btn-play:disabled { background: rgba(26,31,43,0.18); }"
+    },
+    {
+      "name": "Add Items Button (secondary)",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Full-width capsule that opens the bag's contents sheet.",
+      "html": "<button class=\"ds-btn-secondary\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\"><path d=\"M12 5v14M5 12h14\"/></svg>Add items</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 44px; background: #F9F9FA; color: #1A1F2B; font: 500 15px/1.2 -apple-system, 'SF Pro', system-ui; border: none; border-radius: 9999px; } .ds-btn-secondary:hover { background: #f0f0f2; } .ds-btn-secondary:focus-visible { outline: 2px solid #1A1F2B; outline-offset: 2px; }"
+    },
+    {
+      "name": "Bag Card",
+      "kind": "card",
+      "refersTo": "card-bag",
+      "description": "One suitcase on the Pack tab: name, honest figures, load bar, and the two actions.",
+      "html": "<div class=\"ds-card-bag\"><div class=\"ds-card-bag__head\"><span class=\"ds-card-bag__name\">Scanned suitcase</span><span class=\"ds-card-bag__pct\">62%</span></div><div class=\"ds-card-bag__meta\">55 × 23 × 40 cm · 6 items</div></div>",
+      "css": ".ds-card-bag { background: rgba(249,249,250,0.55); border: 0.5px solid rgba(26,31,43,0.10); border-radius: 22px; padding: 18px; color: #1A1F2B; font-family: -apple-system, 'SF Pro', system-ui; } .ds-card-bag__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; } .ds-card-bag__name { font: 600 20px/1.2 inherit; } .ds-card-bag__pct { font: 600 15px/1.2 inherit; font-variant-numeric: tabular-nums; color: #D6541F; } .ds-card-bag__meta { margin-top: 2px; font: 400 13px/1.3 inherit; font-variant-numeric: tabular-nums; color: rgba(26,31,43,0.5); }"
+    },
+    {
+      "name": "Load Bar",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Load against the limit. The 100 mark sits inboard at 84% of the width so an over-packed bag visibly runs into the overrun strip.",
+      "html": "<div class=\"ds-loadbar\" role=\"img\" aria-label=\"62 percent by volume\"><span class=\"ds-loadbar__fill\" style=\"width:52%\"></span><span class=\"ds-loadbar__limit\"></span></div>",
+      "css": ".ds-loadbar { position: relative; height: 14px; display: flex; align-items: center; } .ds-loadbar::before { content: ''; position: absolute; left: 0; right: 0; height: 8px; border-radius: 9999px; background: rgba(26,31,43,0.07); } .ds-loadbar__fill { position: relative; height: 8px; min-width: 6px; border-radius: 9999px; background: #D6541F; } .ds-loadbar__limit { position: absolute; left: 84%; width: 1px; height: 14px; background: rgba(26,31,43,0.3); } .ds-loadbar--over .ds-loadbar__fill { background: #B37108; }"
+    },
+    {
+      "name": "Stamp Icon",
+      "kind": "chip",
+      "refersTo": "icon-stamp",
+      "description": "An item's glyph as ink on paper inside a hairline field box. Deliberately not a tinted chip; hidden from VoiceOver.",
+      "html": "<span class=\"ds-stamp\" aria-hidden=\"true\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M3 7l9-4 9 4v10l-9 4-9-4V7zm9 0l6-2.7M12 7v11\"/></svg></span>",
+      "css": ".ds-stamp { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; border: 0.75px solid rgba(26,31,43,0.10); color: rgba(26,31,43,0.6); background: #fff; }"
+    },
+    {
+      "name": "Inventory Card",
+      "kind": "card",
+      "refersTo": "card-inventory",
+      "description": "One scanned item in the horizontal strip over the camera: accent glyph, two-line name, monospaced size.",
+      "html": "<button class=\"ds-inv-card\"><svg class=\"ds-inv-card__glyph\" width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M3 7l9-4 9 4v10l-9 4-9-4V7z\"/></svg><span class=\"ds-inv-card__name\">Running shoes</span><span class=\"ds-inv-card__size\">30×12×11</span></button>",
+      "css": ".ds-inv-card { display: flex; flex-direction: column; align-items: flex-start; width: 104px; height: 88px; padding: 9px 11px; background: #F9F9FA; border: 0.5px solid rgba(26,31,43,0.10); border-radius: 15px; color: #1A1F2B; text-align: left; font-family: -apple-system, 'SF Pro', system-ui; } .ds-inv-card__glyph { color: #D6541F; margin-bottom: auto; } .ds-inv-card__name { font: 500 12px/1.2 inherit; } .ds-inv-card__size { margin-top: 5px; font: 400 11px/1.2 ui-monospace, 'SF Mono', monospace; color: rgba(26,31,43,0.5); } .ds-inv-card:hover { background: #f0f0f2; } .ds-inv-card:focus-visible { outline: 2px solid #D6541F; outline-offset: 2px; }"
+    },
+    {
+      "name": "Ticked Row",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "A row in the bag contents sheet. Tapping moves the item in or out; the state is a tick AND a sentence.",
+      "html": "<button class=\"ds-tick-row\" aria-pressed=\"true\"><svg class=\"ds-tick-row__mark\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a10 10 0 100 20 10 10 0 000-20zm-1 14l-4-4 1.4-1.4L11 13.2l5.6-5.6L18 9l-7 7z\"/></svg><span class=\"ds-tick-row__text\"><span class=\"ds-tick-row__name\">Running shoes</span><span class=\"ds-tick-row__where\">30×12×11 cm · in this bag</span></span></button>",
+      "css": ".ds-tick-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 0; background: none; border: none; text-align: left; color: #1A1F2B; font-family: -apple-system, 'SF Pro', system-ui; } .ds-tick-row__mark { color: #D6541F; flex: none; } .ds-tick-row[aria-pressed='false'] .ds-tick-row__mark { color: rgba(26,31,43,0.25); } .ds-tick-row__text { display: flex; flex-direction: column; gap: 2px; } .ds-tick-row__name { font: 400 17px/1.2 inherit; } .ds-tick-row__where { font: 400 12px/1.2 ui-monospace, 'SF Mono', monospace; color: rgba(26,31,43,0.5); } .ds-tick-row:focus-visible { outline: 2px solid #1A1F2B; outline-offset: 2px; }"
+    },
+    {
+      "name": "The Lens",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "The landing page's whole interface: two accent haloes breathing out of phase around a viewfinder glyph. Drag past 96pt or tap to enter.",
+      "html": "<div class=\"ds-lens\"><span class=\"ds-lens__halo ds-lens__halo--outer\"></span><span class=\"ds-lens__halo ds-lens__halo--inner\"></span><svg class=\"ds-lens__glyph\" width=\"46\" height=\"46\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"><path d=\"M3 8V5a2 2 0 012-2h3M16 3h3a2 2 0 012 2v3M21 16v3a2 2 0 01-2 2h-3M8 21H5a2 2 0 01-2-2v-3\"/><circle cx=\"12\" cy=\"12\" r=\"3.2\"/></svg></div>",
+      "css": ".ds-lens { position: relative; display: grid; place-items: center; width: 190px; height: 190px; } .ds-lens__halo { position: absolute; border-radius: 50%; background: #D6541F; } .ds-lens__halo--outer { width: 190px; height: 190px; opacity: 0.06; animation: ds-breath-a 5.2s ease-in-out infinite; } .ds-lens__halo--inner { width: 138px; height: 138px; opacity: 0.10; animation: ds-breath-b 5.2s ease-in-out infinite; } .ds-lens__glyph { position: relative; color: #D6541F; opacity: 0.6; } @keyframes ds-breath-a { 0%,100% { transform: scale(0.94); } 50% { transform: scale(1.06); } } @keyframes ds-breath-b { 0%,100% { transform: scale(1.04); } 50% { transform: scale(0.97); } } @media (prefers-reduced-motion: reduce) { .ds-lens__halo { animation: none; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Good Tape Measure",
+    "overview": "PackAR is a measuring instrument, not an app about travel. Everything is on one white ground — the landing page, the lists, the plan, and the chrome floating over the live camera feed. There is no dark variant and no warm paper: .preferredColorScheme(.light) is set once on the TabView and every surface inherits it. Depth comes from a 10%-ink hairline and a barely-tinted card fill, never from a shadow. The interface has almost no colour of its own, so the one orange it does carry reads as a signal rather than as decoration.\n\nDensity is low and targets are large, because the user is holding a phone over an open suitcase with both hands busy. Detail lives in sheets and menus; the always-on surfaces carry one status line, one primary action, and honest figures. Every measurement and count is set in tabular or monospaced figures so numbers hold their columns as they change, and nothing is rounded to look better.\n\nThe world was chosen against specific alternatives and those refusals are load-bearing: the hero-metric dashboard, the pastel glyph chip, the drop-shadowed card on a grey ground, and the printed load-sheet vocabulary of tracked uppercase stencil labels all got built at some point and all got removed. The landing page is the clearest statement of the result — it shows a connection dot, a breathing lens, and one sentence, and it starts the work with a drag instead of reporting on it.",
+    "keyCharacteristics": [
+      "One white ground everywhere, camera tabs included; no dark chrome, no warm paper.",
+      "A single accent (signal orange) plus a single warn amber; nothing else is coloured.",
+      "Hairlines and tonal fills instead of shadows — zero drop shadows in the app.",
+      "Sentence case, SF throughout, no tracked caps anywhere.",
+      "Figures are always tabular; monospace is reserved for measurements.",
+      "Motion is ambient and gestural, and every bit of it is gated on Reduce Motion."
+    ],
+    "rules": [
+      { "name": "The One Signal Rule", "body": "Orange means \"act here\" or \"this is the number\". If two orange things are visible at once on a surface, one of them is decoration and should be ink.", "section": "colors" },
+      { "name": "The Opacity-Not-Grey Rule", "body": "There is no grey token. Every quieter tone is ink at a lower opacity, so a single hue holds the whole neutral ramp and nothing drifts blue or warm against the white.", "section": "colors" },
+      { "name": "The Colour-Is-Never-Alone Rule", "body": "Over capacity is amber and says so in words. A failed request is amber and a triangle and a sentence.", "section": "colors" },
+      { "name": "The Tabular Figures Rule", "body": "Any run of text containing a number uses .monospacedDigit() at minimum. Numbers must not reflow their neighbours when they change.", "section": "typography" },
+      { "name": "The Mono-Means-Measured Rule", "body": "Full monospace is reserved for dimensions, addresses and layer indices. It is never applied for texture; a monospaced sentence that is not a measurement is a debug HUD.", "section": "typography" },
+      { "name": "The Sentence Case Rule", "body": "No tracked caps and no uppercase labels anywhere in the app. Titles, buttons, section headers and captions are all sentence case.", "section": "typography" },
+      { "name": "The Detail-Lives-In-Sheets Rule", "body": "The always-on surface carries one status line and one primary action. Everything else opens in a sheet or a pushed screen.", "section": "layout" },
+      { "name": "The No-Shadow Rule", "body": "A surface separates from its ground by a hairline and a tonal step, never by a cast shadow. If a card needs a shadow to be legible, the ground is wrong.", "section": "elevation" },
+      { "name": "The Light-Chrome-Over-Camera Rule", "body": "Chrome above a live camera feed stays on the app's white at 92-94% opacity with .environment(\\.colorScheme, .light) forced. The camera tab is not a dark tab.", "section": "elevation" },
+      { "name": "The Continuous-Corner Rule", "body": "Every RoundedRectangle uses style: .continuous. A circular-arc corner reads harder than this world allows.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do put every new surface on paper, including anything drawn over the camera, and force light colour scheme on chrome that floats over a live feed.",
+      "Do separate surfaces with a 0.5pt hairline at 10% ink and a card fill.",
+      "Do use 22pt continuous corners for full-width cards and capsules for controls.",
+      "Do spend the accent on the one thing the user is about to touch or the one number they came to read.",
+      "Do set every number with .monospacedDigit(), and every measurement in full monospace.",
+      "Do give every swipe action a tap equivalent and a named VoiceOver action, and label every icon-only control.",
+      "Do hide decorative glyphs from VoiceOver and let the adjacent text carry the meaning.",
+      "Do gate every animation on accessibilityReduceMotion.",
+      "Do say the state in words as well as in colour."
+    ],
+    "donts": [
+      "Don't use pastel tinted glyph chips for item categories.",
+      "Don't build a hero-metric card - a giant percentage over a small label.",
+      "Don't put drop-shadowed cards on a grey ground.",
+      "Don't use gradient text, ever.",
+      "Don't introduce dark chrome over the camera.",
+      "Don't set tracked uppercase stencil labels.",
+      "Don't add decorative dot fields, ray bursts, or drifting radial arrangements of content.",
+      "Don't add a second accent hue.",
+      "Don't make a drag the only route to an action."
+    ]
+  }
+}

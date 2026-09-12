@@ -50,17 +50,28 @@ struct HomeScreen: View {
             .padding(.bottom, 18)
             // Everything but the lens recedes as the pull builds, so the lens is
             // plainly the thing you are moving.
-            .opacity(1 - entry * 0.9)
+            .opacity(1 - entry * 0.95)
+            .scaleEffect(1 - entry * 0.06)
+            .blur(radius: entry * 3)
 
             // The lens, grown past the screen edges: what the eye follows from this
             // page into the next one.
-            Circle()
-                .fill(Sheet.accent)
-                .frame(width: 150, height: 150)
-                .scaleEffect(1 + entry * 9)
-                .opacity(entry > 0 ? 1 : 0)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
+            ZStack {
+                Circle()
+                    .fill(Sheet.accent)
+                    .frame(width: 150, height: 150)
+                    .scaleEffect(1 + entry * 9)
+                // The lens itself grows and thins out as the colour swallows the page,
+                // so what you followed on the way in is still the thing you arrive at.
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 46, weight: .light))
+                    .foregroundStyle(.white)
+                    .scaleEffect(1 + entry * 5.5)
+                    .opacity(entry > 0 ? (1 - entry * entry) : 0)
+            }
+            .opacity(entry > 0 ? 1 : 0)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
         }
         .contentShape(Rectangle())
         .gesture(
@@ -88,7 +99,7 @@ struct HomeScreen: View {
         .task {
             await check()
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) { breathing = true }
+            withAnimation(.easeInOut(duration: 1.9).repeatForever(autoreverses: true)) { breathing = true }
         }
         .onAppear {
             // Coming back from a tab: clear the expansion so the lens is a lens again.
@@ -109,14 +120,16 @@ struct HomeScreen: View {
             entering = false
             return
         }
-        withAnimation(.easeIn(duration: 0.3)) {
+        withAnimation(.easeInOut(duration: 0.62)) {
             entry = 1
             drag = .zero
         }
         Task {
-            try? await Task.sleep(for: .milliseconds(280))
+            // Hand over just before the lens finishes filling the screen, so the tab
+            // underneath is already there when the colour clears.
+            try? await Task.sleep(for: .milliseconds(560))
             go(tab)
-            try? await Task.sleep(for: .milliseconds(120))
+            try? await Task.sleep(for: .milliseconds(200))
             entry = 0
             entering = false
         }
@@ -155,22 +168,23 @@ struct HomeScreen: View {
                 Circle()
                     .fill(Sheet.accent.opacity(0.06))
                     .frame(width: 190, height: 190)
-                    .scaleEffect((breathing ? 1.06 : 0.94) + 0.10 * pull)
+                    .scaleEffect((breathing ? 1.10 : 0.90) + 0.12 * pull)
                 Circle()
                     .fill(Sheet.accent.opacity(0.10 + 0.26 * pull))
                     .frame(width: 138, height: 138)
-                    .scaleEffect((breathing ? 0.97 : 1.04) + 0.14 * pull)
+                    .scaleEffect((breathing ? 0.94 : 1.07) + 0.16 * pull)
                 Image(systemName: "viewfinder")
                     .font(.system(size: 46, weight: .light))
                     .foregroundStyle(Sheet.accent)
                     .opacity(0.6 + 0.4 * pull)
-                    .rotationEffect(.degrees(pull * 90))
+                    .rotationEffect(.degrees(pull * 90 + (breathing ? 3 : -3)))
+                    .scaleEffect(breathing ? 1.03 : 0.98)
             }
             .overlay(alignment: .top) {
                 Image(systemName: "chevron.up")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Sheet.accent.opacity(0.3 + 0.7 * upProgress))
-                    .offset(y: -34 - 10 * upProgress)
+                    .offset(y: -34 - 10 * upProgress + (breathing ? -5 : 3))
                     .opacity(1 - leftProgress)
             }
 
@@ -204,11 +218,11 @@ struct HomeScreen: View {
                 let w = geo.size.width, h = geo.size.height
                 ZStack {
                     wash(tint: Sheet.accent.opacity(0.16), diameter: w * 1.25)
-                        .position(x: w * (0.5 + 0.16 * cos(t / 11)),
-                                  y: h * (0.40 + 0.10 * sin(t / 9)))
+                        .position(x: w * (0.5 + 0.26 * cos(t / 7)),
+                                  y: h * (0.40 + 0.16 * sin(t / 5.5)))
                     wash(tint: Sheet.accent.opacity(0.09), diameter: w * 1.05)
-                        .position(x: w * (0.5 - 0.20 * sin(t / 14)),
-                                  y: h * (0.58 + 0.12 * cos(t / 12)))
+                        .position(x: w * (0.5 - 0.30 * sin(t / 9)),
+                                  y: h * (0.58 + 0.19 * cos(t / 7.5)))
                 }
                 .blur(radius: 50)
             }

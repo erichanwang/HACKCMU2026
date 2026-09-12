@@ -11,6 +11,15 @@ logger = logging.getLogger("suitcase")
 _jwks_cache = {"keys": None, "fetched_at": 0.0}
 
 
+def open_mode() -> bool:
+    """No Auth0 tenant configured, so there is nothing to verify a token against."""
+    return not (os.environ.get("AUTH0_DOMAIN") and os.environ.get("AUTH0_AUDIENCE"))
+
+
+if open_mode():
+    logger.warning("auth: open mode, single local user (AUTH0_DOMAIN/AUTH0_AUDIENCE not set)")
+
+
 def _jwks() -> list[dict]:
     """Auth0 signing keys, cached for an hour (they rotate rarely).
 
@@ -41,11 +50,6 @@ def verify_token(token: str) -> dict:
         raise jwt.JWTError("signing key not found in JWKS")
     domain = os.environ["AUTH0_DOMAIN"]
     return jwt.decode(token, key, algorithms=["RS256"], audience=os.environ["AUTH0_AUDIENCE"], issuer=f"https://{domain}/")
-
-
-def open_mode() -> bool:
-    """No Auth0 tenant configured, so there is nothing to verify a token against."""
-    return not (os.environ.get("AUTH0_DOMAIN") and os.environ.get("AUTH0_AUDIENCE"))
 
 
 def require_auth(authorization: str = Header(None)) -> dict:

@@ -1,9 +1,35 @@
-# PRD — AR Packing Assistant
+# HackCMU 2026 — Travel Track PRD: AR Packing Assistant
+
+## Product vision and track focus
+
+Help travelers fit their belongings into a suitcase and follow a practical packing plan before a trip. The app scans the bag and items, builds a metric 3D digital twin, computes a feasible arrangement, and guides physical placement with a 3D preview and AR.
+
+**scan suitcase and travel items → reconstruct → pack → preview → follow AR guidance**
+
+The primary user is a traveler packing carry-on luggage or working within a checked-bag limit. Students traveling to or from campus and travelers carrying fragile camera equipment are secondary users. Professional logistics and warehouse use are outside this hackathon's scope.
+
+This document combines the spatial-packing demo requirements and the traveler-focused product requirements. It is the general product reference; `MVP.md` describes the demo implementation in more detail.
+
+## Hackathon scope and release decisions
+
+- Demo one rectangular suitcase or travel container with 4–6 rigid travel items. Start with synthetic cuboids, then replace them with measured oriented bounding boxes (OBBs).
+- Capture with Swift and ARKit on a LiDAR-capable iPhone/iPad. Manual dimensions and corrections provide a fallback. Keep metric scale and a stable container anchor throughout the flow.
+- Show a rotatable digital twin, compute collision-free placements, validate containment and support, animate the packing result, and guide at least one real placement with an AR ghost and manual **Placed** confirmation.
+- Include a labeled layer view as a practical alternative to holding a phone during packing. AR is part of the HackCMU demo even though the longer-term validation roadmap below stages it after capture.
+- Use a configurable measurement margin (initially 3–5%, to be calibrated), honor allowed orientations, and clearly report items that do not fit. Do not present a rejected or incomplete layout as a complete solution.
+- The demo uses rigid objects and a rectangular interior. Voxel interiors, soft-item compression, nesting, multiple compartments, and production libraries are later work. No cloth simulation is required.
+- Python/NumPy with optional PyBullet/Open3D can support prototype solving and physics validation. Fully offline, on-device solving is a later product target, not a claim about the demo.
+- Weight, fragility, balance, and access priority motivate the travel product; implement them after the core demo unless capacity remains. Airline-rule lookup and packing-list generation are future scope.
+- The requirement priorities and v0–v3 gates below describe the broader product roadmap. They do not expand the hackathon must-haves above. The ten-participant experiment is a product-validation gate, not a prerequisite to building the hackathon demo.
+
+## Hackathon success criteria
+
+A reliable demo completes within a few minutes: capture a suitcase and several travel items, inspect their geometry, generate a visibly valid arrangement, animate it, and physically place at least one item using aligned AR guidance. Global mathematical optimality is not required. Longer-term performance and utilization targets below are goals to validate, not measured results.
 
 | | |
 |---|---|
 | **Status** | Draft |
-| **Owner** | David Chung |
+| **Original travel PRD owner** | David Chung |
 | **Platform** | iOS (iPhone Pro with depth sensor), iOS 17+ |
 | **Target** | v0 validation build, then v1 public beta |
 
@@ -11,7 +37,7 @@
 
 ## 1. Problem
 
-Packing a suitcase is a spatial optimization problem people solve badly, by hand, under time pressure. The typical traveler achieves roughly 60–70% volume utilization, repacks two or three times, and still arrives at the airport unsure whether the bag is over the weight limit. Nothing existing solves this — packing cubes reorganize the problem without solving it, and packing-list apps handle *what* to bring, not *how it fits*.
+Packing a suitcase is a spatial optimization problem people solve badly, by hand, under time pressure. Travelers may repeatedly rearrange belongings and remain unsure whether everything fits or whether their bag is within a weight limit. The product focuses on physical fit and placement; baseline utilization, time savings, and competing solutions still need validation.
 
 The same problem in professional contexts (equipment cases, field kits, fulfillment cartons) is solved manually by experienced people and costs real money when done poorly.
 
@@ -122,8 +148,8 @@ The same problem in professional contexts (equipment cases, field kits, fulfillm
 
 ## 6. Key design decisions
 
-- **OBBs, not meshes.** For roughly 95% of objects, an oriented bounding box plus a class label is sufficient input to the solver. Full meshes are reserved for high-value irregular items. This is what makes capture fast enough to be worth doing.
-- **Voxel container, not a prism.** Wheel wells, handle rails, and the lid compartment are 10–15% of usable volume and all of the awkward corners.
+- **OBBs, not meshes.** Use an oriented bounding box plus a class label as the initial solver representation; validate its adequacy on real travel items. Full meshes are reserved for high-value irregular items. This is what makes capture fast enough to be worth doing.
+- **Voxel container, not a prism.** Wheel wells, handle rails, and lid compartments require richer geometry in the broader product; the hackathon begins with a rectangular interior.
 - **Tolerance inflation is mandatory, not optional.** One infeasible plan permanently ends the user relationship. Bias toward roomy.
 - **Soft items solved last.** They're the only class that adapts, so they absorb the error left by everything else.
 - **The 2D layer view is the product; AR is the demo.** Hands are busy while packing. Both ship together, and the layer view is never gated behind AR.
@@ -140,7 +166,7 @@ The same problem in professional contexts (equipment cases, field kits, fulfillm
 
 ## 8. Validation plan
 
-The v0 gate runs before any app code:
+For the broader product, run the v0 validation gate before investing in production app development:
 
 1. Recruit ten participants with their own suitcases and a fixed item set.
 2. Have each pack by hand, no guidance. Record time and measure achieved volume utilization.
@@ -157,3 +183,222 @@ Ship criteria: median utilization gain ≥ 12 points, zero infeasible plans acro
 - Does depth-diff auto-advance work reliably enough to ship, or does it break trust when it misfires?
 - Does the item library survive contact with reality, or do people's possessions change faster than the library pays off?
 - Which vertical (foam layout, field kits, carton selection) should get a dedicated build first, and does it need a different interface entirely?
+
+## Hackathon capture, viewer, and execution requirements
+
+Capture container dimensions, pose, origin, orientation, and optional mesh; capture each object's stable ID, dimensions, observed position, and quaternion rotation. Optional mesh URLs must not be required by the solver. The container defines the allowed packing volume.
+
+The viewer shows the container, objects, labels, observed transforms, and packed transforms. Support orbit, zoom, pan, and selection; allow switching between scan geometry and packing proxies when both exist. Animate each object into its planned pose inside a transparent container.
+
+The solver sorts larger items first, enumerates allowed orientations and candidate points, rejects intersections, and scores remaining space, occupied height, and fragmented free space. Return an ordered placement list and explicit leftovers if a full arrangement is infeasible.
+
+Physics validation checks collisions, container bounds, gravity, support, and gross instability before a layout is accepted. Begin with synthetic cuboids so capture, solver, validation, and rendering can develop independently.
+
+For AR, anchor the target transforms to the real suitcase, highlight the current item, show its orientation and short movement instructions, dim placed items, and hide future items. The user confirms placement manually. Automatic pose verification, scan-confidence overlays with rescan prompts, mesh-aware refinement, and choosing among multiple containers are stretch work.
+
+## System Architecture
+
+```text
+          iPhone / iPad
+                │
+         RGB + LiDAR + ARKit
+                │
+                ▼
+       Spatial Reconstruction
+                │
+                ▼
+         Shared Scene Format
+                │
+        ┌───────┴─────────┐
+        │                 │
+        ▼                 ▼
+ Packing Algorithm    Physics Engine
+        │                 │
+        └───────┬─────────┘
+                │
+                ▼
+           Placements
+                │
+        ┌───────┴─────────┐
+        ▼                 ▼
+   3D Simulation       AR Guide
+```
+
+## Team Ownership
+
+### Person 1 — iOS / LiDAR / Capture
+
+Responsibilities:
+- ARKit configuration
+- LiDAR scene reconstruction
+- object/container scanning
+- camera pose
+- geometry extraction
+- scene export
+
+Required output:
+- container geometry
+- object geometry
+- world transform
+
+### Person 2 — 3D Reconstruction / Rendering / AR
+
+Responsibilities:
+- interactive 3D scene
+- mesh rendering
+- transparent container
+- packing animation
+- ghost placements
+- AR visualization
+
+Consumes:
+- objects
+- container
+- placements
+
+This subsystem should first work with hard-coded objects.
+
+### Person 3 — Packing Algorithm
+
+Responsibilities:
+
+```text
+solve(container, objects) → placements
+```
+
+Initial implementation:
+- sort objects largest first
+- enumerate useful orientations
+- generate candidate placement points
+- reject intersections
+- score candidate layouts
+
+Future:
+- convex-hull packing
+- local search
+- simulated annealing / heuristic refinement
+- fragmented-space penalties
+
+### Person 4 — Physics / Validation
+
+Responsibilities:
+
+```text
+validate(scene, placements)
+```
+
+Validation:
+- collision
+- container bounds
+- gravity
+- support
+- stability
+
+Suggested stack:
+- Python
+- NumPy
+- Open3D
+- PyBullet
+
+The physics module should initially operate entirely on synthetic cuboids so development is independent of LiDAR progress.
+
+## Shared Data Contract
+
+### Units
+
+**Meters only.**
+
+### Coordinate system
+
+All components must share one documented coordinate convention.
+
+Example:
+
+```text
+X = right
+Y = up
+Z = forward
+```
+
+### Rotation
+
+Use quaternions:
+
+```text
+[x, y, z, w]
+```
+
+### IDs
+
+Every object must maintain the same unique ID across:
+- scan
+- solver
+- physics
+- renderer
+- AR
+
+## Integration Strategy
+
+### Stage 1: mocked scene
+
+Build:
+- fake container
+- five fake cuboids
+
+Verify:
+
+```text
+solver
+→ physics
+→ renderer
+```
+
+### Stage 2: LiDAR geometry
+
+Swap synthetic geometry for real measured OBBs.
+
+### Stage 3: AR
+
+Feed final transforms into the AR placement system.
+
+### Stage 4: refinement
+
+Only after end-to-end integration:
+- mesh-aware collision
+- improved solver
+- automatic placement checks
+- scan quality visualization
+- UI polish
+
+## Technical Principles
+
+### Decouple perception from packing
+
+The solver should not care whether dimensions came from:
+- LiDAR
+- a mock file
+- manual test data
+
+### Decouple packing from rendering
+
+The renderer should consume transforms rather than depend on solver internals.
+
+### Preserve metric geometry
+
+All components must preserve:
+- scale
+- position
+- orientation
+
+### Prefer an end-to-end demo over perfect subcomponents
+
+A complete loop with rough geometry is more valuable than perfect reconstruction with no working AR execution.
+
+## Travel-track demo script
+
+1. Show an empty suitcase beside a small set of travel items: a toiletry case, shoes, a charger case, and other rigid belongings.
+2. Explain the travel problem: knowing what to bring does not tell you how it fits.
+3. Scan the suitcase and items, then inspect the metric digital twin.
+4. Tap **Pack** and show the validated layout animate into the suitcase. Surface any leftovers explicitly.
+5. Inspect the layer view, switch to AR, and place the first item using its ghost and orientation guide.
+6. Close with the travel benefit: a packing plan the traveler can actually follow before leaving for a trip.

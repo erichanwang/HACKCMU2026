@@ -93,6 +93,31 @@ class ServerContractTests(unittest.TestCase):
         self.assertEqual(body["suitcaseId"], sc["id"])
 
     # --- (2) plan response vs packing-core/CLAUDE.md's PackingPlan contract ---------------
+    def test_nested_placement_carries_host_and_cavity(self):
+        """The solver's `nested_in` record becomes `nestedIn: {itemId, cavity}` (packing-core/CLAUDE.md);
+        a record missing its cavity box is emitted as null, never as a bare host id."""
+        import app_plan
+        sc = self.make_suitcase()
+        self.upload("bowl", sc["id"])
+        self.upload("cup", sc["id"])
+        solver = self.client.post(f"/suitcases/{sc['id']}/plan").json()["solver"]
+        by_id = {p["item_id"]: p for p in solver["placements"]}
+        self.assertEqual(set(by_id), {"bowl", "cup"})
+        host = by_id["bowl"]
+        by_id["cup"]["nested_in"] = {"item_id": "bowl", "position": host["position"], "dims": host["dims"]}
+        items = {i["id"]: i for i in self.client.get("/items", params={"suitcaseId": sc["id"]}).json()}
+        p = app_plan.to_app_plan(solver, {"_id": sc["id"], "name": "s", "dimensions": sc["dimensions"]}, items)
+        self.check_placements(p, {z["id"] for z in p["container"]["zones"]})
+        nested = {pl["itemId"]: pl["nestedIn"] for pl in p["placements"]}
+        self.assertIsNone(nested["bowl"])
+        self.assertEqual(nested["cup"]["itemId"], "bowl")
+        cav = nested["cup"]["cavity"]
+        self.assertEqual(cav["position"], {"x": host["position"][0], "y": host["position"][2], "z": host["position"][1]})
+        # without the cavity box the record is worthless to a strict consumer: null, not a bare id
+        by_id["cup"]["nested_in"] = {"item_id": "bowl"}
+        p2 = app_plan.to_app_plan(solver, {"_id": sc["id"], "name": "s", "dimensions": sc["dimensions"]}, items)
+        self.assertIsNone({pl["itemId"]: pl["nestedIn"] for pl in p2["placements"]}["cup"])
+
 
     def test_plan_matches_packing_plan_contract(self):
         sc = self.make_suitcase()
@@ -113,6 +138,9 @@ class ServerContractTests(unittest.TestCase):
             self.assertEqual(set(zone["origin"]), {"x", "y", "z"})
             self.assertEqual(set(zone["size"]), {"x", "y", "z"})
 
+        self.check_placements(p, zone_ids)
+
+    def check_placements(self, p: dict, zone_ids: set) -> None:
         steps = sorted(pl["step"] for pl in p["placements"])
         self.assertEqual(steps, list(range(1, len(p["placements"]) + 1)))
         for pl in p["placements"]:
@@ -125,12 +153,13 @@ class ServerContractTests(unittest.TestCase):
             # nesting is advisory but must never dangle: a host must be a placement in this plan,
             # and a cavity box only makes sense with a host
             self.assertIn("nestedIn", pl)
-            if pl["nestedIn"] is not None:
-                self.assertIn(pl["nestedIn"], {q["itemId"] for q in p["placements"]})
-                self.assertNotEqual(pl["nestedIn"], pl["itemId"])
-            if pl.get("cavity") is not None:
-                self.assertIsNotNone(pl["nestedIn"])
-                self.assertEqual(set(pl["cavity"]), {"position", "size"})
+            if pl["nestedIn"] is not None:  # {"itemId": host, "cavity": {position, size}} per packing-core/CLAUDE.md
+                self.assertEqual(set(pl["nestedIn"]), {"itemId", "cavity"})
+                self.assertIn(pl["nestedIn"]["itemId"], {q["itemId"] for q in p["placements"]})
+                self.assertNotEqual(pl["nestedIn"]["itemId"], pl["itemId"])
+                self.assertEqual(set(pl["nestedIn"]["cavity"]), {"position", "size"})
+                for box in pl["nestedIn"]["cavity"].values():
+                    self.assertEqual(set(box), {"x", "y", "z"})
 
     # --- (3) re-uploading the same item id replaces, not duplicates -----------------------
 

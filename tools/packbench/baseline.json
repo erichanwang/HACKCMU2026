@@ -2,14 +2,14 @@
   "aggregate": {
     "errors": 0,
     "items_given": 170,
-    "items_packed": 141,
-    "mean_com_offset": 0.0206040432355557,
-    "mean_utilization": 0.6107136263361549,
-    "pack_rate": 0.8294117647058824,
-    "physics_valid": 5,
+    "items_packed": 139,
+    "mean_com_offset": 0.02971425388177876,
+    "mean_utilization": 0.5813886005519803,
+    "pack_rate": 0.8176470588235294,
+    "physics_valid": 7,
     "scenarios": 7,
-    "seconds": 414.6105702879868,
-    "violations": 2
+    "seconds": 153.5755309619708,
+    "violations": 0
   },
   "config": {
     "candidates": [
@@ -25,6 +25,20 @@
     "iters": 40,
     "time_budget_s": 0.0
   },
+  "run": {
+    "commit": "252a528dedca9d6956f2d2d9510e19e08ed4f714",
+    "dirty": false,
+    "flags": {
+      "fixtures": "tools/packbench/fixtures",
+      "iters": 40,
+      "quick": false,
+      "seed": "0",
+      "strategy": "both",
+      "time": null
+    },
+    "started_at": "2026-09-12T10:19:00-04:00",
+    "wall_clock_s": 153.67
+  },
   "scenarios": [
     {
       "best": {
@@ -32,7 +46,7 @@
         "items_given": 5,
         "items_packed": 5,
         "physics_valid": true,
-        "seconds": 2.7808975459920475,
+        "seconds": 0.9808146629948169,
         "seed": 0,
         "strategy": "optimized",
         "violations": 0,
@@ -44,7 +58,7 @@
           "items_given": 5,
           "items_packed": 5,
           "physics_valid": true,
-          "seconds": 2.7808975459920475,
+          "seconds": 0.9808146629948169,
           "seed": 0,
           "strategy": "optimized",
           "violations": 0,
@@ -55,7 +69,7 @@
           "items_given": 5,
           "items_packed": 5,
           "physics_valid": true,
-          "seconds": 0.06183274899376556,
+          "seconds": 0.030554862998542376,
           "seed": null,
           "strategy": "naive",
           "violations": 0,
@@ -69,37 +83,37 @@
     },
     {
       "best": {
-        "com_lateral_offset": 0.027507104771474618,
+        "com_lateral_offset": 0.032753020653248865,
         "items_given": 21,
         "items_packed": 19,
-        "physics_valid": false,
-        "seconds": 29.407039237004938,
+        "physics_valid": true,
+        "seconds": 10.194607385987183,
         "seed": 0,
         "strategy": "optimized",
-        "violations": 1,
+        "violations": 0,
         "volume_utilization": 0.42712791341329925
       },
       "candidates": [
         {
-          "com_lateral_offset": 0.027507104771474618,
+          "com_lateral_offset": 0.032753020653248865,
           "items_given": 21,
           "items_packed": 19,
-          "physics_valid": false,
-          "seconds": 29.407039237004938,
+          "physics_valid": true,
+          "seconds": 10.194607385987183,
           "seed": 0,
           "strategy": "optimized",
-          "violations": 1,
+          "violations": 0,
           "volume_utilization": 0.42712791341329925
         },
         {
           "com_lateral_offset": 0.04802391990031698,
           "items_given": 21,
           "items_packed": 19,
-          "physics_valid": false,
-          "seconds": 0.2536726929974975,
+          "physics_valid": true,
+          "seconds": 0.08273520899820141,
           "seed": null,
           "strategy": "naive",
-          "violations": 1,
+          "violations": 0,
           "volume_utilization": 0.42712791341329925
         }
       ],
@@ -110,37 +124,37 @@
     },
     {
       "best": {
-        "com_lateral_offset": 0.02479233227746801,
+        "com_lateral_offset": 0.03489870257121449,
         "items_given": 41,
-        "items_packed": 27,
-        "physics_valid": false,
-        "seconds": 191.6485211780091,
+        "items_packed": 25,
+        "physics_valid": true,
+        "seconds": 84.22875515899796,
         "seed": 0,
         "strategy": "optimized",
-        "violations": 1,
-        "volume_utilization": 0.68757528766325
+        "violations": 0,
+        "volume_utilization": 0.48585417772296197
       },
       "candidates": [
         {
-          "com_lateral_offset": 0.02479233227746801,
+          "com_lateral_offset": 0.03489870257121449,
           "items_given": 41,
-          "items_packed": 27,
-          "physics_valid": false,
-          "seconds": 191.6485211780091,
+          "items_packed": 25,
+          "physics_valid": true,
+          "seconds": 84.22875515899796,
           "seed": 0,
           "strategy": "optimized",
-          "violations": 1,
-          "volume_utilization": 0.68757528766325
+          "violations": 0,
+          "volume_utilization": 0.48585417772296197
         },
         {
           "com_lateral_offset": 0.028463749519696845,
           "items_given": 41,
           "items_packed": 23,
-          "physics_valid": false,
-          "seconds": 2.7246838089922676,
+          "physics_valid": true,
+          "seconds": 1.0165327370050363,
           "seed": null,
           "strategy": "naive",
-          "violations": 5,
+          "violations": 0,
           "volume_utilization": 0.4677057679135932
         }
       ],
@@ -155,7 +169,7 @@
         "items_given": 14,
         "items_packed": 13,
         "physics_valid": true,
-        "seconds": 12.517464225995354,
+        "seconds": 6.11006407700188,
         "seed": 0,
         "strategy": "optimized",
         "violations": 0,
@@ -167,7 +181,7 @@
           "items_given": 14,
           "items_packed": 13,
           "physics_valid": true,
-          "seconds": 12.517464225995354,
+          "seconds": 6.11006407700188,
           "seed": 0,
           "strategy": "optimized",
           "violations": 0,
@@ -177,11 +191,11 @@
           "com_lateral_offset": 0.0077939825693849815,
           "items_given": 14,
           "items_packed": 11,
-          "physics_valid": false,
-          "seconds": 0.5790758880029898,
+          "physics_valid": true,
+          "seconds": 0.20122171498951502,
           "seed": null,
           "strategy": "naive",
-          "violations": 3,
+          "violations": 0,
           "volume_utilization": 0.35606552459526775
         }
       ],
@@ -196,7 +210,7 @@
         "items_given": 21,
         "items_packed": 18,
         "physics_valid": true,
-        "seconds": 36.031514993999735,
+        "seconds": 13.385870357989916,
         "seed": 0,
         "strategy": "optimized",
         "violations": 0,
@@ -208,7 +222,7 @@
           "items_given": 21,
           "items_packed": 18,
           "physics_valid": true,
-          "seconds": 36.031514993999735,
+          "seconds": 13.385870357989916,
           "seed": 0,
           "strategy": "optimized",
           "violations": 0,
@@ -219,7 +233,7 @@
           "items_given": 21,
           "items_packed": 16,
           "physics_valid": true,
-          "seconds": 0.8002610870025819,
+          "seconds": 0.17462124000303447,
           "seed": null,
           "strategy": "naive",
           "violations": 0,
@@ -233,34 +247,34 @@
     },
     {
       "best": {
-        "com_lateral_offset": 0.02839934945241931,
+        "com_lateral_offset": 0.024899275156970248,
         "items_given": 42,
         "items_packed": 33,
         "physics_valid": true,
-        "seconds": 119.5223231150012,
+        "seconds": 31.570482983006514,
         "seed": 0,
         "strategy": "optimized",
         "violations": 0,
-        "volume_utilization": 0.7370156622297034
+        "volume_utilization": 0.7334615916807697
       },
       "candidates": [
         {
-          "com_lateral_offset": 0.02839934945241931,
+          "com_lateral_offset": 0.024899275156970248,
           "items_given": 42,
           "items_packed": 33,
           "physics_valid": true,
-          "seconds": 119.5223231150012,
+          "seconds": 31.570482983006514,
           "seed": 0,
           "strategy": "optimized",
           "violations": 0,
-          "volume_utilization": 0.7370156622297034
+          "volume_utilization": 0.7334615916807697
         },
         {
           "com_lateral_offset": 0.016339452019626645,
           "items_given": 42,
           "items_packed": 32,
           "physics_valid": true,
-          "seconds": 2.3601626910094637,
+          "seconds": 0.5071085109957494,
           "seed": null,
           "strategy": "naive",
           "violations": 0,
@@ -274,11 +288,11 @@
     },
     {
       "best": {
-        "com_lateral_offset": 0.003767367665780703,
+        "com_lateral_offset": 0.05568663030927048,
         "items_given": 26,
         "items_packed": 26,
         "physics_valid": true,
-        "seconds": 15.729185731994221,
+        "seconds": 5.04877970200323,
         "seed": 0,
         "strategy": "optimized",
         "violations": 0,
@@ -286,11 +300,11 @@
       },
       "candidates": [
         {
-          "com_lateral_offset": 0.003767367665780703,
+          "com_lateral_offset": 0.05568663030927048,
           "items_given": 26,
           "items_packed": 26,
           "physics_valid": true,
-          "seconds": 15.729185731994221,
+          "seconds": 5.04877970200323,
           "seed": 0,
           "strategy": "optimized",
           "violations": 0,
@@ -301,7 +315,7 @@
           "items_given": 26,
           "items_packed": 26,
           "physics_valid": true,
-          "seconds": 0.1939353429916082,
+          "seconds": 0.04338235899922438,
           "seed": null,
           "strategy": "naive",
           "violations": 0,

@@ -25,6 +25,7 @@ PROMPT = (
     "mass = your best estimate in kg. keepUpright = true only if it must stay this side up (liquids, open containers)."
 )
 UNKNOWN = {"label": "unknown", "description": "", "rigidity": "rigid", "compressibility": 1.0, "mass": 0.0, "keepUpright": False}
+MAX_IMAGE_BYTES = 10 * 1024 * 1024  # a LiDAR scan's photo has no business being bigger than this
 
 
 def compressibility(value, rigidity: str) -> float:
@@ -166,8 +167,11 @@ def create_item(item: str = Form(...), image: UploadFile = File(...)):
     item_id, suitcase_id = doc["id"], doc["suitcaseId"]
     if db.suitcases.find_one({"_id": suitcase_id}) is None:
         raise HTTPException(404, "no such suitcase")
+    jpeg = image.file.read(MAX_IMAGE_BYTES + 1)
+    if len(jpeg) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, f"image must be at most {MAX_IMAGE_BYTES} bytes")
     try:
-        guess = detect(image.file.read())
+        guess = detect(jpeg)
     except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
         # x.ai down, rate-limited or returning garbage must not lose the scan; the app's editor fixes the label.
         logging.warning("grok labelling failed, item %s saved as unknown: %s", item_id, exc)

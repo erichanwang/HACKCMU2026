@@ -122,7 +122,7 @@ for sc in scenarios {
     } else {
         all = base
     }
-    let gotBox = fitBox(points: all, planeY: planeY, padding: 0)!
+    let gotBox = fitBox(points: all, planeY: planeY, padding: 0, trimAboveRim: true)!
     let trueDims = [trueBox.width, trueBox.depth].sorted() + [trueBox.height]
     let gotDims = [gotBox.width, gotBox.depth].sorted() + [gotBox.height]
     let errs = zip(gotDims, trueDims).map { $0 - $1 }
@@ -138,6 +138,28 @@ for sc in scenarios {
 
 print("")
 if failures.isEmpty {
+    // An ITEM has no lid, and must never be trimmed: rimHeight picks the densest height band,
+    // so an item whose top face was not densely captured (occlusion, far side never seen) has
+    // no spike at its top, every band ties, and the lowest wins -- a 22 cm bottle fitted as a
+    // 1.5 cm disc. This is why trimAboveRim is opt-in and ScanView passes it only in .suitcase.
+    var wallOnly: [SIMD3<Float>] = []
+    for i in 0..<48 {
+        let t = Float(i) / 48 * 2 * .pi
+        for k in 0...120 {
+            wallOnly.append(SIMD3(0.04 * cos(t), planeY + Float(k) / 120 * 0.22, 0.04 * sin(t)))
+        }
+    }
+    let itemBox = fitBox(points: wallOnly, planeY: planeY, padding: 0)!
+    let trimmedBox = fitBox(points: wallOnly, planeY: planeY, padding: 0, trimAboveRim: true)!
+    print(String(format: "%-42@ true 0.220 m  item %.3f m  trimmed %.3f m",
+                 "occluded-top item (never trim an item)", itemBox.height, trimmedBox.height))
+    guard abs(itemBox.height - 0.22) < 0.015 else {
+        print("FAIL: an item scan was truncated to \(itemBox.height) m"); exit(1)
+    }
+    guard trimmedBox.height < 0.05 else {
+        print("FAIL: trimAboveRim no longer truncates, so this regression is no longer pinned"); exit(1)
+    }
+
     print("lid segmentation: fitBox recovers the closed-lid interior within tolerance on every scenario -- ok")
 } else {
     print("\(failures.count) check(s) FAILED")

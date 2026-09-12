@@ -140,7 +140,9 @@ struct ScanView: UIViewRepresentable {
                         pts += densify(a, b, c, spacing: shapeCellMeters / 2).filter { $0.y - planeY > minHeightMeters }
                     }
                     let cluster = connectedCluster(pts, seed: seed, cell: clusterCellMeters)
-                    guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters) else {
+                    // Only a bag has a lid to trim away; trimming an item truncates it (Geometry.swift).
+                    guard let box = fitBox(points: cluster, planeY: planeY, padding: paddingMeters,
+                                           trimAboveRim: mode == .suitcase) else {
                         return (pts.count, cluster, nil, [])
                     }
                     // Suitcase mode never looks at the heightmap, so don't build one.

@@ -373,7 +373,7 @@ func runScan(_ items: [ScanIn]) -> [ScanOut] {
 
 func runTransform(_ t: TransformIn) -> TransformOut {
     let pts = t.suitcasePoints.map { SIMD3<Float>($0[0], $0[1], $0[2]) }
-    guard let outer = fitBox(points: pts, planeY: t.planeY, padding: 0) else {
+    guard let outer = fitBox(points: pts, planeY: t.planeY, padding: 0, trimAboveRim: true) else {
         FileHandle.standardError.write("fitBox failed on suitcase points\n".data(using: .utf8)!)
         exit(1)
     }

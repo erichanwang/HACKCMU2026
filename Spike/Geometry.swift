@@ -113,11 +113,20 @@ func rimHeight(_ heights: [Float]) -> Float {
 /// Fit a box to world-space points sitting on a horizontal plane at `planeY`.
 /// nil when there is no 2D footprint to fit (see `minAreaRect`), so the tap reports
 /// "nothing above the table here" rather than shipping a degenerate item.
-func fitBox(points: [SIMD3<Float>], planeY: Float, padding: Float) -> BoxFit? {
+/// `trimAboveRim` drops everything above the rim -- an open suitcase lid hinged in frame,
+/// rather than the cavity itself. **Suitcase scans only.** An item has no lid, and the trim is
+/// actively dangerous there: `rimHeight` picks the densest height band, so an item whose top
+/// face was not densely captured (occlusion, or the far side never seen -- both of which
+/// `scripts/ar_sim.py` models) has no density spike at its top, every band ties, and the lowest
+/// one wins. A 22 cm bottle then fits as a 1.5 cm disc and packs as a coaster. See
+/// tests/swift/lid for both directions.
+func fitBox(points: [SIMD3<Float>], planeY: Float, padding: Float, trimAboveRim: Bool = false) -> BoxFit? {
     guard !points.isEmpty else { return nil }
-    // Drop anything above the rim -- an open suitcase lid hinged in frame, not the cavity itself.
-    let rim = rimHeight(points.map { $0.y - planeY })
-    let points = points.filter { $0.y - planeY <= rim }
+    var points = points
+    if trimAboveRim {
+        let rim = rimHeight(points.map { $0.y - planeY })
+        points = points.filter { $0.y - planeY <= rim }
+    }
     let flat = points.map { SIMD2<Float>($0.x, $0.z) }
     guard let r = minAreaRect(flat) else { return nil }
     // The hull only picks the rectangle's axis — jitter barely turns it. The extents come from

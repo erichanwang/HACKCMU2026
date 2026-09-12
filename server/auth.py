@@ -32,8 +32,15 @@ def verify_token(token: str) -> dict:
     return jwt.decode(token, key, algorithms=["RS256"], audience=os.environ["AUTH0_AUDIENCE"], issuer=f"https://{domain}/")
 
 
+def open_mode() -> bool:
+    """No Auth0 tenant configured, so there is nothing to verify a token against."""
+    return not (os.environ.get("AUTH0_DOMAIN") and os.environ.get("AUTH0_AUDIENCE"))
+
+
 def require_auth(authorization: str = Header(None)) -> dict:
-    """FastAPI dependency: bearer token -> verified claims, or 401."""
+    """FastAPI dependency: bearer token -> verified claims, or 401. Unconfigured -> one shared local user."""
+    if open_mode():
+        return {"sub": "local", "email": None}
     if not authorization or not authorization.startswith("Bearer "):
         logger.warning("auth rejected: missing bearer token")
         raise HTTPException(401, "missing bearer token")

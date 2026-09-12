@@ -50,7 +50,10 @@ def compressibility(value, rigidity: str) -> float:
 
 
 db = MongoClient(os.environ.get("SUITCASE_MONGODB_URI", "mongodb://localhost:27017"), serverSelectionTimeoutMS=8000)[os.environ.get("MONGO_DB", "suitcase")]
-db.client.admin.command("ping")  # fail at startup, not on the first request
+try:
+    db.client.admin.command("ping")  # fail at startup, not on the first request
+except Exception as exc:  # pymongo's ServerSelectionTimeoutError, or a bad URI
+    raise SystemExit(f"cannot reach MongoDB ({exc}); start it with `make mongo` or set SUITCASE_MONGODB_URI") from None
 
 
 @asynccontextmanager

@@ -165,10 +165,15 @@ assert c.delete(f"/suitcases/{sc['id']}").status_code == 404
 assert c.get("/suitcases").json() == [{k: v for k, v in empty.items()}], "only the untouched suitcase remains"
 assert main.db.users.find_one({"_id": "u1"})["email"] == "u1@example.com", "current_user must upsert a users doc"
 
-# --- auth: no token / wrong owner --------------------------------------------------
+# --- auth: open mode (no Auth0 tenant configured) lets the phone write with no token ------
 del main.app.dependency_overrides[auth.require_auth]  # exercise the real dependency: no Authorization header
-assert c.post("/suitcases", json={"name": "x", "dimensions": [1, 1, 1]}).status_code == 401
-assert c.delete(f"/suitcases/{empty['id']}").status_code == 401
+assert not os.environ.get("AUTH0_DOMAIN"), "run the check without an Auth0 tenant in the environment"
+r = c.post("/suitcases", json={"name": "open", "dimensions": [1, 1, 1]})
+assert r.status_code == 200 and c.delete(f"/suitcases/{r.json()['id']}").status_code == 200, r.text
+# --- auth: configured tenant, no token / wrong owner ---------------------------------------
+with patch.dict(os.environ, {"AUTH0_DOMAIN": "test-tenant.example.auth0.com", "AUTH0_AUDIENCE": "test-audience"}):
+    assert c.post("/suitcases", json={"name": "x", "dimensions": [1, 1, 1]}).status_code == 401
+    assert c.delete(f"/suitcases/{empty['id']}").status_code == 401
 main.app.dependency_overrides[auth.require_auth] = lambda: {"sub": "u1", "email": "u1@example.com"}
 
 main.app.dependency_overrides[auth.require_auth] = lambda: {"sub": "u2"}  # a different, authenticated user

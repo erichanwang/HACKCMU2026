@@ -378,6 +378,82 @@ class ServerContractTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(main.db.items.find_one({"_id": "i1"})["labelModel"], "gemini")
 
+    # --- (11) clearing and re-identifying the inventory ----------------------------------------
+
+    def test_clear_inventory_removes_items_suitcases_and_plans(self):
+        a, b = self.make_suitcase("a"), self.make_suitcase("b")
+        self.upload("i1", a["id"])
+        self.upload("i2", b["id"])
+        self.stored_plan(a["id"])
+        r = self.client.delete("/inventory")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json(), {"items": 2, "suitcases": 2})
+        self.assertEqual(self.client.get("/inventory").json(), [])
+        self.assertEqual(self.client.get("/suitcases").json(), [])
+        self.assertIsNone(main.db.plans.find_one({"_id": a["id"]}))
+
+    def test_clear_inventory_leaves_other_owners_alone(self):
+        a = self.make_suitcase("a")
+        self.upload("i1", a["id"])
+        main.db.items.insert_one({"_id": "theirs", "owner_id": "u2", "label": "not yours"})
+        main.db.suitcases.insert_one({"_id": "their-bag", "owner_id": "u2", "name": "theirs",
+                                      "dimensions": [0.5, 0.2, 0.3]})
+        self.client.delete("/inventory")
+        self.assertIsNotNone(main.db.items.find_one({"_id": "theirs"}))
+        self.assertIsNotNone(main.db.suitcases.find_one({"_id": "their-bag"}))
+
+    def test_clear_inventory_on_an_empty_account_is_not_an_error(self):
+        r = self.client.delete("/inventory")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json(), {"items": 0, "suitcases": 0})
+
+    def test_relabel_reopens_items_the_models_gave_up_on(self):
+        sc = self.make_suitcase()
+        self.upload("i1", sc["id"])
+        main.db.items.update_one({"_id": "i1"}, {"$set": {"labelStatus": "unidentified",
+                                                          "label": "unknown", "labelModel": "grok"}})
+        with patch.dict(os.environ, self.ALL_KEYS, clear=False):
+            with patch.object(main, "_grok_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_claude_detect", return_value={"label": "kettle"}), \
+                 patch.object(main, "_gemini_detect", return_value={"label": "kettle"}):
+                r = self.client.post("/inventory/relabel")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json(), {"considered": 1, "labelled": 1})
+        doc = main.db.items.find_one({"_id": "i1"})
+        self.assertEqual(doc["label"], "kettle")
+        # Re-opened against the mixture, not the single model that had given up.
+        self.assertEqual(doc["labelModel"], "both")
+
+    def test_relabel_leaves_already_named_items_alone(self):
+        sc = self.make_suitcase()
+        self.upload("i1", sc["id"])
+        self.client.patch("/items/i1", json={"label": "hiking boot"})
+        with patch.dict(os.environ, self.ALL_KEYS, clear=False):
+            with patch.object(main, "_claude_detect") as claude:
+                r = self.client.post("/inventory/relabel")
+                claude.assert_not_called()
+        self.assertEqual(r.json()["considered"], 0)
+        self.assertEqual(self.client.get("/items/i1").json()["label"], "hiking boot")
+
+    # --- (12) the hint names the move that would fix the scan ----------------------------------
+
+    def flat_grid(self, relief):
+        return [[0.0, relief], [relief, 0.0]]
+
+    def test_hint_names_a_move_for_each_kind_of_bad_scan(self):
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "c"}, clear=False):
+            self.assertIn("step back", main.identify_hint([0.9, 0.4, 0.3], self.flat_grid(0.2)))
+            self.assertIn("move closer", main.identify_hint([0.02, 0.2, 0.2], self.flat_grid(0.2)))
+            self.assertIn("lower the phone", main.identify_hint([0.2, 0.2, 0.2], self.flat_grid(0.001)))
+            self.assertIn("step left or right", main.identify_hint([0.2, 0.2, 0.2], self.flat_grid(0.02)))
+            # A scan with nothing wrong with it still gets a move, not just "try again".
+            self.assertIn("scan it again", main.identify_hint([0.2, 0.2, 0.2], self.flat_grid(0.2)))
+
+    def test_hint_says_labelling_is_off_when_no_model_is_configured(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(main.identify_hint([0.2, 0.2, 0.2], self.flat_grid(0.2)),
+                             "labelling is off — type it in")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -240,9 +240,19 @@ def identify_hint(dims: list[float], heights: list[list[float]]) -> str:
     if not any(os.environ.get(env_key) for _, env_key, _ in _DETECTORS):
         return "labelling is off — type it in"
     flat = [h for row in heights for h in row]
-    if min(dims) < 0.03 or max(flat) - min(flat) < 0.01:
-        return "the scan looks too flat or small to show the object clearly — try rescanning it"
-    return "couldn't tell what this is — try rotating it for a clearer angle"
+    relief = max(flat) - min(flat) if flat else 0.0
+    longest, shortest = max(dims), min(dims)
+    # Each case names the move that would fix it, because "try again" tells nobody what
+    # to do differently. The scan's own geometry says which move that is.
+    if longest > 0.8:
+        return "it filled the frame — step back about a metre and scan it again"
+    if shortest < 0.03:
+        return "too small in frame to make out — move closer, about an arm's length away, and scan it again"
+    if relief < 0.01:
+        return "the scan came out flat — lower the phone towards the item's own height and scan it again"
+    if relief < 0.04:
+        return "only one face came through — step left or right and scan it again from the side"
+    return "couldn't tell what this is — move a step closer, or round to one side, and scan it again"
 
 
 def resolve_label_status(doc: dict, guess: dict) -> str:
@@ -509,6 +519,47 @@ def list_items(suitcaseId: str | None = None, user: str = Depends(current_user))
 def list_inventory(user: str = Depends(current_user)):
     """The caller's items across every suitcase, newest first; survives DELETE /suitcases."""
     return [public(d) for d in db.items.find({"owner_id": user}).sort("createdAt", -1)]
+
+
+@app.post("/inventory/relabel")
+def relabel_inventory(user: str = Depends(current_user)):
+    """Re-ask every configured model about everything still carrying no usable label.
+
+    `resolve_label_status` makes "unidentified" terminal because re-asking the same model
+    about the same photo cannot change its mind. The mixture is not the same model, so this
+    route re-opens those items against all of them at once, which is the one thing that can
+    change the answer. Synchronous: it is a handful of items in a demo, and the caller wants
+    to know what it got.
+    """
+    # On the label, not on labelStatus: an item the user named themselves keeps the
+    # "unidentified" status its upload gave it, and re-asking models about a name a human
+    # already supplied is exactly what this must not do.
+    stuck = list(db.items.find({"owner_id": user,
+                                "label": {"$in": [None, "", "unknown", "Unknown", "UNKNOWN"]}}))
+    labelled = 0
+    for doc in stuck:
+        reopened = {"labelModel": "both", "labelStatus": "pending", "labelAttempts": 0}
+        db.items.update_one({"_id": doc["_id"]}, {"$set": reopened})
+        if label_item(doc | reopened):
+            labelled += 1
+    logger.info("relabel: %d considered, %d now labelled", len(stuck), labelled)
+    return {"considered": len(stuck), "labelled": labelled}
+
+
+@app.delete("/inventory")
+def clear_inventory(user: str = Depends(current_user)):
+    """Everything this user has scanned, gone: items, suitcases and their stored plans.
+
+    Irreversible, and the whole point — the app calls it at launch so a demo starts from an
+    empty bag rather than yesterday's.
+    """
+    bags = [b["_id"] for b in db.suitcases.find({"owner_id": user}, {"_id": 1})]
+    items = db.items.delete_many({"owner_id": user}).deleted_count
+    db.suitcases.delete_many({"owner_id": user})
+    if bags:
+        db.plans.delete_many({"_id": {"$in": bags}})
+    logger.info("cleared inventory: %d items, %d suitcases", items, len(bags))
+    return {"items": items, "suitcases": len(bags)}
 
 
 @app.get("/items/{item_id}")

@@ -18,6 +18,8 @@ struct ItemsScreen: View {
     /// The item a Delete was tapped on, until the dialog confirms or cancels. Swipe and
     /// Edit-mode deletes are their own confirmation; a tapped button is not.
     @State private var deleting: ScannedItem?
+    /// A relabel round is in flight; it is a model call per stuck item.
+    @State private var identifying = false
 
     var body: some View {
         NavigationStack {
@@ -46,6 +48,19 @@ struct ItemsScreen: View {
             .toolbar {
                 // Swipe already deletes, but nothing on screen says so. Edit mode does.
                 if !items.isEmpty { ToolbarItem(placement: .topBarTrailing) { EditButton() } }
+                if unlabelled > 0 {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { identifyAll() } label: {
+                            if identifying {
+                                ProgressView()
+                            } else {
+                                Label("Identify \(unlabelled)", systemImage: "sparkles")
+                                    .font(.subheadline.weight(.medium))
+                            }
+                        }
+                        .disabled(identifying)
+                    }
+                }
             }
         }
         .task { await load() }
@@ -138,6 +153,31 @@ struct ItemsScreen: View {
     private func shortBagName(for id: String?) -> String {
         guard let id else { return "Not in a suitcase" }
         return suitcases.first { $0.id == id }?.name ?? "Another suitcase"
+    }
+
+    /// Everything the models have not managed to name yet.
+    private var unlabelled: Int {
+        items.filter { ($0.label ?? "").isEmpty || $0.label?.lowercased() == "unknown"
+            || $0.labelStatus == "unidentified" || $0.labelStatus == "failed" }.count
+    }
+
+    /// Re-ask every configured model at once about all of them. The server re-opens items
+    /// it had marked terminal, because the mixture is not the model that gave up on them.
+    private func identifyAll() {
+        identifying = true
+        Task {
+            defer { identifying = false }
+            do {
+                let result = try await API.relabelInventory()
+                await load()
+                let still = unlabelled
+                status = still == 0
+                    ? ""
+                    : "\(result.labelled) of \(result.considered) named · \(still) still unclear — open one for what to change"
+            } catch {
+                status = "identify: \(error.localizedDescription)"
+            }
+        }
     }
 
     // MARK: - Server calls

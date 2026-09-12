@@ -18,6 +18,9 @@ struct ContentView: View {
     /// Held here so changing either re-evaluates the tree that reads `Sheet`.
     @AppStorage("accentName") private var accentName = "Orange"
     @AppStorage("appearance") private var appearance = Appearance.light.rawValue
+    /// Wipe the server's inventory when the app starts, so a demo opens on an empty bag
+    /// rather than yesterday's. Off keeps whatever was scanned before.
+    @AppStorage("freshStart") private var freshStart = true
     /// True while the Pack tab's AR overlay owns the camera.
     @State private var arActive = false
 
@@ -38,6 +41,11 @@ struct ContentView: View {
         }
         .tint(Sheet.accent)
         .preferredColorScheme(Appearance(rawValue: appearance)?.scheme ?? .light)
+        .task {
+            // Once per launch, before anything reads the inventory.
+            guard freshStart else { return }
+            try? await API.clearInventory()
+        }
     }
 }
 
@@ -544,6 +552,7 @@ struct SettingsSheet: View {
     /// Which model the server asks to identify a scan. Sent with every upload; the
     /// server re-asks the same one on its background retries.
     @AppStorage("labelModel") private var labelModel = "both"
+    @AppStorage("freshStart") private var freshStart = true
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -555,6 +564,11 @@ struct SettingsSheet: View {
                     Text("Server address")
                 } footer: {
                     Text("The Mac running the packing server, on the same Wi-Fi as this phone. `ipconfig getifaddr en0` on the Mac prints its address.")
+                }
+                Section {
+                    Toggle("Start each session empty", isOn: $freshStart)
+                } footer: {
+                    Text("Clears every scanned item and suitcase from the server when the app launches. Turn this off to keep what you scanned last time.")
                 }
                 Section("Appearance") {
                     Picker("Theme", selection: $appearance) {

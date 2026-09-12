@@ -187,6 +187,21 @@ enum API {
         _ = try await body(of: request("items/\(itemId)", "DELETE"))
     }
 
+    /// Re-asks every configured model about anything still unlabelled. Slow by nature —
+    /// it is a model call per stuck item — so it gets the solver's budget, not the default.
+    @discardableResult
+    static func relabelInventory() async throws -> (considered: Int, labelled: Int) {
+        struct Result: Decodable { let considered: Int; let labelled: Int }
+        let data = try await body(of: request("inventory/relabel", "POST", timeout: 90))
+        let r = try JSONDecoder().decode(Result.self, from: data)
+        return (r.considered, r.labelled)
+    }
+
+    /// Wipes everything this user has scanned. Irreversible.
+    static func clearInventory() async throws {
+        _ = try await body(of: request("inventory", "DELETE"))
+    }
+
     /// Removes a suitcase and its plan — the app's Reset. Its items are detached and stay in the inventory.
     static func deleteSuitcase(id: String) async throws {
         _ = try await body(of: request("suitcases/\(id)", "DELETE"))

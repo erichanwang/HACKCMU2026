@@ -428,16 +428,18 @@ struct PlanARPlanView: View {
     private let content: PlanEntityBuilder.Content
     private let plan: PackingPlan
     private let scans: [String: ScannedItem]
+    private let useRealScans: Bool
 
     static var isSupported: Bool { ARWorldTrackingConfiguration.isSupported }
 
-    init(plan: PackingPlan, scans: [String: ScannedItem] = [:], topLayer: Binding<Int>) {
+    init(plan: PackingPlan, scans: [String: ScannedItem] = [:], useRealScans: Bool = true, topLayer: Binding<Int>) {
         self.plan = plan
         self.scans = scans
+        self.useRealScans = useRealScans
         self._topLayer = topLayer
 
         let built = PlanEntityBuilder(plan: plan, scans: scans)
-            .build(includeLabels: false, includeWireframe: true)
+            .build(includeLabels: false, includeWireframe: true, useRealScans: useRealScans)
         self.content = built
         _controller = StateObject(
             wrappedValue: BagPlaneController(
@@ -454,7 +456,7 @@ struct PlanARPlanView: View {
             BagPlaneContainer(controller: controller).ignoresSafeArea()
 
             if !controller.arEnabled {
-                LayeredPlanSceneView(plan: plan, scans: scans, topLayer: $topLayer)
+                LayeredPlanSceneView(plan: plan, scans: scans, useRealScans: useRealScans, topLayer: $topLayer)
                     .ignoresSafeArea()
             }
 

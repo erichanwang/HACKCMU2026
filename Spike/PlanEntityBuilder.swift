@@ -11,9 +11,10 @@ private let labelSize: CGFloat = 0.014
 /// Builds the RealityKit entities for a plan's placements.
 ///
 /// Shared by the non-AR scene and the AR overlay so both draw the same boxes
-/// from the same rules — same colours, same translucency, same heightmap meshes,
-/// and the same min-corner handling. Only the chrome around them differs: the
-/// scene adds a wireframe and a camera, AR parents this to the bag anchor.
+/// from the same rules — same colours, same opaque shading, same heightmap
+/// meshes, and the same min-corner handling. Only the chrome around them
+/// differs: the scene adds a wireframe and a camera, AR parents this to the
+/// bag anchor.
 @MainActor
 struct PlanEntityBuilder {
     let plan: PackingPlan
@@ -44,7 +45,9 @@ struct PlanEntityBuilder {
     ///   - includeWireframe: the container outline. AR needs it to align the bag
     ///     against the real one; it is the only visible cue for the yaw and
     ///     position corrections.
-    func build(includeLabels: Bool, includeWireframe: Bool = false) -> Content {
+    ///   - useRealScans: false forces a plain box for every item, even ones with a
+    ///     scanned heightmap — a clean read of the layering itself, no scan noise.
+    func build(includeLabels: Bool, includeWireframe: Bool = false, useRealScans: Bool = true) -> Content {
         let root = Entity()
         if includeWireframe {
             root.addChild(Self.wireframeBox(size: plan.container.dimensions))
@@ -55,7 +58,8 @@ struct PlanEntityBuilder {
         for layer in plan.layers() {
             var entities: [Entity] = []
             for placement in layer.placements {
-                let box = itemEntity(placement, scan: scans[placement.itemID])
+                let scan = useRealScans ? scans[placement.itemID] : nil
+                let box = itemEntity(placement, scan: scan)
                 root.addChild(box)
                 entities.append(box)
 
@@ -73,18 +77,18 @@ struct PlanEntityBuilder {
     }
 
     func itemEntity(_ placement: Placement, scan: ScannedItem?) -> ModelEntity {
-        let material = SimpleMaterial(
-            color: color(for: placement).withAlphaComponent(0.45),
-            roughness: 0.6,
-            isMetallic: false
-        )
-
         if let scan, let mesh = HeightmapMesh.generate(from: scan, fitting: placement) {
+            let material = SimpleMaterial(
+                color: Self.classifiedColor(for: scan) ?? color(for: placement),
+                roughness: 0.5,
+                isMetallic: false
+            )
             let entity = ModelEntity(mesh: mesh, materials: [material])
             entity.position = placement.position.simd
             return entity
         }
 
+        let material = SimpleMaterial(color: color(for: placement), roughness: 0.5, isMetallic: false)
         let entity = ModelEntity(
             mesh: .generateBox(size: placement.size.simd, cornerRadius: 0.002),
             materials: [material]
@@ -93,6 +97,43 @@ struct PlanEntityBuilder {
         // `size / 2` here.
         entity.position = placement.renderCenter.simd
         return entity
+    }
+
+    /// Every scanned item is either strictly black or strictly white. Rather than paint the
+    /// noisy baked photo (`ScanView.Coordinator.bakeColorMap`) straight onto the mesh — which
+    /// picks up shadow and lighting noise pixel to pixel — this reads the same colour map,
+    /// averages the luminance of every cell that captured anything, and commits to one flat
+    /// answer. Cached by item id so re-showing the same plan doesn't redecode the PNG every time.
+    /// nil when there's no colour map, so the caller falls back to its own step colour.
+    private static var classifiedColorCache: [String: UIColor] = [:]
+
+    static func classifiedColor(for scan: ScannedItem) -> UIColor? {
+        if let cached = classifiedColorCache[scan.id] { return cached }
+        guard let base64 = scan.colorMap,
+              let data = Data(base64Encoded: base64),
+              let cgImage = UIImage(data: data)?.cgImage,
+              let provider = cgImage.dataProvider,
+              let pixelData = provider.data,
+              let bytes = CFDataGetBytePtr(pixelData)
+        else { return nil }
+
+        let width = cgImage.width, height = cgImage.height
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        var total: Double = 0, count = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = y * cgImage.bytesPerRow + x * bytesPerPixel
+                let alpha = bytesPerPixel >= 4 ? bytes[offset + 3] : 255
+                guard alpha > 0 else { continue }
+                let r = Double(bytes[offset]), g = Double(bytes[offset + 1]), b = Double(bytes[offset + 2])
+                total += (r + g + b) / 3
+                count += 1
+            }
+        }
+        guard count > 0 else { return nil }
+        let color: UIColor = (total / Double(count)) > 127.5 ? .white : .black
+        classifiedColorCache[scan.id] = color
+        return color
     }
 
     func labelPivot(for placement: Placement) -> Entity {

@@ -346,6 +346,9 @@ class Scan(BaseModel, extra="ignore"):
     heights: list[list[Annotated[float, Field(ge=0, allow_inf_nan=False)]]]
     # The LiDAR hull, local (x, z) in metres, 3+ vertices; convexity is checked where the geometry is built.
     footprint: Annotated[list[tuple[Finite, Finite]], Field(min_length=3, max_length=256)] | None = None
+    # Base64 PNG baked client-side (Spike/ScanView.swift's bakeColorMap); stored and returned
+    # as-is, never read by the solver. 2MB covers a grid at the maxItemDimensionMeters cap.
+    colorMap: Annotated[str, Field(max_length=2_000_000)] | None = None
 
     @model_validator(mode="after")
     def rectangular(self):

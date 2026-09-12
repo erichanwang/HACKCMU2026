@@ -46,6 +46,7 @@ enum HeightmapMesh {
         var descriptor = MeshDescriptor(name: "heightmap")
         descriptor.positions = MeshBuffers.Positions(surface.positions)
         descriptor.normals = MeshBuffers.Normals(surface.normals)
+        descriptor.textureCoordinates = MeshBuffers.TextureCoordinates(surface.uvs)
         descriptor.primitives = .triangles(Array(UInt32(0)..<UInt32(surface.positions.count)))
         return try? MeshResource.generate(from: [descriptor])
     }
@@ -58,7 +59,7 @@ enum HeightmapMesh {
         heights grid: [[Float]],
         cellSize cell: Float,
         place: (SIMD3<Float>) -> SIMD3<Float>
-    ) -> (positions: [SIMD3<Float>], normals: [SIMD3<Float>])? {
+    ) -> (positions: [SIMD3<Float>], normals: [SIMD3<Float>], uvs: [SIMD2<Float>])? {
         guard cell > 0,
               let firstRow = grid.first,
               !firstRow.isEmpty,
@@ -67,9 +68,15 @@ enum HeightmapMesh {
 
         let rows = grid.count
         let cols = firstRow.count
+        // Matches `ScanView.Coordinator.bakeColorMap`'s pixel layout: image width = rows (the
+        // i/width axis), height = cols (the j/depth axis). Walls and the base reuse the top's
+        // (x, z) coordinate at their own corner, so they read as the top colour smeared straight
+        // down — there's no captured colour for a side, and that's a better guess than a flat tint.
+        let spanI = Float(rows) * cell, spanJ = Float(cols) * cell
 
         var positions: [SIMD3<Float>] = []
         var normals: [SIMD3<Float>] = []
+        var uvs: [SIMD2<Float>] = []
 
         /// Flat-shaded: each triangle carries its own three vertices and one
         /// normal, so a wall never smears into the top it meets.
@@ -80,6 +87,7 @@ enum HeightmapMesh {
             let unit = simd_normalize(normal)
             positions += [pa, pb, pc]
             normals += [unit, unit, unit]
+            uvs += [SIMD2(a.x / spanI, a.z / spanJ), SIMD2(b.x / spanI, b.z / spanJ), SIMD2(c.x / spanI, c.z / spanJ)]
         }
 
         func quad(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ d: SIMD3<Float>) {
@@ -151,7 +159,7 @@ enum HeightmapMesh {
         }
 
         guard drawn > 0 else { return nil }
-        return (positions, normals)
+        return (positions, normals, uvs)
     }
 
     // MARK: - Placing the scan inside the packed box

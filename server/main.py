@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from pymongo import MongoClient
 
@@ -116,32 +116,34 @@ def detect(jpeg: bytes) -> dict:
             "mass": mass, "keepUpright": out.get("keepUpright") is True}
 
 
-def relabel_pending() -> int:
-    """Retry Grok for every item whose labelling failed at upload; returns how many got labelled.
+def label_item(doc: dict) -> bool:
+    """Label one pending item from its stored photo; True if it came back labelled.
 
     A guessed field is overwritten only while its `*Source` is still "auto" (a missing source
     counts as auto, for items stored before sources existed); `description` has no `*Source`
     and no PATCH route, so it is always auto. No stored photo, or LABEL_MAX_ATTEMPTS failed
     attempts, marks the item "failed" and stops the retries.
     """
-    labelled = 0
-    for doc in list(db.items.find({"labelStatus": "pending"})):
-        item_id = doc["_id"]
-        if not doc.get("photo"):
-            db.items.update_one({"_id": item_id}, {"$set": {"labelStatus": "failed"}})
-            continue
-        try:
-            guess = detect(doc["photo"])
-        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
-            attempts = doc.get("labelAttempts", 0) + 1
-            logging.warning("relabelling item %s failed (attempt %d): %s", item_id, attempts, exc)
-            status = "failed" if attempts >= LABEL_MAX_ATTEMPTS else "pending"
-            db.items.update_one({"_id": item_id}, {"$inc": {"labelAttempts": 1}, "$set": {"labelStatus": status}})
-            continue
-        fields = {k: v for k, v in guess.items() if k not in SOURCES or doc.get(SOURCES[k], "auto") == "auto"}
-        db.items.update_one({"_id": item_id}, {"$set": fields | {"labelStatus": "done"}})
-        labelled += 1
-    return labelled
+    item_id = doc["_id"]
+    if not doc.get("photo"):
+        db.items.update_one({"_id": item_id}, {"$set": {"labelStatus": "failed"}})
+        return False
+    try:
+        guess = detect(doc["photo"])
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+        attempts = doc.get("labelAttempts", 0) + 1
+        logging.warning("labelling item %s failed (attempt %d): %s", item_id, attempts, exc)
+        status = "failed" if attempts >= LABEL_MAX_ATTEMPTS else "pending"
+        db.items.update_one({"_id": item_id}, {"$inc": {"labelAttempts": 1}, "$set": {"labelStatus": status}})
+        return False
+    fields = {k: v for k, v in guess.items() if k not in SOURCES or doc.get(SOURCES[k], "auto") == "auto"}
+    db.items.update_one({"_id": item_id}, {"$set": fields | {"labelStatus": "done"}})
+    return True
+
+
+def relabel_pending() -> int:
+    """Retry Grok for every item whose labelling failed at upload; returns how many got labelled."""
+    return sum(label_item(doc) for doc in list(db.items.find({"labelStatus": "pending"})))
 
 
 def public(doc: dict) -> dict:
@@ -215,7 +217,9 @@ def create_plan(suitcase_id: str, user: str = Depends(current_user)):
     items = list(db.items.find({"suitcaseId": suitcase_id}))
     if not items:
         raise HTTPException(409, "suitcase has no scanned items to pack")
-    doc = {"_id": suitcase_id, "suitcaseId": suitcase_id, "createdAt": now()} | solve(suitcase, items)
+    # labelling is not worth blocking a plan for; the app shows how many labels are still coming
+    pending = sum(i.get("labelStatus") == "pending" for i in items)
+    doc = {"_id": suitcase_id, "suitcaseId": suitcase_id, "createdAt": now()} | solve(suitcase, items) | {"pendingLabels": pending}
     db.plans.replace_one({"_id": suitcase_id}, doc, upsert=True)
     return public(doc)
 
@@ -248,7 +252,8 @@ class Scan(BaseModel, extra="allow"):
 
 
 @app.post("/items")
-def create_item(item: str = Form(...), image: UploadFile = File(...), user: str = Depends(current_user)):
+def create_item(background: BackgroundTasks, item: str = Form(...), image: UploadFile = File(...),
+                later: bool = Query(False, alias="async"), user: str = Depends(current_user)):
     try:
         doc = Scan.model_validate_json(item).model_dump(mode="json")
     except ValidationError as exc:
@@ -261,18 +266,25 @@ def create_item(item: str = Form(...), image: UploadFile = File(...), user: str 
     jpeg = image.file.read(MAX_IMAGE_BYTES + 1)
     if len(jpeg) > MAX_IMAGE_BYTES:
         raise HTTPException(413, f"image must be at most {MAX_IMAGE_BYTES} bytes")
-    try:
-        guess, status = detect(jpeg), "done"
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
-        # x.ai down, rate-limited or returning garbage must not lose the scan; relabel_pending retries it.
-        logging.warning("grok labelling failed, item %s saved as unknown: %s", item_id, exc)
+    background_label = later and bool(os.environ.get("XAI_API_KEY"))  # ?async=1: don't make the phone wait 6 s for Grok
+    if background_label:
         guess, status = dict(UNKNOWN), "pending"
+    else:
+        try:
+            guess, status = detect(jpeg), "done"
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            # x.ai down, rate-limited or returning garbage must not lose the scan; relabel_pending retries it.
+            logging.warning("grok labelling failed, item %s saved as unknown: %s", item_id, exc)
+            guess, status = dict(UNKNOWN), "pending"
     doc |= guess | {
         "_id": item_id, "owner_id": user, "photo": jpeg, "labelStatus": status,
         "labelSource": "auto", "rigiditySource": "auto", "compressibilitySource": "auto",
         "massSource": "auto", "keepUprightSource": "auto",
         "createdAt": now(),
     }
+    if background_label:
+        doc["labelAttempts"] = 0
+        background.add_task(label_item, doc)  # runs after this response is sent; a failure leaves it to the sweep
     db.items.replace_one({"_id": item_id}, doc, upsert=True)
     return public(doc)
 

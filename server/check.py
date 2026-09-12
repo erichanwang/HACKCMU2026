@@ -117,6 +117,29 @@ with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "pos
 assert c.get("/items/t1d").json()["labelStatus"] == "failed", "a non-object answer must count as a failed attempt"
 assert c.get("/items/t1e").json()["labelStatus"] == "failed", "an unreadable item must not block the ones behind it"
 
+# --- ?async=1: the upload returns before Grok answers ------------------------------------------
+# TestClient runs a BackgroundTasks job before returning, so the item is already labelled by the
+# next GET; on the phone the app polls that GET while labelStatus is "pending".
+with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "post", grok):
+    r = c.post("/items?async=1", data={"item": json.dumps(bad | {"id": "t1f"})}, files=img)
+assert r.status_code == 200 and r.json()["labelStatus"] == "pending", r.text
+assert r.json()["label"] == "unknown" and r.json()["labelAttempts"] == 0, r.json()
+d = c.get("/items/t1f").json()
+assert d["labelStatus"] == "done" and d["label"] == "wool scarf", d
+
+# a failed background label leaves the item pending, with the attempt counted, for the sweep
+with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "post", side_effect=httpx.ConnectError("down")):
+    r = c.post("/items?async=1", data={"item": json.dumps(bad | {"id": "t1g"})}, files=img)
+assert r.status_code == 200 and r.json()["labelStatus"] == "pending", r.text
+d = c.get("/items/t1g").json()
+assert d["labelStatus"] == "pending" and d["labelAttempts"] == 1, d
+with patch.dict(os.environ, {"XAI_API_KEY": "k"}), patch.object(main.httpx, "post", grok):
+    assert main.relabel_pending() == 1, "the sweep finishes what the background task could not"
+d = c.get("/items/t1g").json()
+assert d["labelStatus"] == "done" and d["label"] == "wool scarf" and d["labelAttempts"] == 1, d
+
+assert c.delete("/items/t1f").json() == {"deleted": "t1f"}
+assert c.delete("/items/t1g").json() == {"deleted": "t1g"}
 assert c.delete("/items/t1b").json() == {"deleted": "t1b"}
 assert c.delete("/items/t1b").status_code == 404
 assert c.delete("/items/t1c").json() == {"deleted": "t1c"}
@@ -150,6 +173,7 @@ r = c.post(f"/suitcases/{sc['id']}/plan")
 assert r.status_code == 200, r.text
 plan = r.json()
 assert plan["suitcaseId"] == sc["id"] and "_id" not in plan and plan["createdAt"], plan
+assert plan["pendingLabels"] == 0, "every item is labelled, so nothing is still coming"
 assert plan["solver"]["metrics"]["items_packed"] >= 1, plan["solver"]["metrics"]
 assert "valid" in plan["validation"] and "adapter" in plan["validation"], plan["validation"]
 assert plan["chosen"]["strategy"] == plan["solver"]["strategy"] == plan["alternatives"][0]["strategy"], plan["chosen"]
@@ -174,6 +198,11 @@ for q in p["placements"]:
     if it["keepUpright"]:
         assert q["rotation"][1] == "Y", ("keepUpright item was tipped over", q)
 assert c.get(f"/suitcases/{sc['id']}/plan").json() == plan, "GET must return the stored plan"
+
+# a still-labelling item must not block the plan, only be counted in it
+main.db.items.update_one({"_id": "t3"}, {"$set": {"labelStatus": "pending"}})
+assert c.post(f"/suitcases/{sc['id']}/plan").json()["pendingLabels"] == 1, "the app shows the count"
+main.db.items.update_one({"_id": "t3"}, {"$set": {"labelStatus": "done"}})
 
 # --- delete ----------------------------------------------------------------------
 assert c.delete("/items/t4").json() == {"deleted": "t4"}

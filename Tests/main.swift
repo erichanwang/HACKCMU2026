@@ -1,3 +1,4 @@
+import Foundation
 import simd
 
 func approx(_ a: Float, _ b: Float, _ tol: Float = 1e-3) -> Bool { abs(a - b) < tol }
@@ -45,4 +46,6 @@ let tri = densify(SIMD3(0, 0, 0), SIMD3(0.1, 0, 0), SIMD3(0, 0, 0.1), spacing: 0
 assert(tri.count == 66, "densify \(tri.count)")
 
 print(ScannedItem(lFit, heights: lhm, cell: 0.01).asciiMap)
+let encoded = String(data: try! JSONEncoder().encode(ScannedItem(fit, heights: hm, cell: 0.01)), encoding: .utf8)!
+assert(encoded.contains("\"dimensions\"") && !encoded.contains("\"label\""), encoded)
 print("geometry ok: \(dims.map { $0 * 100 }) cm footprint, \(fit.height * 100) cm tall")

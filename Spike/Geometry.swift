@@ -113,25 +113,33 @@ func heightMap(points: [SIMD3<Float>], box: BoxFit, planeY: Float, cell: Float) 
     return h
 }
 
-/// Output of one scan. Dimensions in centimetres. `heights[i][j]` is the surface height at cell
-/// (i along width, j along depth) — the object's real shape as seen from above, not just its box.
+/// Output of one scan, in metres (team contract). `dimensions` = [width, height, depth] of the bounding
+/// box (X right, Y up, Z forward). `heights[i][j]` is the surface height at cell (i along width, j along
+/// depth) — the object's real shape as seen from above. Label/rigidity are filled in by the server.
 struct ScannedItem: Codable, Identifiable {
-    var id = UUID()
-    var width: Float
-    var depth: Float
-    var height: Float
+    var id = UUID().uuidString
+    var dimensions: [Float]
     var cellSize: Float
     var heights: [[Float]]
+    var label: String?
+    var labelSource: String?
+    var rigidity: String?
+    var rigiditySource: String?
+    var createdAt: String?
 
     init(_ box: BoxFit, heights: [[Float]], cell: Float) {
-        width = box.width * 100; depth = box.depth * 100; height = box.height * 100
-        cellSize = cell * 100
-        self.heights = heights.map { $0.map { $0 * 100 } }
+        dimensions = [box.width, box.height, box.depth]
+        cellSize = cell
+        self.heights = heights
     }
+
+    var width: Float { dimensions[0] }
+    var height: Float { dimensions[1] }
+    var depth: Float { dimensions[2] }
 
     /// Top-down ASCII view, one character per cell, darker = taller.
     var asciiMap: String {
-        let ramp = Array(" .:-=+*#%@"), top = max(height, 0.01)
+        let ramp = Array(" .:-=+*#%@"), top = max(height, 0.0001)
         return heights.map { row in
             String(row.map { ramp[min(ramp.count - 1, Int($0 / top * Float(ramp.count - 1)))] })
         }.joined(separator: "\n")

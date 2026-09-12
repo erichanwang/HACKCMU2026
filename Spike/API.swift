@@ -1,0 +1,41 @@
+import Foundation
+import UIKit
+
+/// The FastAPI server in server/. Set to this Mac's LAN IP; phone and Mac must share a Wi-Fi network.
+enum API {
+    static let base = URL(string: "http://172.26.48.172:8000")!
+
+    static func upload(_ item: ScannedItem, image: UIImage) async throws -> ScannedItem {
+        let boundary = "suitcase-\(UUID().uuidString)"
+        var req = URLRequest(url: base.appending(path: "items"))
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"item\"\r\n\r\n".data(using: .utf8)!)
+        body.append(try JSONEncoder().encode(item))
+        body.append("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"image\"; filename=\"o.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(image.jpegData(compressionQuality: 0.7)!)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        req.httpBody = body
+        return try await send(req)
+    }
+
+    static func update(id: String, label: String?, rigidity: String?) async throws -> ScannedItem {
+        var req = URLRequest(url: base.appending(path: "items/\(id)"))
+        req.httpMethod = "PATCH"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var fields: [String: String] = [:]
+        if let label { fields["label"] = label }
+        if let rigidity { fields["rigidity"] = rigidity }
+        req.httpBody = try JSONEncoder().encode(fields)
+        return try await send(req)
+    }
+
+    private static func send(_ req: URLRequest) async throws -> ScannedItem {
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
+            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "server error"])
+        }
+        return try JSONDecoder().decode(ScannedItem.self, from: data)
+    }
+}

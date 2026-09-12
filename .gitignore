@@ -15,3 +15,7 @@ DerivedData/
 # Swift build output
 .build/
 .swiftpm/
+
+# Python
+.venv/
+__pycache__/

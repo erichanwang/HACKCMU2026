@@ -85,10 +85,39 @@ struct ScanView: UIViewRepresentable {
             let heights = heightMap(points: cluster, box: box, planeY: planeY, cell: shapeCellMeters)
             let scanned = ScannedItem(box, heights: heights, cell: shapeCellMeters)
             item = scanned
-            status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
+            status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells — labelling…"
             print(scanned.asciiMap)
             print(String(data: try! JSONEncoder().encode(scanned), encoding: .utf8)!)
+
+            // Photograph the object before the overlay covers it, then ask the server for label + rigidity.
+            let crop = screenRect(of: box, in: view)
+            view.snapshot(saveToHDR: false) { [weak self] shot in
+                guard let self, let shot, let cg = shot.cgImage?.cropping(to: crop.applying(.init(scaleX: shot.scale, y: shot.scale))) else { return }
+                Task { @MainActor in
+                    do {
+                        self.item = try await API.upload(scanned, image: UIImage(cgImage: cg))
+                        self.status = "\(cluster.count) pts, \(heights.count)×\(heights[0].count) cells"
+                    } catch {
+                        self.status = "server: \(error.localizedDescription)"
+                    }
+                }
+            }
             show(box, in: view)
+        }
+
+        /// Screen-space rectangle around the box's projected corners, padded 15%, clamped to the view.
+        func screenRect(of box: BoxFit, in view: ARView) -> CGRect {
+            let perp = SIMD3<Float>(-box.axis.z, 0, box.axis.x)
+            var pts: [CGPoint] = []
+            for sx: Float in [-0.5, 0.5] { for sy: Float in [-0.5, 0.5] { for sz: Float in [-0.5, 0.5] {
+                let corner = box.center + box.axis * (sx * box.width) + SIMD3<Float>(0, sy * box.height, 0) + perp * (sz * box.depth)
+                if let p = view.project(corner) { pts.append(p) }
+            } } }
+            guard let minX = pts.map(\.x).min(), let maxX = pts.map(\.x).max(),
+                  let minY = pts.map(\.y).min(), let maxY = pts.map(\.y).max() else { return view.bounds }
+            return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+                .insetBy(dx: -(maxX - minX) * 0.15, dy: -(maxY - minY) * 0.15)
+                .intersection(view.bounds)
         }
 
         func show(_ box: BoxFit, in view: ARView) {

@@ -43,7 +43,7 @@ final class PlanSceneController: ObservableObject {
         arView.environment.background = .color(.secondarySystemBackground)
 
         let root = AnchorEntity(world: .zero)
-        root.addChild(wireframeBox(size: dimensions))
+        root.addChild(PlanEntityBuilder.wireframeBox(size: dimensions))
 
         // Same boxes the AR overlay draws — one builder, two hosts.
         let built = PlanEntityBuilder(plan: plan, scans: scans).build(includeLabels: true)
@@ -94,41 +94,8 @@ final class PlanSceneController: ObservableObject {
         content?.show(upTo: topLayer)
     }
 
-    // MARK: - Scene building
-
-    /// The scanned surface when we have one, the bounding box otherwise.
-    ///
-    /// The two meshes are anchored differently and that is easy to get wrong:
-    /// `generateBox` is built around its centre, so it wants `renderCenter`, while
-    /// the heightmap is authored from its min corner and wants `position`.
-    /// Wireframe as twelve thin bars — RealityKit has no line primitive.
-    private func wireframeBox(size: Vector3) -> Entity {
-        let container = Entity()
-        let material = SimpleMaterial(color: .systemGray, roughness: 0.5, isMetallic: false)
-        let extent = size.simd
-
-        for axis in 0..<3 {
-            var barSize = SIMD3<Float>(repeating: wireThickness)
-            barSize[axis] = extent[axis]
-
-            // The four edges parallel to `axis` sit at the corners of the other two.
-            let otherA = (axis + 1) % 3
-            let otherB = (axis + 2) % 3
-            for a in [Float(0), 1] {
-                for b in [Float(0), 1] {
-                    let bar = ModelEntity(mesh: .generateBox(size: barSize), materials: [material])
-                    var position = SIMD3<Float>(repeating: 0)
-                    position[axis] = extent[axis] / 2
-                    position[otherA] = a * extent[otherA]
-                    position[otherB] = b * extent[otherB]
-                    bar.position = position
-                    container.addChild(bar)
-                }
-            }
-        }
-        return container
-    }
 }
+
 
 
 private struct PlanSceneContainer: UIViewRepresentable {

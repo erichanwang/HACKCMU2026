@@ -2,6 +2,8 @@ import PackingPlan
 import UIKit
 import RealityKit
 
+/// Thickness of the container's wireframe edges, in metres.
+private let wireThickness: Float = 0.004
 /// Height of the item labels, in metres. Small enough that stacked items in a
 /// shallow bag do not overprint each other.
 private let labelSize: CGFloat = 0.014
@@ -35,11 +37,18 @@ struct PlanEntityBuilder {
         }
     }
 
-    /// - Parameter includeLabels: 3D text costs nothing to place but has to be
-    ///   turned to face the camera. The scene does that when its camera moves;
-    ///   in AR the camera moves every frame, so the overlay leaves them out.
-    func build(includeLabels: Bool) -> Content {
+    /// - Parameters:
+    ///   - includeLabels: 3D text costs nothing to place but has to be turned to
+    ///     face the camera. The scene does that when its camera moves; in AR the
+    ///     camera moves every frame, so the overlay leaves them out.
+    ///   - includeWireframe: the container outline. AR needs it to align the bag
+    ///     against the real one; it is the only visible cue for the yaw and
+    ///     position corrections.
+    func build(includeLabels: Bool, includeWireframe: Bool = false) -> Content {
         let root = Entity()
+        if includeWireframe {
+            root.addChild(Self.wireframeBox(size: plan.container.dimensions))
+        }
         var byLayer: [[Entity]] = []
         var labels: [Entity] = []
 
@@ -112,5 +121,33 @@ struct PlanEntityBuilder {
             brightness: 0.85,
             alpha: 1
         )
+    }
+
+    /// Wireframe as twelve thin bars — RealityKit has no line primitive.
+    static func wireframeBox(size: Vector3) -> Entity {
+        let container = Entity()
+        let material = SimpleMaterial(color: .systemGray, roughness: 0.5, isMetallic: false)
+        let extent = size.simd
+
+        for axis in 0..<3 {
+            var barSize = SIMD3<Float>(repeating: wireThickness)
+            barSize[axis] = extent[axis]
+
+            // The four edges parallel to `axis` sit at the corners of the other two.
+            let otherA = (axis + 1) % 3
+            let otherB = (axis + 2) % 3
+            for a in [Float(0), 1] {
+                for b in [Float(0), 1] {
+                    let bar = ModelEntity(mesh: .generateBox(size: barSize), materials: [material])
+                    var position = SIMD3<Float>(repeating: 0)
+                    position[axis] = extent[axis] / 2
+                    position[otherA] = a * extent[otherA]
+                    position[otherB] = b * extent[otherB]
+                    bar.position = position
+                    container.addChild(bar)
+                }
+            }
+        }
+        return container
     }
 }

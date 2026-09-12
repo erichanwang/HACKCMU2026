@@ -1,0 +1,1157 @@
+{
+  "naive": {
+    "strategy": "naive",
+    "container": {
+      "id": "dragon",
+      "shape": "cylinder",
+      "dims": [
+        3.2,
+        3.2,
+        1.15
+      ],
+      "gravity": false,
+      "max_mass": 3307.0,
+      "min_support": 0.7,
+      "obstacles": [
+        {
+          "id": "hatch",
+          "position": [
+            1.35,
+            1.35,
+            0.95
+          ],
+          "dims": [
+            0.5,
+            0.5,
+            0.2
+          ]
+        }
+      ],
+      "com_target": [
+        1.6,
+        1.6,
+        0.575
+      ],
+      "com_axis_weights": [
+        1.0,
+        1.0,
+        0.1
+      ]
+    },
+    "placements": [
+      {
+        "item_id": "CTB1",
+        "shape": "box",
+        "position": [
+          0.46862915,
+          0.46862915,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.25
+        ],
+        "center": [
+          0.71862915,
+          0.67862915,
+          0.125
+        ],
+        "orientation": "xyz",
+        "mass": 27.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB2",
+        "shape": "box",
+        "position": [
+          0.96862915,
+          0.129839856,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.25
+        ],
+        "center": [
+          1.21862915,
+          0.339839856,
+          0.125
+        ],
+        "orientation": "xyz",
+        "mass": 22.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB3",
+        "shape": "box",
+        "position": [
+          1.46862915,
+          0.129839856,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.25
+        ],
+        "center": [
+          1.71862915,
+          0.339839856,
+          0.125
+        ],
+        "orientation": "xyz",
+        "mass": 31.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB4",
+        "shape": "box",
+        "position": [
+          0.96862915,
+          0.549839856,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.25
+        ],
+        "center": [
+          1.21862915,
+          0.7598398559999999,
+          0.125
+        ],
+        "orientation": "xyz",
+        "mass": 18.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB5",
+        "shape": "box",
+        "position": [
+          1.46862915,
+          0.549839856,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.25
+        ],
+        "center": [
+          1.71862915,
+          0.7598398559999999,
+          0.125
+        ],
+        "orientation": "xyz",
+        "mass": 25.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB6",
+        "shape": "box",
+        "position": [
+          1.96862915,
+          0.549839856,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.25
+        ],
+        "center": [
+          2.21862915,
+          0.7598398559999999,
+          0.125
+        ],
+        "orientation": "xyz",
+        "mass": 29.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB_double_1",
+        "shape": "box",
+        "position": [
+          0.16683863,
+          0.88862915,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.5
+        ],
+        "center": [
+          0.41683863,
+          1.09862915,
+          0.25
+        ],
+        "orientation": "xyz",
+        "mass": 48.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB_double_2",
+        "shape": "box",
+        "position": [
+          0.96862915,
+          0.969839856,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.5
+        ],
+        "center": [
+          1.21862915,
+          1.179839856,
+          0.25
+        ],
+        "orientation": "xyz",
+        "mass": 48.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB_double_3",
+        "shape": "box",
+        "position": [
+          1.46862915,
+          0.969839856,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.5
+        ],
+        "center": [
+          1.71862915,
+          1.179839856,
+          0.25
+        ],
+        "orientation": "xyz",
+        "mass": 48.0,
+        "fragile": false
+      },
+      {
+        "item_id": "freezer",
+        "shape": "box",
+        "position": [
+          1.96862915,
+          0.969839856,
+          0.0
+        ],
+        "dims": [
+          0.9,
+          0.6,
+          0.7
+        ],
+        "center": [
+          2.41862915,
+          1.269839856,
+          0.35
+        ],
+        "orientation": "xyz",
+        "mass": 210.0,
+        "fragile": true
+      },
+      {
+        "item_id": "tank_1",
+        "shape": "cylinder",
+        "position": [
+          0.026753984,
+          1.30862915,
+          0.0
+        ],
+        "dims": [
+          0.4,
+          0.4,
+          0.75
+        ],
+        "center": [
+          0.226753984,
+          1.50862915,
+          0.375
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 95.0,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.2,
+        "height": 0.75
+      },
+      {
+        "item_id": "tank_2",
+        "shape": "cylinder",
+        "position": [
+          0.426753984,
+          1.30862915,
+          0.0
+        ],
+        "dims": [
+          0.4,
+          0.4,
+          0.75
+        ],
+        "center": [
+          0.626753984,
+          1.50862915,
+          0.375
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 95.0,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.2,
+        "height": 0.75
+      },
+      {
+        "item_id": "gas_bottle_1",
+        "shape": "cylinder",
+        "position": [
+          1.96862915,
+          0.129839856,
+          0.0
+        ],
+        "dims": [
+          0.22,
+          0.22,
+          0.6
+        ],
+        "center": [
+          2.0786291500000003,
+          0.23983985600000002,
+          0.3
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 30.0,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.11,
+        "height": 0.6
+      },
+      {
+        "item_id": "gas_bottle_2",
+        "shape": "cylinder",
+        "position": [
+          2.46862915,
+          0.549839856,
+          0.0
+        ],
+        "dims": [
+          0.22,
+          0.22,
+          0.6
+        ],
+        "center": [
+          2.5786291500000003,
+          0.6598398560000001,
+          0.3
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 30.0,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.11,
+        "height": 0.6
+      },
+      {
+        "item_id": "crate_1",
+        "shape": "box",
+        "position": [
+          0.96862915,
+          1.389839856,
+          0.0
+        ],
+        "dims": [
+          0.6,
+          0.4,
+          0.4
+        ],
+        "center": [
+          1.26862915,
+          1.589839856,
+          0.2
+        ],
+        "orientation": "xyz",
+        "mass": 60.0,
+        "fragile": false
+      },
+      {
+        "item_id": "crate_2",
+        "shape": "box",
+        "position": [
+          1.96862915,
+          1.569839856,
+          0.0
+        ],
+        "dims": [
+          0.6,
+          0.4,
+          0.4
+        ],
+        "center": [
+          2.2686291499999998,
+          1.769839856,
+          0.2
+        ],
+        "orientation": "xyz",
+        "mass": 60.0,
+        "fragile": false
+      },
+      {
+        "item_id": "crate_3",
+        "shape": "box",
+        "position": [
+          0.96862915,
+          1.789839856,
+          0.0
+        ],
+        "dims": [
+          0.6,
+          0.4,
+          0.4
+        ],
+        "center": [
+          1.26862915,
+          1.989839856,
+          0.2
+        ],
+        "orientation": "xyz",
+        "mass": 60.0,
+        "fragile": false
+      },
+      {
+        "item_id": "rack_1",
+        "shape": "box",
+        "position": [
+          1.96862915,
+          1.969839856,
+          0.0
+        ],
+        "dims": [
+          0.8,
+          0.5,
+          0.6
+        ],
+        "center": [
+          2.3686291500000003,
+          2.219839856,
+          0.3
+        ],
+        "orientation": "xyz",
+        "mass": 120.0,
+        "fragile": false
+      },
+      {
+        "item_id": "rack_2",
+        "shape": "box",
+        "position": [
+          0.96862915,
+          2.189839856,
+          0.0
+        ],
+        "dims": [
+          0.8,
+          0.5,
+          0.6
+        ],
+        "center": [
+          1.36862915,
+          2.439839856,
+          0.3
+        ],
+        "orientation": "xyz",
+        "mass": 120.0,
+        "fragile": false
+      },
+      {
+        "item_id": "spare_pump",
+        "shape": "box",
+        "position": [
+          1.56862915,
+          1.389839856,
+          0.0
+        ],
+        "dims": [
+          0.35,
+          0.35,
+          0.3
+        ],
+        "center": [
+          1.7436291499999998,
+          1.5648398559999999,
+          0.15
+        ],
+        "orientation": "xyz",
+        "mass": 40.0,
+        "fragile": true
+      },
+      {
+        "item_id": "science_locker",
+        "shape": "box",
+        "position": [
+          0.426753984,
+          1.70862915,
+          0.0
+        ],
+        "dims": [
+          0.45,
+          0.45,
+          0.5
+        ],
+        "center": [
+          0.651753984,
+          1.9336291499999998,
+          0.25
+        ],
+        "orientation": "xyz",
+        "mass": 55.0,
+        "fragile": true
+      },
+      {
+        "item_id": "water_bag",
+        "shape": "cylinder",
+        "position": [
+          0.426753984,
+          2.15862915,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "center": [
+          0.676753984,
+          2.40862915,
+          0.25
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 90.0,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.25,
+        "height": 0.5
+      }
+    ],
+    "unpacked": [],
+    "metrics": {
+      "items_packed": 22,
+      "items_unpacked": 0,
+      "volume_utilization": 0.244192106056408,
+      "bbox_extent_utilization": 0.4914329793491041,
+      "packed_volume": 2.2462862549701925,
+      "usable_volume": 9.19884877216835,
+      "total_mass": 1361.0,
+      "max_mass": 3307.0,
+      "com": [
+        1.4854997410580455,
+        1.5453274464041147,
+        0.2703894195444526
+      ],
+      "com_basis": "mass",
+      "com_target": [
+        1.6,
+        1.6,
+        0.575
+      ],
+      "com_lateral_offset": 0.12688340086264088,
+      "com_offset_3d": 0.32998030720019506,
+      "com_deviation": 0.09267298865392751,
+      "max_height": 0.75,
+      "max_height_fraction": 0.6521739130434783,
+      "unpacked_priority_volume_fraction": 0.0,
+      "objective": 1.0474709112726692
+    },
+    "stats": {
+      "strategy": "first-fit bottom-back-left"
+    }
+  },
+  "optimized": {
+    "strategy": "optimized",
+    "container": {
+      "id": "dragon",
+      "shape": "cylinder",
+      "dims": [
+        3.2,
+        3.2,
+        1.15
+      ],
+      "gravity": false,
+      "max_mass": 3307.0,
+      "min_support": 0.7,
+      "obstacles": [
+        {
+          "id": "hatch",
+          "position": [
+            1.35,
+            1.35,
+            0.95
+          ],
+          "dims": [
+            0.5,
+            0.5,
+            0.2
+          ]
+        }
+      ],
+      "com_target": [
+        1.6,
+        1.6,
+        0.575
+      ],
+      "com_axis_weights": [
+        1.0,
+        1.0,
+        0.1
+      ]
+    },
+    "placements": [
+      {
+        "item_id": "CTB_double_3",
+        "shape": "box",
+        "position": [
+          1.85,
+          1.35,
+          0.0
+        ],
+        "dims": [
+          0.42,
+          0.5,
+          0.5
+        ],
+        "center": [
+          2.06,
+          1.6,
+          0.25
+        ],
+        "orientation": "yxz",
+        "mass": 48.0,
+        "fragile": false
+      },
+      {
+        "item_id": "gas_bottle_2",
+        "shape": "cylinder",
+        "position": [
+          0.46862915,
+          0.46862915,
+          0.0
+        ],
+        "dims": [
+          0.22,
+          0.6,
+          0.22
+        ],
+        "center": [
+          0.57862915,
+          0.76862915,
+          0.11
+        ],
+        "orientation": "cyl_axis_y",
+        "mass": 30.0,
+        "fragile": false,
+        "axis": "y",
+        "radius": 0.11,
+        "height": 0.6
+      },
+      {
+        "item_id": "spare_pump",
+        "shape": "box",
+        "position": [
+          1.85,
+          1.85,
+          0.0
+        ],
+        "dims": [
+          0.35,
+          0.35,
+          0.3
+        ],
+        "center": [
+          2.0250000000000004,
+          2.0250000000000004,
+          0.15
+        ],
+        "orientation": "xyz",
+        "mass": 40.0,
+        "fragile": true
+      },
+      {
+        "item_id": "CTB3",
+        "shape": "box",
+        "position": [
+          0.68862915,
+          0.46862915,
+          0.0
+        ],
+        "dims": [
+          0.25,
+          0.5,
+          0.42
+        ],
+        "center": [
+          0.81362915,
+          0.71862915,
+          0.21
+        ],
+        "orientation": "zxy",
+        "mass": 31.0,
+        "fragile": false
+      },
+      {
+        "item_id": "water_bag",
+        "shape": "cylinder",
+        "position": [
+          1.35,
+          1.85,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "center": [
+          1.6,
+          2.1,
+          0.25
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 90.0,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.25,
+        "height": 0.5
+      },
+      {
+        "item_id": "CTB6",
+        "shape": "box",
+        "position": [
+          0.090813126,
+          1.48862915,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.25
+        ],
+        "center": [
+          0.340813126,
+          1.69862915,
+          0.125
+        ],
+        "orientation": "xyz",
+        "mass": 29.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB2",
+        "shape": "box",
+        "position": [
+          1.43862915,
+          0.46862915,
+          0.0
+        ],
+        "dims": [
+          0.25,
+          0.42,
+          0.5
+        ],
+        "center": [
+          1.56362915,
+          0.67862915,
+          0.25
+        ],
+        "orientation": "zyx",
+        "mass": 22.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB4",
+        "shape": "box",
+        "position": [
+          0.93862915,
+          0.46862915,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.25
+        ],
+        "center": [
+          1.18862915,
+          0.67862915,
+          0.125
+        ],
+        "orientation": "xyz",
+        "mass": 18.0,
+        "fragile": false
+      },
+      {
+        "item_id": "freezer",
+        "shape": "box",
+        "position": [
+          1.68862915,
+          0.46862915,
+          0.0
+        ],
+        "dims": [
+          0.9,
+          0.6,
+          0.7
+        ],
+        "center": [
+          2.13862915,
+          0.76862915,
+          0.35
+        ],
+        "orientation": "xyz",
+        "mass": 210.0,
+        "fragile": true
+      },
+      {
+        "item_id": "CTB_double_2",
+        "shape": "box",
+        "position": [
+          0.090813126,
+          1.06862915,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.5
+        ],
+        "center": [
+          0.340813126,
+          1.27862915,
+          0.25
+        ],
+        "orientation": "xyz",
+        "mass": 48.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB5",
+        "shape": "box",
+        "position": [
+          0.93862915,
+          0.88862915,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.42,
+          0.25
+        ],
+        "center": [
+          1.18862915,
+          1.09862915,
+          0.125
+        ],
+        "orientation": "xyz",
+        "mass": 25.0,
+        "fragile": false
+      },
+      {
+        "item_id": "rack_2",
+        "shape": "box",
+        "position": [
+          1.35,
+          2.35,
+          0.0
+        ],
+        "dims": [
+          0.8,
+          0.5,
+          0.6
+        ],
+        "center": [
+          1.75,
+          2.6,
+          0.3
+        ],
+        "orientation": "xyz",
+        "mass": 120.0,
+        "fragile": false
+      },
+      {
+        "item_id": "crate_1",
+        "shape": "box",
+        "position": [
+          0.93862915,
+          1.30862915,
+          0.0
+        ],
+        "dims": [
+          0.6,
+          0.4,
+          0.4
+        ],
+        "center": [
+          1.23862915,
+          1.50862915,
+          0.2
+        ],
+        "orientation": "xyz",
+        "mass": 60.0,
+        "fragile": false
+      },
+      {
+        "item_id": "crate_3",
+        "shape": "box",
+        "position": [
+          0.93862915,
+          1.70862915,
+          0.0
+        ],
+        "dims": [
+          0.4,
+          0.4,
+          0.6
+        ],
+        "center": [
+          1.13862915,
+          1.9086291499999999,
+          0.3
+        ],
+        "orientation": "yzx",
+        "mass": 60.0,
+        "fragile": false
+      },
+      {
+        "item_id": "CTB1",
+        "shape": "box",
+        "position": [
+          1.68862915,
+          1.06862915,
+          0.0
+        ],
+        "dims": [
+          0.42,
+          0.25,
+          0.5
+        ],
+        "center": [
+          1.89862915,
+          1.19362915,
+          0.25
+        ],
+        "orientation": "yzx",
+        "mass": 27.0,
+        "fragile": false
+      },
+      {
+        "item_id": "tank_1",
+        "shape": "cylinder",
+        "position": [
+          2.27,
+          1.35,
+          0.0
+        ],
+        "dims": [
+          0.4,
+          0.4,
+          0.75
+        ],
+        "center": [
+          2.4699999999999998,
+          1.55,
+          0.375
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 95.0,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.2,
+        "height": 0.75
+      },
+      {
+        "item_id": "rack_1",
+        "shape": "box",
+        "position": [
+          2.27,
+          1.75,
+          0.0
+        ],
+        "dims": [
+          0.5,
+          0.8,
+          0.6
+        ],
+        "center": [
+          2.52,
+          2.15,
+          0.3
+        ],
+        "orientation": "yxz",
+        "mass": 120.0,
+        "fragile": false
+      },
+      {
+        "item_id": "tank_2",
+        "shape": "cylinder",
+        "position": [
+          0.93862915,
+          2.10862915,
+          0.0
+        ],
+        "dims": [
+          0.4,
+          0.4,
+          0.75
+        ],
+        "center": [
+          1.13862915,
+          2.30862915,
+          0.375
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 95.0,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.2,
+        "height": 0.75
+      },
+      {
+        "item_id": "science_locker",
+        "shape": "box",
+        "position": [
+          0.93862915,
+          0.46862915,
+          0.25
+        ],
+        "dims": [
+          0.45,
+          0.45,
+          0.5
+        ],
+        "center": [
+          1.16362915,
+          0.69362915,
+          0.5
+        ],
+        "orientation": "xyz",
+        "mass": 55.0,
+        "fragile": true
+      },
+      {
+        "item_id": "CTB_double_1",
+        "shape": "box",
+        "position": [
+          0.090813126,
+          1.48862915,
+          0.25
+        ],
+        "dims": [
+          0.42,
+          0.5,
+          0.5
+        ],
+        "center": [
+          0.300813126,
+          1.73862915,
+          0.5
+        ],
+        "orientation": "yxz",
+        "mass": 48.0,
+        "fragile": false
+      },
+      {
+        "item_id": "crate_2",
+        "shape": "box",
+        "position": [
+          0.510813126,
+          1.48862915,
+          0.25
+        ],
+        "dims": [
+          0.4,
+          0.6,
+          0.4
+        ],
+        "center": [
+          0.7108131259999999,
+          1.78862915,
+          0.45
+        ],
+        "orientation": "yxz",
+        "mass": 60.0,
+        "fragile": false
+      },
+      {
+        "item_id": "gas_bottle_1",
+        "shape": "cylinder",
+        "position": [
+          2.10862915,
+          1.06862915,
+          0.0
+        ],
+        "dims": [
+          0.22,
+          0.22,
+          0.6
+        ],
+        "center": [
+          2.21862915,
+          1.17862915,
+          0.3
+        ],
+        "orientation": "cyl_axis_z",
+        "mass": 30.0,
+        "fragile": false,
+        "axis": "z",
+        "radius": 0.11,
+        "height": 0.6
+      }
+    ],
+    "unpacked": [],
+    "metrics": {
+      "items_packed": 22,
+      "items_unpacked": 0,
+      "volume_utilization": 0.244192106056408,
+      "bbox_extent_utilization": 0.502791694972826,
+      "packed_volume": 2.2462862549701925,
+      "usable_volume": 9.19884877216835,
+      "total_mass": 1361.0,
+      "max_mass": 3307.0,
+      "com": [
+        1.5900746177516534,
+        1.5847961199118294,
+        0.30698750918442325
+      ],
+      "com_basis": "mass",
+      "com_target": [
+        1.6,
+        1.6,
+        0.575
+      ],
+      "com_lateral_offset": 0.018156849465457044,
+      "com_offset_3d": 0.26862681626315876,
+      "com_deviation": 0.07391635125752476,
+      "max_height": 0.75,
+      "max_height_fraction": 0.6521739130434783,
+      "unpacked_priority_volume_fraction": 0.0,
+      "objective": 0.9462898025179746
+    },
+    "stats": {
+      "multistart_runs": 24,
+      "multistart_time_s": 0.19948433299941826,
+      "greedy_objective": 1.0425140633297052,
+      "sa_iterations": 1333,
+      "sa_accepted": 393,
+      "sa_improvements": 6,
+      "search_objective": 0.946845111528782,
+      "balance_swaps": 2,
+      "time_s": 6.001794749998226,
+      "seed": 0
+    }
+  }
+}

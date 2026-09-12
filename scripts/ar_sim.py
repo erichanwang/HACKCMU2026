@@ -67,6 +67,11 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
+_PACKER3D_ROOT = ROOT / "packer3d"
+if (_PACKER3D_ROOT / "packer3d" / "__init__.py").is_file() and str(_PACKER3D_ROOT) not in sys.path:
+    sys.path.append(str(_PACKER3D_ROOT))  # sibling source dir, same trick as physics/packer3d_adapter.py
+from packer3d.models import Item, oriented_solid_boxes  # noqa: E402 -- needs the sys.path append above
+
 RNG_SEED = 20260912
 TABLE_Y = 0.80          # world height of the table plane, metres
 WALL = 0.01             # suitcaseWallMeters, Spike/ScanView.swift
@@ -99,6 +104,13 @@ def skip(message: str) -> None:
 def fail(message: str) -> None:
     print(f"AR SIM: FAIL -- {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def warn(name: str, detail: str) -> None:
+    """A characterised limitation worth seeing, that is not a failure. scripts/ar_gate.sh lifts
+    these into its summary table as WARN rows, so a GREEN gate never reads as "nothing to know".
+    """
+    print(f"AR-WARN: {name} | {detail}")
 
 
 # --- geometry synthesis (numpy) ----------------------------------------------------------
@@ -344,7 +356,10 @@ import simd
 #endif
 
 struct ScanIn: Codable { let points: [[Float]]; let planeY: Float; let cell: Float; let padding: Float }
-struct ScanOut: Codable { let width: Float; let height: Float; let depth: Float; let axis: [Float]; let heights: [[Float]] }
+struct ScanOut: Codable {
+    let width: Float; let height: Float; let depth: Float; let axis: [Float]; let heights: [[Float]]
+    let footprint: [[Float]]?  // ScannedItem.footprint(from:) -- same code Spike/ScanView.swift will call
+}
 
 struct PlacementIn: Codable { let position: [Float]; let size: [Float] }
 struct TransformIn: Codable { let suitcasePoints: [[Float]]; let planeY: Float; let wall: Float; let placements: [PlacementIn] }
@@ -367,7 +382,8 @@ func runScan(_ items: [ScanIn]) -> [ScanOut] {
         }
         let hm = heightMap(points: pts, box: fit, planeY: inp.planeY, cell: inp.cell)
         return ScanOut(width: fit.width, height: fit.height, depth: fit.depth,
-                        axis: [fit.axis.x, fit.axis.y, fit.axis.z], heights: hm)
+                        axis: [fit.axis.x, fit.axis.y, fit.axis.z], heights: hm,
+                        footprint: ScannedItem.footprint(from: fit))
     }
 }
 
@@ -530,24 +546,97 @@ def post_item(url: str, item: dict) -> dict:
     return call(url, data=body, content_type=f"multipart/form-data; boundary={boundary}", method="POST")
 
 
-def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item_fits: list[dict]) -> list[dict]:
-    """POST /suitcases, POST every item's scan under it, POST /plan; returns the placements.
-    Used to solve a plan against a specific (e.g. ground-truth) suitcase, distinct from -- and not
-    printed alongside -- the main pipeline's own suitcase/items/plan."""
+def item_doc(it: dict, fit: dict, *, with_footprint: bool, item_id: str | None = None) -> dict:
+    """The `POST /items` body for one scanned item (SCAN_OUTPUT.md), optionally carrying the
+    footprint the real Swift path now computes (`ScannedItem.footprint`, docs/LIDAR_HULLS.md).
+    `item_id` defaults to a fresh uuid; pass a fixed one to compare two POSTs of "the same" item
+    (the solver's own ordering can depend on item id, so two calls with different random ids are
+    not a controlled comparison -- see `footprint_wiring_check`)."""
+    doc = {"id": item_id or f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": None,
+           "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
+           "heights": fit["heights"]}
+    if with_footprint and fit.get("footprint") is not None:
+        doc["footprint"] = fit["footprint"]
+    return doc
+
+
+def assert_footprint_in_box(name: str, fit: dict) -> None:
+    """Item 3's consistency check: every footprint vertex must fit inside the SAME box
+    (width/depth) this scan produced -- physics/geometry.py's `footprint_local` enforces this
+    server-side with 1e-6 m slack; assert it here too since prepack.py never hands the footprint
+    to that check on the live `/plan` path (see the wiring finding this script prints)."""
+    fp = fit.get("footprint")
+    if fp is None:
+        return
+    hx, hz = fit["width"] / 2, fit["depth"] / 2
+    for x, z in fp:
+        if abs(x) > hx + 1e-6 or abs(z) > hz + 1e-6:
+            fail(f"{name}: footprint point ({x:.4f}, {z:.4f}) exceeds box half-dimensions "
+                 f"({hx:.4f}, {hz:.4f})")
+
+
+def footprint_wiring_check(base: str, dims, items: list[dict], item_fits: list[dict]) -> None:
+    """Does sending `footprint` change the solver's plan at all? POST the same items/suitcase
+    twice -- once with `footprint`, once without -- and compare. `prepack.py`'s `physics_object()`
+    and packer3d's own Item builder never read `doc["footprint"]`, so this is expected to show no
+    effect; that is the real finding item 4 of the task asks for, not a bug in this script.
+
+    Pinning identical item ids across both POSTs (so id-driven noise doesn't confound the diff)
+    turned up a SEPARATE, real finding: the solver's own step/orientation assignment is not
+    reproducible run-to-run even with byte-identical requests -- verified by running the SAME
+    request (`with_footprint` held fixed) twice in a row and seeing the placements differ on
+    ~1/3 of trials. So exact placement equality is not a valid footprint test on its own; compare
+    the solver's own metrics (items_packed/unpacked -- order-invariant, and the one number that
+    would actually move if footprint let something pack that otherwise wouldn't) plus a
+    permutation-of-assignment-invariant summary (the multiset of packed box volumes)."""
+    ids = [f"{it['name']}-wiring-{uuid.uuid4().hex[:8]}" for it in items]
+    with_fp, with_metrics = post_suitcase_items_plan(base, "wiring check (with footprint)", dims, items,
+                                                       item_fits, with_footprint=True, item_ids=ids)
+    without_fp, without_metrics = post_suitcase_items_plan(base, "wiring check (without footprint)", dims,
+                                                             items, item_fits, with_footprint=False, item_ids=ids)
+    metrics_same = (with_metrics.get("items_packed") == without_metrics.get("items_packed")
+                     and with_metrics.get("items_unpacked") == without_metrics.get("items_unpacked"))
+    volumes = lambda ps: sorted(round(p["size"]["x"] * p["size"]["y"] * p["size"]["z"], 6) for p in ps)
+    volumes_same = volumes(with_fp) == volumes(without_fp)
+    exact_same = with_fp == without_fp
+    print(f"[wiring] with vs without `footprint`: items_packed/unpacked "
+          f"{'match' if metrics_same else 'DIFFER'} "
+          f"({with_metrics.get('items_packed')}/{with_metrics.get('items_unpacked')} vs "
+          f"{without_metrics.get('items_packed')}/{without_metrics.get('items_unpacked')}), "
+          f"packed volumes {'match' if volumes_same else 'DIFFER'}, "
+          f"exact placements {'match' if exact_same else 'differ (see note on solver order-noise above)'}")
+    if metrics_same and volumes_same:
+        print("[wiring] footprint is accepted by the server (Scan model has extra=\"allow\") but "
+              "never reaches a packing decision: physics/prepack.py's physics_object() and "
+              "packer3d's own Item builder both read only dimensions/heights/rigidity/etc., "
+              "never doc[\"footprint\"] -- the field is stored on the item doc and otherwise inert.")
+    else:
+        print("[wiring] UNEXPECTED: footprint correlates with a real outcome change -- "
+              f"with={with_metrics} without={without_metrics}")
+
+
+def post_suitcase_items_plan(base: str, name: str, dims, items: list[dict], item_fits: list[dict],
+                              *, with_footprint: bool = False,
+                              item_ids: list[str] | None = None) -> tuple[list[dict], dict]:
+    """POST /suitcases, POST every item's scan under it, POST /plan; returns (placements, solver
+    metrics). Used to solve a plan against a specific (e.g. ground-truth) suitcase, distinct from
+    -- and not printed alongside -- the main pipeline's own suitcase/items/plan. `item_ids`, if
+    given, pins each item's id (see `footprint_wiring_check`); otherwise each gets a fresh
+    random one."""
     status, suitcase_doc = post_json(f"{base}/suitcases", {"name": name, "dimensions": dims})
     if status != 200:
         fail(f"POST /suitcases ({name}) -> {status}: {suitcase_doc}")
-    for it, fit in zip(items, item_fits):
-        doc = {"id": f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": suitcase_doc["id"],
-               "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
-               "heights": fit["heights"]}
+    ids = item_ids or [None] * len(items)
+    for it, fit, item_id in zip(items, item_fits, ids):
+        doc = item_doc(it, fit, with_footprint=with_footprint, item_id=item_id)
+        doc["suitcaseId"] = suitcase_doc["id"]
         status, resp = post_item(f"{base}/items", doc)
         if status != 200:
             fail(f"POST /items ({name}/{it['name']}) -> {status}: {resp}")
     status, plan_doc = post_json(f"{base}/suitcases/{suitcase_doc['id']}/plan", {})
     if status != 200:
         fail(f"POST /suitcases/{{id}}/plan ({name}) -> {status}: {plan_doc}")
-    return plan_doc["plan"]["placements"]
+    return plan_doc["plan"]["placements"], plan_doc["solver"]["metrics"]
 
 
 # --- checks -----------------------------------------------------------------------------
@@ -567,6 +656,44 @@ def assert_contained(label: str, position, size, interior, eps: float = 1e-4) ->
 
 def boxes_overlap(a_pos, a_size, b_pos, b_size, eps: float = 1e-4) -> bool:
     return all(a_pos[i] < b_pos[i] + b_size[i] - eps and b_pos[i] < a_pos[i] + a_size[i] - eps for i in range(3))
+
+
+# app_plan.py's placement frame is packer3d's with y/z swapped, no reflection:
+# "app(x, y, z) = (packer_x, packer_z, packer_y)". `oriented_solid_boxes` only decomposes a
+# height-grid item into its cavity boxes for orientations "xyz"/"yxz" (the two that keep the
+# item's own "up" along world z); app_plan.py's `_ROTATION` maps exactly those two packer
+# orientations to the app rotation strings "XYZ"/"ZYX", everything else falls back to the plain
+# bbox in oriented_solid_boxes anyway, so only those two need naming here.
+_APP_ROTATION_TO_PACKER_ORIENTATION = {"XYZ": "xyz", "ZYX": "yxz"}
+
+
+def placement_solid_boxes(placement: dict, items_by_id: dict) -> list:
+    """`placement`'s occupied boxes (list of packer-frame ``(lo, hi)`` tuples), decomposed into
+    cavity solids via `packer3d`'s own `Item.solid_boxes()`/`oriented_solid_boxes` -- the same
+    algorithm `packer3d.verify` and `physics/packer3d_adapter.py` use -- instead of one bbox per
+    placement, so a legitimately nested item (e.g. a cup inside a bowl) isn't reported as an
+    overlap with its container."""
+    pos, size = placement["position"], placement["size"]
+    packer_pos = (pos["x"], pos["z"], pos["y"])
+    packer_dims = (size["x"], size["z"], size["y"])
+    item = items_by_id.get(placement["itemId"])
+    if item is None:
+        return [(packer_pos, tuple(packer_pos[k] + packer_dims[k] for k in range(3)))]
+    orientation = _APP_ROTATION_TO_PACKER_ORIENTATION.get(placement.get("rotation"), "")
+    return oriented_solid_boxes(item, packer_pos, packer_dims, orientation)
+
+
+def solids_overlap(placement_a: dict, placement_b: dict, items_by_id: dict) -> bool:
+    """True iff any solid sub-box of `placement_a` truly overlaps any solid sub-box of
+    `placement_b` -- unlike a bare bounding-box test, this lets one item's cavity legitimately
+    contain another's solid."""
+    for a_lo, a_hi in placement_solid_boxes(placement_a, items_by_id):
+        a_size = [a_hi[k] - a_lo[k] for k in range(3)]
+        for b_lo, b_hi in placement_solid_boxes(placement_b, items_by_id):
+            b_size = [b_hi[k] - b_lo[k] for k in range(3)]
+            if boxes_overlap(a_lo, a_size, b_lo, b_size):
+                return True
+    return False
 
 
 # --- degradation report -------------------------------------------------------------------
@@ -673,7 +800,9 @@ def clutter_check(driver: Path) -> None:
     w, d, h, cell, gap = BOX_ARGS["w"], BOX_ARGS["d"], BOX_ARGS["h"], 0.02, 0.03
     print("== clutter: two boxes 3cm apart, one tap on the first ==")
     print(f"{'grid phase':<12} {'cluster pts':<14} {'of total':<10} {'resulting box (m)':<20} verdict")
-    for phase in (0.0, cell / 2):
+    merged_phases = 0
+    phases = (0.0, cell / 2)
+    for phase in phases:
         cx, cz = 2.0 + phase, 2.0
         a = box_points(np.random.default_rng(RNG_SEED + 100), w=w, d=d, h=h, cx=cx, cz=cz, angle=0.0, table_y=TABLE_Y)
         b = box_points(np.random.default_rng(RNG_SEED + 101), w=w, d=d, h=h, cx=cx + w + gap, cz=cz, angle=0.0,
@@ -686,7 +815,11 @@ def clutter_check(driver: Path) -> None:
         box_str = "x".join(f"{v:.3f}" for v in out["box"])
         print(f"{phase * 100:5.1f} cm     {out['clusterCount']:<14} {out['clusterCount']}/{out['totalCount']:<8} "
               f"{box_str:<20} {'MERGED (known limitation)' if merged else 'separated'}")
+        merged_phases += bool(merged)
     print("")
+    if merged_phases:
+        warn("clutter merge", f"two boxes {gap * 100:.0f} cm apart fuse into one at "
+                              f"{merged_phases}/{len(phases)} grid phases (connectedCluster limitation)")
 
 
 def _drift_fit(driver: Path, true_points: np.ndarray, pivot: np.ndarray, axis_deg: float, horizontal_cm: float,
@@ -733,6 +866,7 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
     print("(planeY is re-resolved live -- Spike/ScanView.swift's refreshPlaneY -- so vertical world "
           "drift is now largely corrected; horizontal drift and axis error are not)")
     print(f"{'scenario':<58} {'corner err (today/frozen)':<28} {'escape (today/frozen)':<28} fits? (today)")
+    worst_esc, worst_label = 0.0, ""
     for label, (plane_cm, vertical_cm, axis_deg, horizontal_cm) in (
             ("mid-range", DRIFT_MID), ("worst realistic", DRIFT_WORST)):
         # The real table never moves -- what drifts is ARKit's world-frame belief about its
@@ -758,6 +892,11 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
                     f"{axis_deg:.0f}deg axis, {horizontal_cm:.0f}cm horizontal drift)")
         print(f"{scenario:<58} {corner_err * 100:5.2f} / {frozen_corner_err * 100:5.2f} cm         "
               f"{max_esc * 100:5.2f} / {frozen_esc * 100:5.2f} cm ({escaped} corners)   {verdict}")
+        if max_esc > worst_esc:
+            worst_esc, worst_label = max_esc, label
+    if worst_esc > 1e-4:
+        warn("drift escape", f"worst {worst_esc * 100:.2f} cm at {worst_label} drift, "
+                              f"live-planeY corrected (horizontal drift and axis error are not)")
     print("note: horizontal drift + axis error dominate both columns here (the interior is tall "
           "enough that the vertical shift alone doesn't threaten containment); it still shows up "
           "as the small today/frozen gap in corner err, all of it in the corrected Y term.")
@@ -771,6 +910,43 @@ def drift_check(driver: Path, true_suitcase_points: np.ndarray, true_out: dict, 
 # on (~0.5 cm, measured with --no-lid-open) -- so the tolerance below is set just above that
 # noise floor, not at zero: it fails on a lid inflating the box again, not on routine jitter.
 LID_OPEN_ESCAPE_TOLERANCE_M = 0.010
+
+
+def pin_nesting_overlap_check() -> None:
+    """Regression pin for `solids_overlap`, both directions -- no driver/docker needed, so it
+    always runs, even when the rest of the pipeline skips. A bowl (box item with a cavity carved
+    into one quadrant of its height grid, like `Item.solid_boxes`) with a cup placed in that
+    cavity must NOT be reported as an overlap; two genuinely overlapping plain boxes still must
+    be. Without the second half, "always accepts" would pass just as silently as the bug this
+    check replaces."""
+    # 4x4 height grid, one corner cell (x>=0.15, z>=0.15) empty: fill_frac 15/16 and
+    # volume/bbox 15/16 both clear the 0.9 "box" classification threshold (a coarser cavity,
+    # e.g. one of 2x2, reads as "cylinder" and falls back to the plain bbox -- see models.py's
+    # from_scanned_heightmap classifier -- which would make this pin test nothing).
+    bowl = Item.from_scanned_heightmap({"id": "bowl", "dimensions": [0.2, 0.1, 0.2], "cellSize": 0.05,
+                                         "heights": [[0.1, 0.1, 0.1, 0.1], [0.1, 0.1, 0.1, 0.1],
+                                                     [0.1, 0.1, 0.1, 0.1], [0.1, 0.1, 0.1, 0.0]]})
+    cup = Item.from_scanned_heightmap({"id": "cup", "dimensions": [0.04, 0.04, 0.04], "cellSize": 0.04,
+                                        "heights": [[0.04]]})
+    items_by_id = {"bowl": bowl, "cup": cup}
+    bowl_p = {"itemId": "bowl", "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+              "size": {"x": 0.2, "y": 0.1, "z": 0.2}, "rotation": "XYZ"}
+    cup_p = {"itemId": "cup", "position": {"x": 0.155, "y": 0.0, "z": 0.155},
+             "size": {"x": 0.04, "y": 0.04, "z": 0.04}, "rotation": "XYZ"}
+    assert boxes_overlap([0.0, 0.0, 0.0], [0.2, 0.1, 0.2], [0.155, 0.0, 0.155], [0.04, 0.04, 0.04]), \
+        "sanity: bowl/cup bboxes should overlap, or this isn't testing nesting at all"
+    assert not solids_overlap(bowl_p, cup_p, items_by_id), \
+        "cup nested in the bowl's cavity must not be reported as an overlap"
+
+    a = Item.from_scanned_heightmap({"id": "a", "dimensions": [0.1, 0.1, 0.1], "cellSize": 0.1, "heights": [[0.1]]})
+    b = Item.from_scanned_heightmap({"id": "b", "dimensions": [0.1, 0.1, 0.1], "cellSize": 0.1, "heights": [[0.1]]})
+    items_by_id2 = {"a": a, "b": b}
+    a_p = {"itemId": "a", "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+           "size": {"x": 0.1, "y": 0.1, "z": 0.1}, "rotation": "XYZ"}
+    b_p = {"itemId": "b", "position": {"x": 0.05, "y": 0.0, "z": 0.05},
+           "size": {"x": 0.1, "y": 0.1, "z": 0.1}, "rotation": "XYZ"}
+    assert solids_overlap(a_p, b_p, items_by_id2), "two genuinely overlapping boxes must still fail"
+    print("== nesting overlap check pinned: bowl/cup nesting accepted, genuine overlap rejected ==\n")
 
 
 def lid_open_true_interior_check(true_out: dict, degraded_out: dict, placements: list[dict]) -> None:
@@ -787,6 +963,8 @@ def lid_open_true_interior_check(true_out: dict, degraded_out: dict, placements:
           f"vs. degraded interior {degraded_out['interior'][0]:.3f}x{degraded_out['interior'][1]:.3f}x"
           f"{degraded_out['interior'][2]:.3f} m: max escape {max_esc * 100:.2f} cm ({escaped} corners) -- fits? {verdict}")
     print("")
+    warn("lid-open fit", f"max escape {max_esc * 100:.2f} cm ({escaped} corners) vs "
+                         f"{LID_OPEN_ESCAPE_TOLERANCE_M * 100:.2f} cm tolerance")
     if not fits:
         fail(f"lid-open reality check: max escape {max_esc * 100:.2f} cm exceeds "
              f"{LID_OPEN_ESCAPE_TOLERANCE_M * 100:.2f} cm -- an open-lid scan no longer fits the true bag")
@@ -804,6 +982,7 @@ def main() -> int:
     mongo_name: str | None = None
     server: subprocess.Popen | None = None
     try:
+        pin_nesting_overlap_check()
         driver = build_driver(tmp_root)
 
         print(f"degradations active this run: "
@@ -862,18 +1041,21 @@ def main() -> int:
             fail(f"POST /suitcases -> {status}: {suitcase_doc}")
         print(f"[2/5] suitcase {suitcase_doc['id']} interior {interior[0]:.3f}x{interior[1]:.3f}x{interior[2]:.3f} m")
 
-        # 3) POST every item
+        # 3) POST every item, footprint included when the scan produced one
         item_ids = []
+        items_by_id = {}  # item id -> packer3d Item, so the overlap check below can decompose cavities
         for it, fit in zip(items, item_fits):
-            doc = {"id": f"{it['name']}-{uuid.uuid4().hex[:8]}", "suitcaseId": suitcase_doc["id"],
-                   "dimensions": [fit["width"], fit["height"], fit["depth"]], "cellSize": it["cell"],
-                   "heights": fit["heights"]}
+            assert_footprint_in_box(it["name"], fit)
+            doc = item_doc(it, fit, with_footprint=True)
+            doc["suitcaseId"] = suitcase_doc["id"]
             status, resp = post_item(f"{base}/items", doc)
             if status != 200:
                 fail(f"POST /items ({it['name']}) -> {status}: {resp}")
             item_ids.append(resp["id"])
+            items_by_id[doc["id"]] = Item.from_scanned_heightmap(doc)
+            fp_note = f"footprint {len(fit['footprint'])}v" if fit.get("footprint") is not None else "footprint none"
             print(f"      + {it['name']:<12} {doc['dimensions'][0]:.3f}x{doc['dimensions'][1]:.3f}x"
-                  f"{doc['dimensions'][2]:.3f} m  label={resp['label']}")
+                  f"{doc['dimensions'][2]:.3f} m  label={resp['label']}  {fp_note}")
 
         # 4) POST /plan
         status, plan_doc = post_json(f"{base}/suitcases/{suitcase_doc['id']}/plan", {})
@@ -885,6 +1067,8 @@ def main() -> int:
               f"physics valid={plan_doc['validation']['valid']}")
         if not placements:
             fail("solver packed zero items; nothing to check the transform/containment against")
+
+        footprint_wiring_check(base, interior, items, item_fits)
 
         # 5) push placements through the real bag->world transform and check them
         transform_req = {"cmd": "transform", "transform": {
@@ -909,11 +1093,7 @@ def main() -> int:
         for i in range(len(placements)):
             for j in range(i + 1, len(placements)):
                 pi, pj = placements[i], placements[j]
-                pos_i = [pi["position"]["x"], pi["position"]["y"], pi["position"]["z"]]
-                size_i = [pi["size"]["x"], pi["size"]["y"], pi["size"]["z"]]
-                pos_j = [pj["position"]["x"], pj["position"]["y"], pj["position"]["z"]]
-                size_j = [pj["size"]["x"], pj["size"]["y"], pj["size"]["z"]]
-                if boxes_overlap(pos_i, size_i, pos_j, size_j):
+                if solids_overlap(pi, pj, items_by_id):
                     fail(f"{pi['label']} (step {pi['step']}) overlaps {pj['label']} (step {pj['step']})")
 
         print(f"[5/5] every placement is inside the bag, no two overlap, all world positions finite")
@@ -930,8 +1110,8 @@ def main() -> int:
             # A plan solved against the SAME (true, undegraded) bag the drift sweep measures
             # against -- reusing `placements` here would confound drift with whatever degraded
             # the suitcase (e.g. lid-open inflation), mis-attributing that error to drift.
-            true_placements = post_suitcase_items_plan(base, "sim suitcase (true bag, for drift)",
-                                                         true_out["interior"], items, item_fits)
+            true_placements, _ = post_suitcase_items_plan(base, "sim suitcase (true bag, for drift)",
+                                                            true_out["interior"], items, item_fits)
             drift_check(driver, true_suitcase_cloud, true_out, true_placements)
 
         return 0

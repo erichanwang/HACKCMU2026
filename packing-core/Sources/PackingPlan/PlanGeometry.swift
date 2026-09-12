@@ -21,6 +21,11 @@ public enum GeometryIssue: Hashable, Sendable {
     /// A size component is zero or negative.
     case degenerateSize(itemID: String, size: Vector3)
 
+    /// The placement claims to nest inside an item the plan does not contain.
+    /// Reported rather than quietly dropped: the nesting is ignored either way,
+    /// but a host ID that names nothing is a producer bug worth seeing.
+    case unknownNestingHost(itemID: String, hostItemID: String)
+
     // MARK: - Stability (see `stabilityIssues()`)
     //
     // Reported separately from the cases above: those mean the solver emitted
@@ -57,6 +62,8 @@ extension GeometryIssue: CustomStringConvertible {
             return "\(itemID) names unknown zone '\(zoneID)'"
         case let .degenerateSize(itemID, size):
             return "\(itemID) has a non-positive size \(size)"
+        case let .unknownNestingHost(itemID, hostItemID):
+            return "\(itemID) claims to nest in '\(hostItemID)', which the plan does not contain"
         case let .floating(itemID, gap):
             return String(format: "%@ floats %.3f m above anything that could hold it up", itemID, gap)
         case let .unsupportedOverhang(itemID, supportedFraction):
@@ -74,6 +81,38 @@ extension GeometryIssue: CustomStringConvertible {
 }
 
 public extension PackingPlan {
+    /// The `nestedIn` assertions the geometry checks honour, keyed by the nested
+    /// item's ID.
+    ///
+    /// `nestedIn` is the producer's claim, and a wrong claim must not be able to
+    /// hide a collision, so every dubious form is dropped and the placement is
+    /// treated as not nested: a host the plan does not contain (also reported as
+    /// `.unknownNestingHost`), a self-reference, and any chain of hosts that
+    /// loops back on itself.
+    func honouredNesting() -> [String: Nesting] {
+        let itemIDs = Set(placements.map(\.itemID))
+        let host = Dictionary(
+            placements.compactMap { p in p.nestedIn.map { (p.itemID, $0.itemID) } },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var honoured: [String: Nesting] = [:]
+        for placement in placements {
+            guard let nesting = placement.nestedIn, itemIDs.contains(nesting.itemID) else { continue }
+            // Walk up the host chain. Ending on an ID already seen means the chain
+            // loops; a self-reference is just the shortest such loop.
+            var seen: Set<String> = []
+            var cursor: String? = placement.itemID
+            while let current = cursor, seen.insert(current).inserted {
+                cursor = host[current]
+            }
+            if cursor == nil {
+                honoured[placement.itemID] = nesting
+            }
+        }
+        return honoured
+    }
+
     /// Every geometric problem in the plan, in a stable order.
     ///
     /// Empty means the plan is geometrically sound: all placements inside the
@@ -83,6 +122,7 @@ public extension PackingPlan {
         var issues: [GeometryIssue] = []
         let ordered = orderedPlacements
         let interior = container.interior
+        let itemIDs = Set(ordered.map(\.itemID))
 
         for placement in ordered {
             let box = placement.box
@@ -110,14 +150,32 @@ public extension PackingPlan {
             } else {
                 issues.append(.unknownZone(itemID: placement.itemID, zoneID: placement.zone))
             }
+
+            if let nesting = placement.nestedIn, !itemIDs.contains(nesting.itemID) {
+                issues.append(
+                    .unknownNestingHost(itemID: placement.itemID, hostItemID: nesting.itemID)
+                )
+            }
         }
 
         // Pairwise: n is the number of items a person packs, so O(n²) is fine.
+        let nesting = honouredNesting()
         for i in ordered.indices {
             for j in ordered.index(after: i)..<ordered.endIndex {
                 let a = ordered[i]
                 let b = ordered[j]
                 guard a.box.intersects(b.box, tolerance: tolerance) else { continue }
+                // A nested item shares volume with its host legitimately — but only
+                // inside the cavity the producer named. The shared volume of two
+                // boxes is itself a box, so the test is exactly "is that box inside
+                // the cavity": a cup in a bowl's well passes, the same cup shoved
+                // through the bowl's wall does not, and neither does anything the
+                // pair happens to overlap elsewhere. Skipping the pair outright
+                // would turn a real interpenetration into a silent feature.
+                if let cavity = cavity(sharedBy: a, b, nesting),
+                   intersection(a.box, b.box).isContained(in: cavity, tolerance: tolerance) {
+                    continue
+                }
                 issues.append(
                     .intersection(
                         itemID: a.itemID,
@@ -176,6 +234,8 @@ public extension PackingPlan {
         let ordered = orderedPlacements
         let ceiling = container.dimensions.y
 
+        let nesting = honouredNesting()
+
         for placement in ordered {
             let box = placement.box
             let base = box.minCorner.y
@@ -183,10 +243,18 @@ public extension PackingPlan {
 
             // Anything that could hold this item up: a box under our footprint
             // whose top is at or below our base. The floor counts, at y = 0.
-            let below = others.filter {
-                $0.box.maxCorner.y <= base + tolerance && footprintOverlap(box, $0.box) > 0
+            //
+            // A nested item is held up by the floor of its host's cavity, which is
+            // a void inside the host's own box — the host box is therefore *not*
+            // below it, and without this the socks in a shoe read as floating.
+            var supporters = others.map(\.box)
+            if let cavity = nesting[placement.itemID]?.cavity.box {
+                supporters.append(plinth(under: cavity))
             }
-            let surface = max(below.map(\.box.maxCorner.y).max() ?? 0, 0)
+            let below = supporters.filter {
+                $0.maxCorner.y <= base + tolerance && footprintOverlap(box, $0) > 0
+            }
+            let surface = max(below.map(\.maxCorner.y).max() ?? 0, 0)
             let gap = base - surface
 
             if gap > tolerance {
@@ -196,17 +264,18 @@ public extension PackingPlan {
                 // rectangles are the footprints topping out at our base; they are
                 // disjoint, because two boxes ending at the same height with
                 // overlapping footprints would share volume and `geometryIssues()`
-                // already reports that. So the supported areas simply add up.
-                let contacts = below.filter { abs($0.box.maxCorner.y - base) <= tolerance }
+                // already reports that. So the supported areas simply add up. The
+                // one exception is a cavity plinth, which does overlap its host's
+                // footprint — a nested item's reported fraction can over-count.
+                let contacts = below.filter { abs($0.maxCorner.y - base) <= tolerance }
                 let footprint = box.size.x * box.size.z
-                let supported = contacts.reduce(0) { $0 + footprintOverlap(box, $1.box) }
+                let supported = contacts.reduce(0) { $0 + footprintOverlap(box, $1) }
                 let com = box.center
                 // The centre of mass is inside our own footprint by construction,
                 // so "inside a supporter's footprint" and "inside the contact
                 // rectangle" are the same test.
-                let held = contacts.contains { supporter in
-                    let s = supporter.box
-                    return com.x >= s.minCorner.x - tolerance && com.x <= s.maxCorner.x + tolerance
+                let held = contacts.contains { s in
+                    com.x >= s.minCorner.x - tolerance && com.x <= s.maxCorner.x + tolerance
                         && com.z >= s.minCorner.z - tolerance && com.z <= s.maxCorner.z + tolerance
                 }
                 if !held {
@@ -241,6 +310,43 @@ public extension PackingPlan {
 
         return issues
     }
+}
+
+/// The box two boxes share. Only meaningful when they do intersect; a separated
+/// pair gives a box with a negative extent.
+private func intersection(_ a: BoundingBox, _ b: BoundingBox) -> BoundingBox {
+    let low = Vector3(
+        max(a.minCorner.x, b.minCorner.x),
+        max(a.minCorner.y, b.minCorner.y),
+        max(a.minCorner.z, b.minCorner.z)
+    )
+    let high = Vector3(
+        min(a.maxCorner.x, b.maxCorner.x),
+        min(a.maxCorner.y, b.maxCorner.y),
+        min(a.maxCorner.z, b.maxCorner.z)
+    )
+    return BoundingBox(minCorner: low, size: high - low)
+}
+
+/// The cavity one of the two placements is nested in the other by, if either is —
+/// the only region in which the pair may share volume.
+private func cavity(
+    sharedBy a: Placement,
+    _ b: Placement,
+    _ nesting: [String: Nesting]
+) -> BoundingBox? {
+    if let n = nesting[a.itemID], n.itemID == b.itemID { return n.cavity.box }
+    if let n = nesting[b.itemID], n.itemID == a.itemID { return n.cavity.box }
+    return nil
+}
+
+/// The cavity floor as a support surface: a column from the bag floor up to the
+/// underside of the cavity, with the cavity's own footprint.
+private func plinth(under cavity: BoundingBox) -> BoundingBox {
+    BoundingBox(
+        minCorner: Vector3(cavity.minCorner.x, 0, cavity.minCorner.z),
+        size: Vector3(cavity.size.x, cavity.minCorner.y, cavity.size.z)
+    )
 }
 
 /// Contact area of two boxes seen from above, in square metres. Zero when their

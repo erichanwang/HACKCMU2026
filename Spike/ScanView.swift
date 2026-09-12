@@ -22,6 +22,12 @@ let shapeCellMeters: Float = 0.01
 /// Suitcase wall + floor thickness subtracted from the scanned outer shell to get the interior.
 /// Calibration knob: measure a real bag (outer minus inner, halved) and set it before the demo.
 let suitcaseWallMeters: Float = 0.01
+/// Extra floor clearance for the wheel well. Calibration knob: measure a real bag and set it
+/// before the demo. Defaults to `suitcaseWallMeters` (bit-identical to no calibration).
+let suitcaseFloorWallMeters: Float = suitcaseWallMeters
+/// Extra depth clearance for the telescoping handle's spine. Calibration knob: measure a real
+/// bag and set it before the demo. Defaults to `suitcaseWallMeters` (bit-identical to no calibration).
+let suitcaseHandleWallMeters: Float = suitcaseWallMeters
 
 /// What the next tap captures: the bag itself, or something to put in it.
 enum ScanMode: Hashable {

@@ -30,11 +30,14 @@ func convexHull(_ pts: [SIMD2<Float>]) -> [SIMD2<Float>] {
     return Array(lower.dropLast() + upper.dropLast())
 }
 
-/// Minimum-area bounding rectangle of 2D points. Returns (width, depth, center, unit axis of width edge).
+/// Minimum-area bounding rectangle of 2D points. Returns (width, depth, center, unit axis of width edge),
+/// or nil when the points have no 2D footprint at all — fewer than three hull points means empty,
+/// a single point, duplicates only, or an exactly collinear line, and a zero-depth rectangle is
+/// worse than no scan — `POST /items` rejects any dimension <= 0 and the scan is lost anyway.
 /// ponytail: O(hull²) edge scan, fine for a few thousand points; rotating calipers if it ever matters.
 func minAreaRect(_ pts: [SIMD2<Float>]) -> (w: Float, d: Float, center: SIMD2<Float>, axis: SIMD2<Float>)? {
     let hull = convexHull(pts)
-    guard hull.count >= 2 else { return nil }
+    guard hull.count >= 3 else { return nil }
     var best: (area: Float, w: Float, d: Float, center: SIMD2<Float>, axis: SIMD2<Float>)?
     for i in 0..<hull.count {
         let e = hull[(i + 1) % hull.count] - hull[i]
@@ -57,6 +60,8 @@ func minAreaRect(_ pts: [SIMD2<Float>]) -> (w: Float, d: Float, center: SIMD2<Fl
 }
 
 /// Fit a box to world-space points sitting on a horizontal plane at `planeY`.
+/// nil when there is no 2D footprint to fit (see `minAreaRect`), so the tap reports
+/// "nothing above the table here" rather than shipping a degenerate item.
 func fitBox(points: [SIMD3<Float>], planeY: Float, padding: Float) -> BoxFit? {
     guard !points.isEmpty else { return nil }
     let flat = points.map { SIMD2<Float>($0.x, $0.z) }
@@ -70,6 +75,9 @@ func fitBox(points: [SIMD3<Float>], planeY: Float, padding: Float) -> BoxFit? {
 
 /// Keep only points connected to the seed through occupied `cell`-sized grid cells (8-neighbourhood).
 /// Separates the tapped object from neighbours that are at least one empty cell away.
+/// ponytail: the grid is fixed to the world, so separation is only guaranteed for gaps wider
+/// than two cells (4 cm at ScanView's 0.02) — a 3 cm gap that straddles one cell boundary
+/// leaves no empty cell and merges. Flood by point distance instead if that ever bites.
 func connectedCluster(_ points: [SIMD3<Float>], seed: SIMD3<Float>, cell: Float) -> [SIMD3<Float>] {
     struct Key: Hashable { let x: Int, z: Int }
     func key(_ p: SIMD3<Float>) -> Key { Key(x: Int((p.x / cell).rounded(.down)), z: Int((p.z / cell).rounded(.down))) }
@@ -103,13 +111,18 @@ func densify(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, spacing: F
 /// ponytail: 2.5D — undercuts and overhangs are invisible from above; multi-view fusion if that ever matters.
 func heightMap(points: [SIMD3<Float>], box: BoxFit, planeY: Float, cell: Float) -> [[Float]] {
     let perp = SIMD3<Float>(-box.axis.z, 0, box.axis.x)
-    let ni = max(1, Int((box.width / cell).rounded(.up))), nj = max(1, Int((box.depth / cell).rounded(.up)))
+    // ceil(span / cell) with a sliver of slack: in Float 0.2 / 0.01 is 20.000002,
+    // and a bare ceil then ships an extra all-zero row on every exact multiple of the cell.
+    func count(_ span: Float) -> Int { max(1, Int((span / cell - 1e-4).rounded(.up))) }
+    let ni = count(box.width), nj = count(box.depth)
     var h = Array(repeating: Array(repeating: Float(0), count: nj), count: ni)
     for p in points {
         let d = p - box.center
-        let i = Int(((simd_dot(d, box.axis) + box.width / 2) / cell).rounded(.down))
-        let j = Int(((simd_dot(d, perp) + box.depth / 2) / cell).rounded(.down))
-        guard (0..<ni).contains(i), (0..<nj).contains(j) else { continue }
+        // Clamped, not dropped: the box is fitted to these same points, so a point on the far
+        // boundary (d == +width/2) indexes one past the last cell and would otherwise zero the
+        // very row that defines the box's edge.
+        let i = min(ni - 1, max(0, Int(((simd_dot(d, box.axis) + box.width / 2) / cell).rounded(.down))))
+        let j = min(nj - 1, max(0, Int(((simd_dot(d, perp) + box.depth / 2) / cell).rounded(.down))))
         h[i][j] = max(h[i][j], p.y - planeY)
     }
     return h

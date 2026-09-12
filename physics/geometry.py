@@ -52,8 +52,11 @@ def obb_from(entity: Object | Container) -> OBB:
     return OBB(center=pos, axes=rot, half_extents=half_extents, id=entity.id)
 
 
+# Corner sign pattern, fixed order: (-,-,-), (-,-,+), (-,+,-), ... (+,+,+).
+SIGNS = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)], dtype=float)
+
+
 def obb_vertices(obb: OBB) -> np.ndarray:
-    """8x3 array of world-space corner points."""
-    signs = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
-    offsets = signs * obb.half_extents  # (8, 3) in local axis units
+    """8x3 array of world-space corner points, in `SIGNS` order."""
+    offsets = SIGNS * obb.half_extents  # (8, 3) in local axis units
     return obb.center + offsets @ obb.axes.T

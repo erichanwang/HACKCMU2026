@@ -1,12 +1,12 @@
 """Travel-semantics constraint checker.
 
-Optional metadata-driven layer on top of `physics.geometry`. Does nothing if
-every object's `Constraints` is left at defaults (all False / None) — it only
-flags things an object opted into via `fragile`, `keep_upright`,
-`cannot_support_weight`, `heavy`, or `orientation_lock`.
+Optional metadata-driven layer on top of `physics.scene_geometry`. Does
+nothing if every object's `Constraints` is left at defaults (all False /
+None) -- it only flags things an object opted into via `fragile`,
+`keep_upright`, `cannot_support_weight`, `heavy`, or `orientation_lock`.
 
 Checks:
-  1. keep_upright: local Y axis (OBB.axes[:, 1]) must stay within
+  1. keep_upright: local Y axis (`geom.axes[:, :, 1]`) must stay within
      `angle_tol_deg` (default 15) of world up [0, 1, 0]. -> LIQUID_NOT_UPRIGHT.
   2. orientation_lock:
        "this_side_up" -> same test as keep_upright.
@@ -15,25 +15,54 @@ Checks:
        "horizontal"   -> local Y axis must be within tolerance of the XZ
                          plane (roughly perpendicular to world up).
      -> INVALID_ORIENTATION.
-  3. cannot_support_weight: violated if nonzero mass rests on top of the
-     object (weight-overlap below). -> FRAGILE_OBJECT_OVERLOADED.
-  4. fragile (warning, not a violation): nonzero mass rests on top of the
-     object, OR the object's XZ footprint overlaps/near-touches a `heavy`
+  3. cannot_support_weight: violated if nonzero TRANSITIVE load rests on top
+     of the object (below). -> FRAGILE_OBJECT_OVERLOADED.
+  4. fragile (warning, not a violation): nonzero transitive load rests on
+     top of the object, OR the object's XZ footprint overlaps a `heavy`
      object's footprint at roughly the same height. -> FRAGILE_LOAD.
   5. heavy resting on top of anything (informational, always emitted when it
      happens, independent of the object underneath's constraints).
      -> HEAVY_ON_TOP.
 
-Weight-overlap approximation ("what rests on X"): for every ordered pair
-(X, Y) with Y != X, Y counts as resting on X if Y's OBB lowest-Y extent is
-within `contact_eps_m` (default 0.02 m) of X's OBB highest-Y extent, AND
-their axis-aligned XZ bounding rectangles (derived from each OBB's 8
-vertices, i.e. already accounting for rotation) overlap by any nonzero
-amount. This is O(n^2) over the scene's objects — fine for the object counts
-a suitcase-packing scene actually has. "Adjacent" for the fragile/heavy
-check reuses the same XZ-rectangle-overlap test, without the height
-requirement, as a footprint-proximity approximation — it deliberately does
-not measure true 3D contact/side-adjacency.
+Contact topology ("what rests on what") comes from the shared
+`scene_geometry.resting_pairs`: an ordered (top, bottom, xz_overlap_area)
+triple for every pair where top's lowest-Y is within `contact_eps_m` of
+bottom's highest-Y and their AABB footprints overlap with positive area.
+Rotation-aware to the extent an AABB is (exact for yaw, conservative
+otherwise) -- see `scene_geometry.xz_overlap_area`. Building this is O(n^2),
+a single vectorized broadcast over the scene's objects.
+
+Load model -- transitive, area-weighted propagation:
+A resting DAG can stack more than one level deep (a shoe on a toiletry bag
+on a laptop): the laptop is loaded by the *whole* stack above it, not just
+the toiletry bag directly touching it. We compute, per object x:
+
+    load[x] = mass[x] + sum_{y rests on x} load[y] * w_yx
+    w_yx = area_yx / sum_{z: y rests on z} area_yz
+    supported_weight_kg[x] = load[x] - mass[x]
+
+i.e. each object's accumulated load (its own mass plus everything piled on
+it) is split among *its own* direct supporters in proportion to contact
+overlap area -- a single supporter takes 100% of it, two equal-area
+supporters split it 50/50, etc. This collapses to the old direct-sum
+definition for single-level stacks (one supporter, w = 1), so existing
+single-level results are unchanged.
+
+Computed by processing objects top-down (descending `aabb_min[:, 1]`, so a
+resting DAG's leaves are visited before its roots) and, for each object in
+that order, pushing its already-fully-accumulated `load` down onto its own
+direct supporters. One pass, O(E) over the resting-pair edges after an
+O(n log n) sort -- dominated by the O(n^2) topology build above. We also
+keep the old direct definition (`direct_weight_kg` = sum of mass of objects
+*directly* on top, no propagation) alongside the transitive one in the
+violation/warning details, since it's still a useful "what's touching this"
+number for a renderer.
+
+`HEAVY_ON_TOP.details.load_path`: from the heavy object down to the
+floor-level (no-supporters) object, following the heaviest-loaded supporting
+edge at each step -- i.e. at each node, the direct supporter receiving the
+largest share of that node's load (equivalent to the largest-area supporter,
+since a node's load is fixed when comparing its own supporters).
 """
 from __future__ import annotations
 
@@ -42,7 +71,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from physics.geometry import obb_from, obb_vertices
+from physics.scene_geometry import SceneGeometry, precompute, resting_pairs, xz_overlap_area
 from physics.schema import Scene
 
 WORLD_UP = np.array([0.0, 1.0, 0.0])
@@ -70,49 +99,89 @@ def _up_axis_tilt_deg(local_up: np.ndarray) -> float:
     return math.degrees(math.acos(cos))
 
 
-def _xz_rect(vertices: np.ndarray) -> tuple[float, float, float, float]:
-    """(min_x, max_x, min_z, max_z) axis-aligned rectangle from 8 OBB verts."""
-    return vertices[:, 0].min(), vertices[:, 0].max(), vertices[:, 2].min(), vertices[:, 2].max()
+def _up_axis_cosines(axes: np.ndarray) -> list[float]:
+    """`_up_axis_tilt_deg`'s clipped cosine for every object at once.
 
-
-def _rects_overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
-    ax0, ax1, az0, az1 = a
-    bx0, bx1, bz0, bz1 = b
-    return ax0 < bx1 and bx0 < ax1 and az0 < bz1 and bz0 < az1
+    Dotting a local up axis with world up (0, 1, 0) just picks that column's
+    y component, and the columns of a rotation matrix are unit length -- but
+    only to within ~1e-16, and `acos` is steep near 1, so the division by the
+    norm is kept: it is what makes this bit-for-bit equal to the per-object
+    path. Only the (cheap) `acos` is left to the caller, which needs it solely
+    for objects that opted into an orientation constraint."""
+    up = axes[:, :, 1]
+    return np.clip(up[:, 1] / np.linalg.norm(up, axis=1), -1.0, 1.0).tolist()
 
 
 def check_constraints(
     scene: Scene,
     angle_tol_deg: float = DEFAULT_ANGLE_TOL_DEG,
     contact_eps_m: float = DEFAULT_CONTACT_EPS_M,
+    geom: SceneGeometry | None = None,
 ) -> tuple[list[ConstraintViolation], list[ConstraintWarning]]:
     violations: list[ConstraintViolation] = []
     warnings: list[ConstraintWarning] = []
 
-    objects = scene.objects
-    obbs = {o.id: obb_from(o) for o in objects}
-    verts = {oid: obb_vertices(obb) for oid, obb in obbs.items()}
-    rects = {oid: _xz_rect(v) for oid, v in verts.items()}
-    y_min = {oid: v[:, 1].min() for oid, v in verts.items()}
-    y_max = {oid: v[:, 1].max() for oid, v in verts.items()}
+    if geom is None:
+        geom = precompute(scene)
+    objects = geom.objects
+    n = geom.n
+    if n == 0:
+        return violations, warnings
 
-    # supported_weight_kg[X] = total mass of objects resting on top of X.
-    supported_weight: dict[str, float] = {o.id: 0.0 for o in objects}
-    resting_on: dict[str, list[str]] = {o.id: [] for o in objects}
-    for y in objects:
-        for x in objects:
-            if x.id == y.id:
-                continue
-            if abs(y_min[y.id] - y_max[x.id]) <= contact_eps_m and _rects_overlap(rects[x.id], rects[y.id]):
-                supported_weight[x.id] += y.mass_kg
-                resting_on[y.id].append(x.id)
+    ids = geom.ids
+    masses = geom.masses.tolist()  # plain floats: same IEEE arithmetic, no numpy scalars
+    pairs = resting_pairs(geom, contact_eps_m)  # [(top_idx, bottom_idx, area), ...]
 
-    by_id = {o.id: o for o in objects}
+    direct_weight = [0.0] * n  # sum of mass of objects DIRECTLY on top of x (old definition)
+    resting_on_direct: list[list[int]] = [[] for _ in range(n)]  # top -> [direct supporter idx, ...]
+    supporters: list[list[tuple[int, float]]] = [[] for _ in range(n)]  # top -> [(bottom idx, area), ...]
+    total_support_area = [0.0] * n  # per top object, sum of area over its own direct supporters
 
-    for obj in objects:
+    for top, bottom, area in pairs:
+        direct_weight[bottom] += masses[top]
+        resting_on_direct[top].append(bottom)
+        supporters[top].append((bottom, area))
+        total_support_area[top] += area
+
+    # Transitive load: visit top-down (highest aabb_min first) so that by the
+    # time a node is visited, everything resting on it has already pushed its
+    # share into it -- then push this node's now-final load onto its own
+    # direct supporters, split by area fraction.
+    load = list(masses)
+    for y in np.argsort(-geom.aabb_min[:, 1]).tolist():
+        area_total = total_support_area[y]
+        if area_total <= 0.0:
+            continue
+        for x, area in supporters[y]:
+            load[x] += load[y] * (area / area_total)
+
+    supported_weight = [ld - m for ld, m in zip(load, masses)]
+
+    def _load_path(start: int) -> list[str]:
+        path = [ids[start]]
+        seen = {start}
+        cur = start
+        while supporters[cur]:
+            nxt, _ = max(supporters[cur], key=lambda t: t[1])
+            if nxt in seen:
+                break
+            path.append(ids[nxt])
+            seen.add(nxt)
+            cur = nxt
+        return path
+
+    cos_up = _up_axis_cosines(geom.axes)
+    heavy_idx = [j for j, o in enumerate(objects) if o.constraints.heavy]
+
+    for i, obj in enumerate(objects):
         c = obj.constraints
-        local_up = obbs[obj.id].axes[:, 1]
-        tilt = _up_axis_tilt_deg(local_up)
+        lock = c.orientation_lock
+        # Only orientation constraints read the tilt, so only they pay for it.
+        tilt = (
+            math.degrees(math.acos(cos_up[i]))
+            if c.keep_upright or lock is not None
+            else 0.0
+        )
 
         if c.keep_upright and tilt > angle_tol_deg:
             violations.append(
@@ -123,7 +192,6 @@ def check_constraints(
                 )
             )
 
-        lock = c.orientation_lock
         if lock == "this_side_up":
             if tilt > angle_tol_deg:
                 violations.append(
@@ -154,37 +222,44 @@ def check_constraints(
                     )
                 )
 
-        weight_on_top = supported_weight[obj.id]
-        if c.cannot_support_weight and weight_on_top > 0:
+        if c.cannot_support_weight and supported_weight[i] > 0:
             violations.append(
                 ConstraintViolation(
                     type="FRAGILE_OBJECT_OVERLOADED",
                     object_id=obj.id,
-                    details={"supported_weight_kg": weight_on_top},
+                    details={
+                        "supported_weight_kg": float(supported_weight[i]),
+                        "direct_weight_kg": float(direct_weight[i]),
+                    },
                 )
             )
 
         if c.fragile:
             adjacent_heavy = any(
-                by_id[other].constraints.heavy and _rects_overlap(rects[obj.id], rects[other])
-                for other in rects
-                if other != obj.id
+                xz_overlap_area(geom, i, j) > 0.0 for j in heavy_idx if j != i
             )
-            if weight_on_top > 0 or adjacent_heavy:
+            if supported_weight[i] > 0 or adjacent_heavy:
                 warnings.append(
                     ConstraintWarning(
                         type="FRAGILE_LOAD",
                         object_id=obj.id,
-                        details={"supported_weight_kg": weight_on_top, "adjacent_heavy": adjacent_heavy},
+                        details={
+                            "supported_weight_kg": float(supported_weight[i]),
+                            "direct_weight_kg": float(direct_weight[i]),
+                            "adjacent_heavy": adjacent_heavy,
+                        },
                     )
                 )
 
-        if c.heavy and resting_on[obj.id]:
+        if c.heavy and resting_on_direct[i]:
             warnings.append(
                 ConstraintWarning(
                     type="HEAVY_ON_TOP",
                     object_id=obj.id,
-                    details={"resting_on": resting_on[obj.id]},
+                    details={
+                        "resting_on": [ids[b] for b in resting_on_direct[i]],
+                        "load_path": _load_path(i),
+                    },
                 )
             )
 

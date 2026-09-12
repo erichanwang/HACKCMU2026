@@ -4,3 +4,11 @@ xcuserdata/
 DerivedData/
 .build/
 .DS_Store
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.pan_cache/
+out/
+.playwright-mcp/

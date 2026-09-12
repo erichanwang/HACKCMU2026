@@ -1,0 +1,18 @@
+{
+  "placements": [
+    {
+      "id": "shoe",
+      "target_position": [
+        -0.13,
+        0.055,
+        0.075
+      ],
+      "target_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  ]
+}

@@ -76,7 +76,11 @@ What a bounding box cannot do is nest objects into each other's concavities (a b
 That needs voxel-occupancy collision instead of box collision — see "How to make it stronger".
 
 Scenarios can also be loaded from JSON (`load_scenario(path)`, see `examples/`); an item entry
-with `"count": n` expands into `id_1 .. id_n` — convenient for lidar-scanned batches.
+with `"count": n` expands into `id_1 .. id_n` — convenient for lidar-scanned batches. An item
+entry can also carry the server's scan-document fields (`SCAN_OUTPUT.md`) directly:
+`"rigidity": "soft"/"fragile"/"rigid"`, `"keepUpright"`, and `"compressibility": k` — a soft
+item is packed at `height / k` via `Item.compressed(k)` (`compressibility_k` on the resulting
+`Item`; `k == 1` is a no-op).
 
 ### Output JSON contract (what the frontend consumes)
 

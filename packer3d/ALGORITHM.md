@@ -59,6 +59,7 @@ Item.cylinder("tank1", radius=0.2, height=0.75, mass=95.0, keep_upright=True)
 | `keep_upright` | if true, only orientations with this item's original "up" axis pointing to world z are allowed (forbids laying it on its side) |
 | `allow_lay_down` | cylinders only; if false, only the standing (`axis="z"`) orientation is used |
 | `priority` | higher priority items are dropped last when everything doesn't fit (default 1.0) |
+| `compressibility_k` | loose volume / squeezed volume, default 1 (incompressible); normally set via `Item.compressed(k)`, which also squashes `dims` (height / k) to match |
 
 ### 3b. Lidar gives you `length, depth, height` + a shape label
 
@@ -134,6 +135,22 @@ result = pack_optimized(container, items, config, weights=weights)
 scanner reports a batch of identical objects. See `examples/dragon_resupply.json` and
 `examples/suitcase.json` for full worked examples (a microgravity cargo capsule and a
 gravity-packed overstuffed suitcase).
+
+An item entry can also carry the server's scan-document fields (`SCAN_OUTPUT.md`) straight
+through, in place of `fragile`/`keep_upright`/a squeezed size:
+
+```json
+{"id": "shirt", "shape": "box", "dims": [0.3, 0.2, 0.2], "rigidity": "soft",
+ "keepUpright": false, "compressibility": 2.0}
+```
+
+`rigidity: "fragile"` sets `fragile=True`; `keepUpright` maps straight to `keep_upright`;
+`compressibility: k` calls `Item.compressed(k)` on the loaded item, squashing its height to
+`height / k` (`k` = loose volume / squeezed volume, so a folded t-shirt at `k=2` packs in half
+the height). `rigidity` defaults to `"soft"`, so a bare `compressibility` with no `rigidity`
+key is still trusted; `rigidity: "rigid"` ignores a stray `compressibility`. This applies to
+every item form above (`dims`, `length`/`depth`/`height`, `radius`/`height`, or a heightmap —
+see §8), not just boxes.
 
 ---
 
@@ -322,6 +339,13 @@ what `physics.io.object_from_scanned_item` currently does with this same payload
 
 A scan JSON can also be dropped straight into a scenario file's `"items"` list (anything with
 a `"heights"` key is routed here automatically by `load_scenario`).
+
+The server stores and returns this same object in **metres**, with a single `"dimensions":
+[width, height, depth]` key instead of separate `width`/`depth`/`height` (`SCAN_OUTPUT.md`).
+`Item.from_scanned_heightmap` detects that form automatically -- `"dimensions"` present and no
+`"width"` key -- and reads it as metres instead of the spike's centimetres. The server document
+also adds `rigidity`, `keepUpright`, and `compressibility`; `load_scenario` reads those the same
+way for a heightmap item as for any other item form (see §3d).
 
 ## 9. Connecting to the `physics` validator / renderer (different coordinate convention)
 

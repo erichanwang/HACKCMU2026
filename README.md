@@ -4,6 +4,8 @@
 
 PackAR scans items with an iPhone's LiDAR, figures out the optimal way to pack them into a suitcase (or any container), and overlays the plan onto your real luggage so you just place things where the app shows.
 
+**[Watch the demo](https://youtube.com/shorts/ixLURxjuSVw)**
+
 ## Run it
 
 Needs Docker and [uv](https://docs.astral.sh/uv/). Two terminals from the repo root:

@@ -4,6 +4,23 @@
 
 PackAR scans items with an iPhone's LiDAR, figures out the optimal way to pack them into a suitcase (or any container), and overlays the plan onto your real luggage so you just place things where the app shows.
 
+## Demo
+
+<!--
+GitHub only renders an inline video player for files uploaded through its own asset CDN, not
+for a video committed straight into the repo (that just shows a "view raw" download link). To
+finish this:
+  1. Open this README on GitHub.com and click the pencil (edit) icon.
+  2. Drag `docs/media/demo.mp4` into the edit box — GitHub uploads it and inserts a Markdown
+     line like `https://github.com/user-attachments/assets/...`.
+  3. Replace this whole comment block (and the raw link below it) with that inserted line,
+     then commit.
+The compressed file is already checked into the repo at docs/media/demo.mp4 (18MB, 720p,
+1:10) so it's there to drag in — this step just can't be scripted, it needs a real upload
+through the GitHub UI.
+-->
+[docs/media/demo.mp4](docs/media/demo.mp4)
+
 ## Run it
 
 Needs Docker and [uv](https://docs.astral.sh/uv/). Two terminals from the repo root:

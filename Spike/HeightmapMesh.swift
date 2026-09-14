@@ -6,18 +6,18 @@ import RealityKit
 ///
 /// The grid is `heights[i][j]`: `i` along the item's width (local X), `j` along
 /// its depth (local Z), each value the surface height above the base (local Y).
-/// Zero means nothing is there. The solid is the volume under the heightmap, so
-/// each non-zero cell becomes a column: a quad on top at its own height, a quad
-/// on the base at y = 0, and walls wherever it is taller than what is beside it.
+/// Zero means nothing is there. The solid is the volume under the heightmap.
 ///
-/// Walls are emitted on three occasions, not two:
-/// - against an **empty** neighbour, dropping the full height to y = 0;
-/// - around the grid **perimeter**, likewise to y = 0;
-/// - against a **shorter filled** neighbour, dropping only the step between them.
-///
-/// That third case is not decorative. Without it, two neighbouring columns of
-/// different heights leave a vertical slot between their top quads and the solid
-/// is not closed — you would see straight through the side of the object.
+/// The top is **not** one flat plateau per cell — that reads as a staircase of
+/// Lego-like blocks, because every internal height change becomes a vertical
+/// cliff. Instead each cell's four corners are the *average* of the (up to four)
+/// cells that meet there (`corner(_:_:)`), so adjacent cells already agree on
+/// their shared corner height and the surface between them tilts smoothly
+/// instead of stepping. A corner next to an empty cell or the grid edge is
+/// pulled toward 0 by that neighbour rather than dropping straight down, which
+/// is also why only the true silhouette — a cell actually bordering empty space
+/// or the perimeter — still gets a vertical skirt wall down to y = 0; two filled
+/// neighbours never do, because the smoothed corners already meet there.
 enum HeightmapMesh {
 
     /// Builds a mesh for `item`, expressed in `placement`'s box.
@@ -95,27 +95,53 @@ enum HeightmapMesh {
             triangle(a, c, d)
         }
 
-        /// Height beside cell (i, j); 0 off the grid or on an empty cell, which is
-        /// what makes the perimeter and the filled/empty boundary the same case.
-        func neighbour(_ i: Int, _ j: Int) -> Float {
+        /// Cell height, 0 off the grid or on an empty cell — the implicit "outside"
+        /// value that pulls a corner's average down near the object's edge.
+        func cellHeight(_ i: Int, _ j: Int) -> Float {
             guard i >= 0, i < rows, j >= 0, j < cols else { return 0 }
             return max(0, grid[i][j])
+        }
+        func occupied(_ i: Int, _ j: Int) -> Bool { cellHeight(i, j) > 0 }
+
+        /// Height at grid corner (i, j), i in 0...rows, j in 0...cols: the average
+        /// of whichever of the (up to four) cells meeting there are filled, empty
+        /// and off-grid ones excluded rather than counted as 0. Neighbouring
+        /// cells share this corner vertex and so agree on its height by
+        /// construction — that shared agreement is what turns a staircase of flat
+        /// plateaus into one continuous, gently sloped surface. Excluding empty
+        /// neighbours (instead of averaging them in as 0) matters at the object's
+        /// true edge: a flat-topped object's outer corners still average only
+        /// their one or two real neighbours and so stay at the real height,
+        /// dropping to y = 0 in one clean skirt wall — counting the empty side
+        /// too would melt every edge into a rounded taper that was never scanned.
+        func corner(_ i: Int, _ j: Int) -> Float {
+            var sum: Float = 0, count: Float = 0
+            for di in [-1, 0] {
+                for dj in [-1, 0] {
+                    let h = cellHeight(i + di, j + dj)
+                    if h > 0 { sum += h; count += 1 }
+                }
+            }
+            return count > 0 ? sum / count : 0
         }
 
         var drawn = 0
         for i in 0..<rows {
             for j in 0..<cols {
-                let top = grid[i][j]
-                guard top > 0 else { continue }
+                guard grid[i][j] > 0 else { continue }
                 drawn += 1
 
                 let x0 = Float(i) * cell, x1 = x0 + cell
                 let z0 = Float(j) * cell, z1 = z0 + cell
+                // This cell's four corners, shared with whichever neighbours are
+                // also filled — the top tilts through these, it is not flat.
+                let h00 = corner(i, j), h01 = corner(i, j + 1)
+                let h11 = corner(i + 1, j + 1), h10 = corner(i + 1, j)
 
                 // Top face, wound counter-clockwise seen from above (+Y).
                 quad(
-                    SIMD3(x0, top, z0), SIMD3(x0, top, z1),
-                    SIMD3(x1, top, z1), SIMD3(x1, top, z0)
+                    SIMD3(x0, h00, z0), SIMD3(x0, h01, z1),
+                    SIMD3(x1, h11, z1), SIMD3(x1, h10, z0)
                 )
                 // Base face at y = 0, facing down.
                 quad(
@@ -123,37 +149,20 @@ enum HeightmapMesh {
                     SIMD3(x0, 0, z1), SIMD3(x0, 0, z0)
                 )
 
-                // +X wall.
-                let east = neighbour(i + 1, j)
-                if top > east {
-                    quad(
-                        SIMD3(x1, top, z0), SIMD3(x1, top, z1),
-                        SIMD3(x1, east, z1), SIMD3(x1, east, z0)
-                    )
+                // Skirt walls: only where this cell actually borders empty space
+                // or the perimeter. A filled neighbour needs no wall at all — the
+                // smoothed corners it shares with this cell already meet there.
+                if !occupied(i + 1, j) {
+                    quad(SIMD3(x1, h10, z0), SIMD3(x1, h11, z1), SIMD3(x1, 0, z1), SIMD3(x1, 0, z0))
                 }
-                // −X wall.
-                let west = neighbour(i - 1, j)
-                if top > west {
-                    quad(
-                        SIMD3(x0, top, z1), SIMD3(x0, top, z0),
-                        SIMD3(x0, west, z0), SIMD3(x0, west, z1)
-                    )
+                if !occupied(i - 1, j) {
+                    quad(SIMD3(x0, h01, z1), SIMD3(x0, h00, z0), SIMD3(x0, 0, z0), SIMD3(x0, 0, z1))
                 }
-                // +Z wall.
-                let south = neighbour(i, j + 1)
-                if top > south {
-                    quad(
-                        SIMD3(x1, top, z1), SIMD3(x0, top, z1),
-                        SIMD3(x0, south, z1), SIMD3(x1, south, z1)
-                    )
+                if !occupied(i, j + 1) {
+                    quad(SIMD3(x1, h11, z1), SIMD3(x0, h01, z1), SIMD3(x0, 0, z1), SIMD3(x1, 0, z1))
                 }
-                // −Z wall.
-                let north = neighbour(i, j - 1)
-                if top > north {
-                    quad(
-                        SIMD3(x0, top, z0), SIMD3(x1, top, z0),
-                        SIMD3(x1, north, z0), SIMD3(x0, north, z0)
-                    )
+                if !occupied(i, j - 1) {
+                    quad(SIMD3(x0, h00, z0), SIMD3(x1, h10, z0), SIMD3(x1, 0, z0), SIMD3(x0, 0, z0))
                 }
             }
         }
